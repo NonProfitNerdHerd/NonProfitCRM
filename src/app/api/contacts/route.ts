@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       actionType: "contact_created",
       targetEntityType: "contacts",
       targetEntityId: id,
-      metadata: { contains_pii: parsed.data.contains_pii ?? true }
+      metadata: { contains_pii: true }
     });
 
     return NextResponse.json({ id });

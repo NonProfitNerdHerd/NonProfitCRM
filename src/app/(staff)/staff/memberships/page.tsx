@@ -24,19 +24,28 @@ export default async function MembershipsPage() {
             </tr>
           </thead>
           <tbody>
-            {memberships.map((membership) => (
-              <tr className="border-b border-slate-100" key={membership.id}>
-                <td className="py-2">
-                  <Link href={`/staff/memberships/${membership.id}`}>
-                    {membership.contacts?.first_name} {membership.contacts?.last_name}
-                  </Link>
-                </td>
-                <td className="py-2">{membership.membership_types?.name ?? "-"}</td>
-                <td className="py-2">{membership.status}</td>
-                <td className="py-2">{membership.level ?? "-"}</td>
-                <td className="py-2">{formatDate(membership.renewal_date)}</td>
-              </tr>
-            ))}
+            {memberships.map((membership) => {
+              const contact = Array.isArray(membership.contacts)
+                ? membership.contacts[0]
+                : membership.contacts;
+              const membershipType = Array.isArray(membership.membership_types)
+                ? membership.membership_types[0]
+                : membership.membership_types;
+
+              return (
+                <tr className="border-b border-slate-100" key={membership.id}>
+                  <td className="py-2">
+                    <Link href={`/staff/memberships/${membership.id}`}>
+                      {contact?.first_name} {contact?.last_name}
+                    </Link>
+                  </td>
+                  <td className="py-2">{membershipType?.name ?? "-"}</td>
+                  <td className="py-2">{membership.status}</td>
+                  <td className="py-2">{membership.level ?? "-"}</td>
+                  <td className="py-2">{formatDate(membership.renewal_date)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

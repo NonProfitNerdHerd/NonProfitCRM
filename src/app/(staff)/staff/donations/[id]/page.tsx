@@ -11,6 +11,9 @@ export default async function DonationDetailPage({ params }: PageProps) {
   const { id } = await params;
   const donation = await getDonationById(id);
   if (!donation) notFound();
+  const donor = Array.isArray(donation.contacts)
+    ? donation.contacts[0]
+    : donation.contacts;
 
   return (
     <Card>
@@ -19,7 +22,7 @@ export default async function DonationDetailPage({ params }: PageProps) {
         <div>
           <p className="text-slate-500">Donor</p>
           <p>
-            {donation.contacts?.first_name} {donation.contacts?.last_name}
+            {donor?.first_name} {donor?.last_name}
           </p>
         </div>
         <div>

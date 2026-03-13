@@ -8,8 +8,7 @@ export const contactSchema = z.object({
   phone: z.string().optional(),
   organization_name: z.string().optional(),
   donor_status: z.enum(["prospect", "active", "lapsed", "inactive"]),
-  member_status: z.enum(["none", "active", "lapsed", "cancelled"]),
-  contains_pii: z.boolean().optional().default(true)
+  member_status: z.enum(["none", "active", "lapsed", "cancelled"])
 });
 
 export type ContactInput = z.infer<typeof contactSchema>;

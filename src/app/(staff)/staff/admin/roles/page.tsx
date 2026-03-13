@@ -26,14 +26,19 @@ export default async function RoleTemplatesPage() {
             {template.is_system_template ? "System template" : "Custom template"}
           </div>
           <div className="flex flex-wrap gap-2">
-            {(template.role_template_permissions ?? []).map((assignment) => (
-              <span
-                className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700"
-                key={assignment.permission_id}
-              >
-                {assignment.permissions?.key}
-              </span>
-            ))}
+            {(template.role_template_permissions ?? []).map((assignment) => {
+              const permission = Array.isArray(assignment.permissions)
+                ? assignment.permissions[0]
+                : assignment.permissions;
+              return (
+                <span
+                  className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700"
+                  key={assignment.permission_id}
+                >
+                  {permission?.key}
+                </span>
+              );
+            })}
           </div>
         </Card>
       ))}

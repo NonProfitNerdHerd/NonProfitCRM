@@ -23,8 +23,8 @@ export async function PATCH(request: Request) {
       email: parsed.data.email,
       phone: parsed.data.phone,
       communication_preferences: {
-        contact_by_email: parsed.data.contact_by_email,
-        contact_by_sms: parsed.data.contact_by_sms
+        contact_by_email: parsed.data.contact_by_email ?? true,
+        contact_by_sms: parsed.data.contact_by_sms ?? false
       }
     });
 

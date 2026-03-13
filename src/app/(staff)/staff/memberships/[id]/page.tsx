@@ -11,6 +11,12 @@ export default async function MembershipDetailPage({ params }: PageProps) {
   const { id } = await params;
   const membership = await getMembership(id);
   if (!membership) notFound();
+  const contact = Array.isArray(membership.contacts)
+    ? membership.contacts[0]
+    : membership.contacts;
+  const membershipType = Array.isArray(membership.membership_types)
+    ? membership.membership_types[0]
+    : membership.membership_types;
 
   return (
     <Card>
@@ -22,12 +28,12 @@ export default async function MembershipDetailPage({ params }: PageProps) {
         <div>
           <p className="text-slate-500">Member</p>
           <p>
-            {membership.contacts?.first_name} {membership.contacts?.last_name}
+            {contact?.first_name} {contact?.last_name}
           </p>
         </div>
         <div>
           <p className="text-slate-500">Type</p>
-          <p>{membership.membership_types?.name ?? "-"}</p>
+          <p>{membershipType?.name ?? "-"}</p>
         </div>
         <div>
           <p className="text-slate-500">Status</p>

@@ -70,5 +70,7 @@ export type Database = {
         Returns: unknown;
       }
     >;
+    Enums: Record<string, string>;
+    CompositeTypes: Record<string, never>;
   };
 };

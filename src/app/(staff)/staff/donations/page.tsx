@@ -24,21 +24,29 @@ export default async function DonationsPage() {
             </tr>
           </thead>
           <tbody>
-            {donations.map((donation) => (
-              <tr className="border-b border-slate-100" key={donation.id}>
-                <td className="py-2">
-                  <Link href={`/staff/donations/${donation.id}`}>
-                    {formatDate(donation.donation_date)}
-                  </Link>
-                </td>
-                <td className="py-2">
-                  {donation.contacts?.first_name} {donation.contacts?.last_name}
-                </td>
-                <td className="py-2">{formatCurrency(donation.amount, donation.currency)}</td>
-                <td className="py-2">{donation.status}</td>
-                <td className="py-2">{donation.source ?? "-"}</td>
-              </tr>
-            ))}
+            {donations.map((donation) => {
+              const donor = Array.isArray(donation.contacts)
+                ? donation.contacts[0]
+                : donation.contacts;
+
+              return (
+                <tr className="border-b border-slate-100" key={donation.id}>
+                  <td className="py-2">
+                    <Link href={`/staff/donations/${donation.id}`}>
+                      {formatDate(donation.donation_date)}
+                    </Link>
+                  </td>
+                  <td className="py-2">
+                    {donor?.first_name} {donor?.last_name}
+                  </td>
+                  <td className="py-2">
+                    {formatCurrency(donation.amount, donation.currency)}
+                  </td>
+                  <td className="py-2">{donation.status}</td>
+                  <td className="py-2">{donation.source ?? "-"}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

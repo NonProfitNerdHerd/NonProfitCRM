@@ -34,6 +34,10 @@ const domainSource: Record<ReportDomain, string> = {
   communications: "communication_log"
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function getAuthorizedReportFields(domain: ReportDomain) {
   const context = await requireStaffPermission("can_run_reports");
   const supabase = await createClient();
@@ -192,7 +196,13 @@ export async function exportReport(params: {
       headers.join(","),
       ...rows.map((row) =>
         headers
-          .map((header) => JSON.stringify((row as Record<string, unknown>)[header] ?? ""))
+          .map((header) =>
+            JSON.stringify(
+              isRecord(row) && header in row
+                ? row[header as keyof typeof row]
+                : ""
+            )
+          )
           .join(",")
       )
     ];
@@ -297,10 +307,8 @@ export async function runSavedReport(savedReportId: string) {
     selectedFieldKeys: (definition.selected_fields ?? []) as string[],
     filters: (definition.filters ?? []) as ReportFilter[],
     sort:
-      definition.sort_config &&
-      typeof definition.sort_config === "object" &&
-      "field" in (definition.sort_config as Record<string, unknown>)
-        ? (definition.sort_config as ReportSort)
+      isRecord(definition.sort_config) && "field" in definition.sort_config
+        ? (definition.sort_config as unknown as ReportSort)
         : undefined
   });
 }

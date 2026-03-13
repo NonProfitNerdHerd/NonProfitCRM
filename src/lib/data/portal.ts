@@ -32,6 +32,10 @@ export async function updatePortalProfile(input: {
     .eq("portal_user_id", context.userId)
     .single();
 
+  if (!contact) {
+    throw new Error("Portal contact link not found.");
+  }
+
   const { error } = await supabase
     .from("contacts")
     .update({

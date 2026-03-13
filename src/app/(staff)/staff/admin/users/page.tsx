@@ -28,15 +28,21 @@ export default async function UserManagementPage() {
             </tr>
           </thead>
           <tbody>
-            {(members ?? []).map((member) => (
-              <tr className="border-b border-slate-100" key={member.id}>
-                <td className="py-2">{member.user_id}</td>
-                <td className="py-2">
-                  {member.role_templates?.name} ({member.role_templates?.key})
-                </td>
-                <td className="py-2">{member.is_active ? "Yes" : "No"}</td>
-              </tr>
-            ))}
+            {(members ?? []).map((member) => {
+              const roleTemplate = Array.isArray(member.role_templates)
+                ? member.role_templates[0]
+                : member.role_templates;
+
+              return (
+                <tr className="border-b border-slate-100" key={member.id}>
+                  <td className="py-2">{member.user_id}</td>
+                  <td className="py-2">
+                    {roleTemplate?.name} ({roleTemplate?.key})
+                  </td>
+                  <td className="py-2">{member.is_active ? "Yes" : "No"}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

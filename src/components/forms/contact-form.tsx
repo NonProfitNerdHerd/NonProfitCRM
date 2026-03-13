@@ -22,8 +22,7 @@ export function ContactForm() {
     resolver: zodResolver(contactSchema),
     defaultValues: {
       donor_status: "prospect",
-      member_status: "none",
-      contains_pii: true
+      member_status: "none"
     }
   });
 

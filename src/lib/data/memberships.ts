@@ -43,6 +43,8 @@ export async function listPortalMemberships() {
     .eq("portal_user_id", context.userId)
     .single();
 
+  if (!contact) return [];
+
   const { data, error } = await supabase
     .from("memberships")
     .select("id, status, level, start_date, end_date, renewal_date, membership_types(name)")

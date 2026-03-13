@@ -27,6 +27,8 @@ export async function listPortalDonations() {
     .eq("portal_user_id", context.userId)
     .single();
 
+  if (!contact) return [];
+
   const { data, error } = await supabase
     .from("donations")
     .select("id, amount, currency, donation_date, status, receipt_number")
