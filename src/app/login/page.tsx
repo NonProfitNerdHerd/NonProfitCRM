@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader } from "@/components/ui/card";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -19,6 +21,13 @@ export default function LoginPage() {
     return trimmed.includes("@")
       ? trimmed
       : `${trimmed.toLowerCase()}@nonprofitcrm.local`;
+  }
+
+  async function withTimeout<T>(promise: Promise<T>, ms = 15000): Promise<T> {
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("Request timed out. Please try again.")), ms);
+    });
+    return Promise.race([promise, timeout]);
   }
 
   async function onPasswordSignIn(event: React.FormEvent) {
@@ -34,18 +43,26 @@ export default function LoginPage() {
       return;
     }
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email,
+          password
+        })
+      );
 
-    if (signInError) {
-      setError(signInError.message);
-    } else {
-      window.location.href = "/staff/dashboard";
+      if (signInError) {
+        setError(signInError.message);
+      } else {
+        router.replace("/staff/dashboard");
+        router.refresh();
+      }
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Sign-in failed.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function onMagicLink() {
@@ -60,20 +77,27 @@ export default function LoginPage() {
       return;
     }
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/staff/dashboard`
-      }
-    });
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await withTimeout(
+        supabase.auth.signInWithOtp({
+          email,
+          options: {
+            emailRedirectTo: `${window.location.origin}/staff/dashboard`
+          }
+        })
+      );
 
-    if (signInError) {
-      setError(signInError.message);
-    } else {
-      setMessage(`Magic link sent to ${email}. Check your inbox.`);
+      if (signInError) {
+        setError(signInError.message);
+      } else {
+        setMessage(`Magic link sent to ${email}. Check your inbox.`);
+      }
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Magic link failed.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (
@@ -95,6 +119,9 @@ export default function LoginPage() {
               required
               placeholder="IJRebout or you@nonprofit.org"
             />
+            <p className="mt-1 text-xs text-slate-500">
+              Username values are mapped to @nonprofitcrm.local for test login.
+            </p>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">
