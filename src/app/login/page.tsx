@@ -7,16 +7,58 @@ import { Input } from "@/components/ui/input";
 import { Card, CardHeader } from "@/components/ui/card";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function onSignIn(event: React.FormEvent) {
+  function toEmail(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    return trimmed.includes("@")
+      ? trimmed
+      : `${trimmed.toLowerCase()}@nonprofitcrm.local`;
+  }
+
+  async function onPasswordSignIn(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError(null);
     setMessage(null);
+
+    const email = toEmail(identifier);
+    if (!email || !password) {
+      setError("Username/email and password are required.");
+      setLoading(false);
+      return;
+    }
+
+    const supabase = createClient();
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (signInError) {
+      setError(signInError.message);
+    } else {
+      window.location.href = "/staff/dashboard";
+    }
+    setLoading(false);
+  }
+
+  async function onMagicLink() {
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    const email = toEmail(identifier);
+    if (!email) {
+      setError("Enter a username or email first.");
+      setLoading(false);
+      return;
+    }
 
     const supabase = createClient();
     const { error: signInError } = await supabase.auth.signInWithOtp({
@@ -29,7 +71,7 @@ export default function LoginPage() {
     if (signInError) {
       setError(signInError.message);
     } else {
-      setMessage("Magic link sent. Check your inbox.");
+      setMessage(`Magic link sent to ${email}. Check your inbox.`);
     }
     setLoading(false);
   }
@@ -41,21 +83,41 @@ export default function LoginPage() {
           title="Sign in"
           subtitle="Securely access your nonprofit workspace."
         />
-        <form className="space-y-4" onSubmit={onSignIn}>
+        <form className="space-y-4" onSubmit={onPasswordSignIn}>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">
-              Email
+              Username or Email
             </label>
             <Input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              type="email"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
+              type="text"
               required
-              placeholder="you@nonprofit.org"
+              placeholder="IJRebout or you@nonprofit.org"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Password
+            </label>
+            <Input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              placeholder="Enter your password"
             />
           </div>
           <Button className="w-full" type="submit" disabled={loading}>
-            {loading ? "Sending..." : "Send magic link"}
+            {loading ? "Signing in..." : "Sign in with password"}
+          </Button>
+          <Button
+            className="w-full"
+            type="button"
+            variant="secondary"
+            disabled={loading}
+            onClick={onMagicLink}
+          >
+            Send magic link instead
           </Button>
           {message ? <p className="text-sm text-green-700">{message}</p> : null}
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
