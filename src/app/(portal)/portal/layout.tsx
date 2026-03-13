@@ -9,7 +9,7 @@ const navItems = [
   { href: "/portal/membership", label: "Membership" },
   { href: "/portal/communications", label: "Communications" },
   { href: "/portal/settings", label: "Settings" }
-];
+] as const;
 
 export default async function PortalLayout({ children }: { children: ReactNode }) {
   await requirePortalIdentity();

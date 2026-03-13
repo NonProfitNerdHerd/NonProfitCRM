@@ -16,7 +16,7 @@ const items = [
   { href: "/staff/admin/roles", label: "Roles" },
   { href: "/staff/admin/settings", label: "Organization" },
   { href: "/staff/audit", label: "Audit Log" }
-];
+] as const;
 
 export function StaffSidebar() {
   const pathname = usePathname();
