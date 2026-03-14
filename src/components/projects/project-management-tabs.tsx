@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
@@ -48,12 +48,32 @@ export function ProjectManagementTabs({
   stakeholders: Array<Record<string, unknown>>;
   users: UserOption[];
 }) {
-  const [activeTab, setActiveTab] = useState<
-    "overview" | "tasks_gallery" | "tasks_report" | "stakeholder_matrix"
-  >("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "tasks" | "stakeholder_matrix">("overview");
+  const [projectState, setProjectState] = useState(project);
+  const [staffRows, setStaffRows] = useState(staff);
   const [statusFilter, setStatusFilter] = useState<
     "all" | "open" | "in_progress" | "completed" | "overdue" | "canceled"
   >("all");
+  const [showEditProject, setShowEditProject] = useState(false);
+  const [projectForm, setProjectForm] = useState({
+    name: String(project.name ?? ""),
+    description: String(project.description ?? ""),
+    status: String(project.status ?? "active"),
+    projectStartDate: String(project.project_start_date ?? ""),
+    expectedEndDate: String(project.expected_end_date ?? ""),
+    ownerUserId: String(project.owner_user_id ?? ""),
+    projectManagerUserId: String(project.project_manager_user_id ?? "")
+  });
+  const [projectStaffForm, setProjectStaffForm] = useState<
+    Array<{ userId: string; roleOnProject: string }>
+  >(
+    staff.map((member) => ({
+      userId: String(member.user_id ?? ""),
+      roleOnProject: String(member.role_on_project ?? "Team Member")
+    }))
+  );
+  const [projectSaveError, setProjectSaveError] = useState<string | null>(null);
+
   const [rows, setRows] = useState(stakeholders);
   const [showNewStakeholder, setShowNewStakeholder] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -92,7 +112,75 @@ export function ProjectManagementTabs({
     });
   }, [tasks, statusFilter]);
 
-  async function createStakeholder(event: React.FormEvent) {
+  function resetProjectForm() {
+    setProjectForm({
+      name: String(projectState.name ?? ""),
+      description: String(projectState.description ?? ""),
+      status: String(projectState.status ?? "active"),
+      projectStartDate: String(projectState.project_start_date ?? ""),
+      expectedEndDate: String(projectState.expected_end_date ?? ""),
+      ownerUserId: String(projectState.owner_user_id ?? ""),
+      projectManagerUserId: String(projectState.project_manager_user_id ?? "")
+    });
+    setProjectStaffForm(
+      staffRows.map((member) => ({
+        userId: String(member.user_id ?? ""),
+        roleOnProject: String(member.role_on_project ?? "Team Member")
+      }))
+    );
+    setProjectSaveError(null);
+  }
+
+  function addProjectStaffRow() {
+    setProjectStaffForm((prev) => [...prev, { userId: "", roleOnProject: "Team Member" }]);
+  }
+
+  async function saveProjectEdits(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setProjectSaveError(null);
+
+    const assignedStaff = projectStaffForm
+      .filter((row) => row.userId)
+      .map((row) => ({ userId: row.userId, roleOnProject: row.roleOnProject || "Team Member" }));
+
+    const response = await fetch(`/api/projects/${String(projectState.id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...projectForm,
+        assignedStaff
+      })
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      setProjectSaveError(payload?.message ?? "Unable to save project changes.");
+      setSaving(false);
+      return;
+    }
+
+    setProjectState((prev) => ({
+      ...prev,
+      name: projectForm.name,
+      description: projectForm.description || null,
+      status: projectForm.status,
+      project_start_date: projectForm.projectStartDate || null,
+      expected_end_date: projectForm.expectedEndDate || null,
+      owner_user_id: projectForm.ownerUserId || null,
+      project_manager_user_id: projectForm.projectManagerUserId || null
+    }));
+    setStaffRows(
+      assignedStaff.map((entry) => ({
+        id: `${entry.userId}-${entry.roleOnProject}`,
+        user_id: entry.userId,
+        role_on_project: entry.roleOnProject
+      }))
+    );
+    setSaving(false);
+    setShowEditProject(false);
+  }
+
+  async function createStakeholder(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
     const response = await fetch(`/api/projects/${project.id as string}/stakeholders`, {
@@ -127,11 +215,8 @@ export function ProjectManagementTabs({
         <TabButton active={activeTab === "overview"} onClick={() => setActiveTab("overview")}>
           Overview
         </TabButton>
-        <TabButton active={activeTab === "tasks_gallery"} onClick={() => setActiveTab("tasks_gallery")}>
-          Tasks Gallery
-        </TabButton>
-        <TabButton active={activeTab === "tasks_report"} onClick={() => setActiveTab("tasks_report")}>
-          Tasks Report
+        <TabButton active={activeTab === "tasks"} onClick={() => setActiveTab("tasks")}>
+          Tasks
         </TabButton>
         <TabButton
           active={activeTab === "stakeholder_matrix"}
@@ -143,46 +228,61 @@ export function ProjectManagementTabs({
 
       {activeTab === "overview" ? (
         <section className="rounded-md border border-slate-200 p-4">
-          <h4 className="text-sm font-semibold text-slate-900">Project Overview</h4>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-900">Project Overview</h4>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                resetProjectForm();
+                setShowEditProject(true);
+              }}
+            >
+              Edit Project
+            </Button>
+          </div>
           <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
             <div>
               <p className="text-slate-500">Project Name</p>
-              <p>{String(project.name ?? "-")}</p>
+              <p>{String(projectState.name ?? "-")}</p>
             </div>
             <div>
               <p className="text-slate-500">Status</p>
-              <p>{String(project.status ?? "-")}</p>
+              <p>{String(projectState.status ?? "-")}</p>
             </div>
             <div className="md:col-span-2">
               <p className="text-slate-500">Description</p>
-              <p>{String(project.description ?? "-")}</p>
+              <p>{String(projectState.description ?? "-")}</p>
             </div>
             <div>
               <p className="text-slate-500">Project Start Date</p>
-              <p>{formatDate(project.project_start_date as string)}</p>
+              <p>{formatDate(projectState.project_start_date as string)}</p>
             </div>
             <div>
               <p className="text-slate-500">Projected End Date</p>
-              <p>{formatDate(project.expected_end_date as string)}</p>
+              <p>{formatDate(projectState.expected_end_date as string)}</p>
             </div>
             <div>
               <p className="text-slate-500">Project Owner</p>
-              <p>{userNameById.get(String(project.owner_user_id ?? "")) ?? String(project.owner_user_id ?? "-")}</p>
+              <p>
+                {userNameById.get(String(projectState.owner_user_id ?? "")) ??
+                  String(projectState.owner_user_id ?? "-")}
+              </p>
             </div>
             <div>
               <p className="text-slate-500">Project Manager</p>
               <p>
-                {userNameById.get(String(project.project_manager_user_id ?? "")) ??
-                  String(project.project_manager_user_id ?? "-")}
+                {userNameById.get(String(projectState.project_manager_user_id ?? "")) ??
+                  String(projectState.project_manager_user_id ?? "-")}
               </p>
             </div>
             <div className="md:col-span-2">
               <p className="text-slate-500">Assigned Staff Members</p>
               <div className="mt-1 flex flex-wrap gap-2">
-                {staff.length === 0 ? (
+                {staffRows.length === 0 ? (
                   <span className="text-sm text-slate-500">No staff assigned</span>
                 ) : (
-                  staff.map((member) => (
+                  staffRows.map((member) => (
                     <span
                       key={`${String(member.id)}`}
                       className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700"
@@ -198,10 +298,18 @@ export function ProjectManagementTabs({
         </section>
       ) : null}
 
-      {activeTab === "tasks_gallery" ? (
+      {activeTab === "tasks" ? (
         <section className="rounded-md border border-slate-200 p-4">
+          <h4 className="mb-3 text-sm font-semibold text-slate-900">Tasks</h4>
+          <div className="mb-4 grid gap-3 md:grid-cols-4">
+            <SummaryBox label="Overdue" value={(groupedTasks.overdue ?? []).length} tone="red" />
+            <SummaryBox label="Upcoming" value={(groupedTasks.upcoming ?? []).length} tone="amber" />
+            <SummaryBox label="Completed" value={(groupedTasks.completed ?? []).length} tone="green" />
+            <SummaryBox label="Canceled" value={(groupedTasks.cancelled ?? []).length} tone="slate" />
+          </div>
+
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">Tasks Gallery</h4>
+            <h5 className="text-sm font-semibold text-slate-900">Task List</h5>
             <select
               className="rounded-md border border-slate-300 px-3 py-2 text-sm"
               value={statusFilter}
@@ -260,18 +368,6 @@ export function ProjectManagementTabs({
               </table>
             </div>
           )}
-        </section>
-      ) : null}
-
-      {activeTab === "tasks_report" ? (
-        <section className="rounded-md border border-slate-200 p-4">
-          <h4 className="mb-3 text-sm font-semibold text-slate-900">Tasks Report</h4>
-          <div className="grid gap-3 md:grid-cols-4">
-            <SummaryBox label="Overdue" value={(groupedTasks.overdue ?? []).length} tone="red" />
-            <SummaryBox label="Upcoming" value={(groupedTasks.upcoming ?? []).length} tone="amber" />
-            <SummaryBox label="Completed" value={(groupedTasks.completed ?? []).length} tone="green" />
-            <SummaryBox label="Canceled" value={(groupedTasks.cancelled ?? []).length} tone="slate" />
-          </div>
         </section>
       ) : null}
 
@@ -423,6 +519,164 @@ export function ProjectManagementTabs({
                   {saving ? "Saving..." : "Create Stakeholder"}
                 </Button>
               </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {showEditProject ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-4xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h5 className="text-base font-semibold text-slate-900">Edit Project</h5>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setShowEditProject(false)}
+              >
+                Close
+              </button>
+            </div>
+            <form onSubmit={saveProjectEdits} className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Input
+                  value={projectForm.name}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, name: event.target.value }))
+                  }
+                  placeholder="Project name"
+                />
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={projectForm.status}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, status: event.target.value }))
+                  }
+                >
+                  <option value="active">Active</option>
+                  <option value="on_hold">On Hold</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                <Input
+                  value={projectForm.description}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, description: event.target.value }))
+                  }
+                  placeholder="Description"
+                />
+                <Input
+                  type="date"
+                  value={projectForm.projectStartDate}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, projectStartDate: event.target.value }))
+                  }
+                />
+                <Input
+                  type="date"
+                  value={projectForm.expectedEndDate}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, expectedEndDate: event.target.value }))
+                  }
+                />
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={projectForm.ownerUserId}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                  }
+                >
+                  <option value="">Project Owner</option>
+                  {users.map((user) => (
+                    <option key={user.user_id} value={user.user_id}>
+                      {user.display_name ?? user.user_id}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={projectForm.projectManagerUserId}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({
+                      ...prev,
+                      projectManagerUserId: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">Project Manager</option>
+                  {users.map((user) => (
+                    <option key={user.user_id} value={user.user_id}>
+                      {user.display_name ?? user.user_id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <section className="rounded-md border border-slate-200 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-sm font-semibold">Assigned Staff</p>
+                  <Button type="button" variant="secondary" onClick={addProjectStaffRow}>
+                    Add Staff
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {projectStaffForm.length === 0 ? (
+                    <p className="text-sm text-slate-500">No assigned staff yet.</p>
+                  ) : (
+                    projectStaffForm.map((entry, idx) => (
+                      <div key={`${idx}-${entry.userId}`} className="grid gap-2 md:grid-cols-3">
+                        <select
+                          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          value={entry.userId}
+                          onChange={(event) =>
+                            setProjectStaffForm((prev) =>
+                              prev.map((row, rowIdx) =>
+                                rowIdx === idx ? { ...row, userId: event.target.value } : row
+                              )
+                            )
+                          }
+                        >
+                          <option value="">Select user</option>
+                          {users.map((user) => (
+                            <option key={user.user_id} value={user.user_id}>
+                              {user.display_name ?? user.user_id}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          value={entry.roleOnProject}
+                          onChange={(event) =>
+                            setProjectStaffForm((prev) =>
+                              prev.map((row, rowIdx) =>
+                                rowIdx === idx
+                                  ? { ...row, roleOnProject: event.target.value }
+                                  : row
+                              )
+                            )
+                          }
+                          placeholder="Role on project"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() =>
+                            setProjectStaffForm((prev) =>
+                              prev.filter((_, rowIdx) => rowIdx !== idx)
+                            )
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              {projectSaveError ? <p className="text-sm text-red-700">{projectSaveError}</p> : null}
+              <Button type="submit" disabled={saving}>
+                {saving ? "Saving..." : "Save Project"}
+              </Button>
             </form>
           </div>
         </div>

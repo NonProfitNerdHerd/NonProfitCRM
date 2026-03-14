@@ -21,6 +21,7 @@ export function FinancialAnalyticsDashboard({
   const [payload, setPayload] = useState(initial);
   const [range, setRange] = useState<AnalyticsRangeKey>(initial.range);
   const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   async function onRangeChange(nextRange: AnalyticsRangeKey) {
     setRange(nextRange);
@@ -58,6 +59,8 @@ export function FinancialAnalyticsDashboard({
         title="Donations Trend"
         yAxisLabel="Donation Total"
         xAxisLabel="Time"
+        size="mini"
+        onExpand={() => setExpanded(true)}
         series={[
           {
             name: "Donations",
@@ -66,6 +69,36 @@ export function FinancialAnalyticsDashboard({
           }
         ]}
       />
+
+      {expanded ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-[96vw] max-w-[1400px] rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="text-base font-semibold text-slate-900">Donations Trend (Expanded)</h4>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setExpanded(false)}
+              >
+                Close
+              </button>
+            </div>
+            <LineChart
+              title="Donations Trend"
+              yAxisLabel="Donation Total"
+              xAxisLabel="Time"
+              size="expanded"
+              series={[
+                {
+                  name: "Donations",
+                  color: "#16A34A",
+                  points: payload.trend.map((point) => ({ label: point.label, y: point.y }))
+                }
+              ]}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <section className="rounded-md border border-slate-200 p-4">
         <div className="mb-3 flex items-center justify-between">

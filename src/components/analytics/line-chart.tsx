@@ -11,7 +11,7 @@ type ChartSeries = {
   points: ChartPoint[];
 };
 
-type ChartSize = "compact" | "regular" | "expanded";
+type ChartSize = "mini" | "compact" | "regular" | "expanded";
 
 function pathFor(points: Array<{ x: number; y: number }>) {
   if (points.length === 0) return "";
@@ -36,20 +36,33 @@ export function LineChart({
   onExpand?: () => void;
 }) {
   const width = 860;
-  const height = size === "expanded" ? 460 : size === "compact" ? 180 : 300;
+  const height =
+    size === "expanded" ? 460 : size === "mini" ? 150 : size === "compact" ? 180 : 300;
   const left = 58;
   const right = 18;
   const top = size === "expanded" ? 24 : 22;
   const bottom = 56;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
-  const axisFontSize = size === "expanded" ? 13 : size === "compact" ? 12 : 12;
+  const axisFontSize = size === "expanded" ? 13 : size === "mini" ? 11 : 12;
   const titleClass =
     size === "expanded" ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900";
   const containerHeight =
-    size === "expanded" ? "h-[620px]" : size === "compact" ? "h-[240px]" : "h-[400px]";
+    size === "expanded"
+      ? "h-[620px]"
+      : size === "mini"
+        ? "h-[170px]"
+        : size === "compact"
+          ? "h-[240px]"
+          : "h-[400px]";
   const svgHeightClass =
-    size === "expanded" ? "h-[500px]" : size === "compact" ? "h-[150px]" : "h-[300px]";
+    size === "expanded"
+      ? "h-[500px]"
+      : size === "mini"
+        ? "h-[95px]"
+        : size === "compact"
+          ? "h-[150px]"
+          : "h-[300px]";
 
   const pointCount = Math.max(...series.map((s) => s.points.length), 0);
   const allValues = series.flatMap((s) => s.points.map((p) => p.y));

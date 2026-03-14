@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getProject } from "@/lib/data/projects";
-import { requireSessionContext } from "@/lib/auth/guards";
+import { requireStaffPermission } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteProps = {
@@ -15,7 +15,15 @@ const updateProjectSchema = z.object({
   projectStartDate: z.string().optional(),
   expectedEndDate: z.string().optional(),
   projectManagerUserId: z.string().uuid().optional(),
-  ownerUserId: z.string().uuid().optional()
+  ownerUserId: z.string().uuid().optional(),
+  assignedStaff: z
+    .array(
+      z.object({
+        userId: z.string().uuid(),
+        roleOnProject: z.string().min(1)
+      })
+    )
+    .optional()
 });
 
 export async function GET(_request: Request, { params }: RouteProps) {
@@ -43,7 +51,7 @@ export async function PATCH(request: Request, { params }: RouteProps) {
       );
     }
 
-    const context = await requireSessionContext();
+    const context = await requireStaffPermission("can_create_projects");
     const supabase = await createClient();
 
     const updates: Record<string, unknown> = {};
@@ -59,12 +67,42 @@ export async function PATCH(request: Request, { params }: RouteProps) {
       updates.project_manager_user_id = parsed.data.projectManagerUserId;
     if (parsed.data.ownerUserId !== undefined) updates.owner_user_id = parsed.data.ownerUserId;
 
-    const { error } = await supabase
-      .from("projects")
-      .update(updates)
-      .eq("organization_id", context.organizationId)
-      .eq("id", id);
-    if (error) throw error;
+    if (Object.keys(updates).length > 0) {
+      const { error } = await supabase
+        .from("projects")
+        .update(updates)
+        .eq("organization_id", context.organizationId)
+        .eq("id", id);
+      if (error) throw error;
+    }
+
+    if (parsed.data.assignedStaff !== undefined) {
+      const normalizedStaffMap = new Map<string, { userId: string; roleOnProject: string }>();
+      for (const member of parsed.data.assignedStaff) {
+        normalizedStaffMap.set(member.userId, member);
+      }
+      const normalizedStaff = Array.from(normalizedStaffMap.values());
+
+      const { error: clearError } = await supabase
+        .from("project_staff")
+        .delete()
+        .eq("organization_id", context.organizationId)
+        .eq("project_id", id);
+      if (clearError) throw clearError;
+
+      if (normalizedStaff.length > 0) {
+        const { error: insertError } = await supabase.from("project_staff").insert(
+          normalizedStaff.map((member) => ({
+            organization_id: context.organizationId,
+            project_id: id,
+            user_id: member.userId,
+            role_on_project: member.roleOnProject,
+            created_by: context.userId
+          }))
+        );
+        if (insertError) throw insertError;
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

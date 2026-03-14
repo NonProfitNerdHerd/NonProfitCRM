@@ -20,12 +20,6 @@ const menu: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/dashboard")
   },
   {
-    id: "notifications",
-    href: "/staff/notifications",
-    label: "Notifications",
-    matches: (pathname) => pathname.startsWith("/staff/notifications")
-  },
-  {
     id: "contacts",
     href: "/staff/contacts",
     label: "Contacts",
