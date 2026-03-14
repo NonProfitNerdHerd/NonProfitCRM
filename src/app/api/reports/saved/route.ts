@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { listSavedReports, saveReportDefinition, type ReportDomain } from "@/lib/data/reports";
+import { listSavedReports, saveReportDefinition } from "@/lib/data/reports";
+import { type ReportType } from "@/lib/reports/config";
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const domain = url.searchParams.get("domain") as ReportDomain | null;
-    const reports = await listSavedReports(domain ?? undefined);
+    const reportType = url.searchParams.get("reportType") as ReportType | null;
+    const reports = await listSavedReports(reportType ?? undefined);
     return NextResponse.json({ reports });
   } catch (error) {
     return NextResponse.json(
@@ -20,10 +21,11 @@ export async function POST(request: Request) {
     const payload = await request.json();
     const id = await saveReportDefinition({
       id: payload.id,
+      saveAsNew: Boolean(payload.saveAsNew),
       name: payload.name,
       description: payload.description,
-      domain: payload.domain,
-      selectedFieldKeys: payload.selectedFieldKeys,
+      reportType: payload.reportType,
+      selectedColumns: payload.selectedColumns ?? [],
       filters: payload.filters,
       sort: payload.sort
     });

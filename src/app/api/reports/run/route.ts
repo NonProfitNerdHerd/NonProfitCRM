@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { runReport } from "@/lib/data/reports";
+import { type ReportType } from "@/lib/reports/config";
 
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
     const result = await runReport({
-      domain: payload.domain,
-      selectedFieldKeys: payload.selectedFieldKeys,
+      reportType: payload.reportType as ReportType,
+      selectedColumns: (payload.selectedColumns ?? []) as string[],
       filters: payload.filters,
-      sort: payload.sort
+      sort: payload.sort,
+      page: payload.page,
+      pageSize: payload.pageSize
     });
     return NextResponse.json(result);
   } catch (error) {

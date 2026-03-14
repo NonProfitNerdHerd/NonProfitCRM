@@ -1,28 +1,17 @@
 import { NextResponse } from "next/server";
-import { getAuthorizedReportFields } from "@/lib/data/reports";
+import { getReportBuilderMetadata } from "@/lib/data/reports";
+import { type ReportType } from "@/lib/reports/config";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const domain = url.searchParams.get("domain");
-
-  if (!domain) {
-    return NextResponse.json({ message: "Domain is required" }, { status: 400 });
-  }
+  const reportType = url.searchParams.get("reportType") as ReportType | null;
 
   try {
-    const { fields } = await getAuthorizedReportFields(
-      domain as
-        | "contacts"
-        | "donations"
-        | "memberships"
-        | "notes"
-        | "tasks"
-        | "communications"
-    );
-    return NextResponse.json({ fields });
+    const metadata = await getReportBuilderMetadata(reportType ?? undefined);
+    return NextResponse.json(metadata);
   } catch (error) {
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to load fields" },
+      { message: error instanceof Error ? error.message : "Failed to load report metadata" },
       { status: 500 }
     );
   }

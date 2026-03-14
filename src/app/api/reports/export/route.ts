@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import { exportReport } from "@/lib/data/reports";
 import { requireSessionContext } from "@/lib/auth/guards";
 import { logAuditEvent } from "@/lib/data/audit";
+import { type ReportType } from "@/lib/reports/config";
 
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
     const output = await exportReport({
-      domain: payload.domain,
-      selectedFieldKeys: payload.selectedFieldKeys,
+      reportType: payload.reportType as ReportType,
+      selectedColumns: (payload.selectedColumns ?? []) as string[],
+      filters: payload.filters ?? {},
+      sort: payload.sort ?? undefined,
       format: payload.format
     });
 
@@ -19,9 +22,9 @@ export async function POST(request: Request) {
       actionType: "report_exported",
       targetEntityType: "reports",
       metadata: {
-        domain: payload.domain,
+        report_type: payload.reportType,
         format: payload.format,
-        selected_fields: payload.selectedFieldKeys
+        selected_columns: payload.selectedColumns ?? []
       }
     });
 
