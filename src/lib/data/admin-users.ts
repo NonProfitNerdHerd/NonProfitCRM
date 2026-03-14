@@ -45,7 +45,6 @@ function validateRoleIds(roles: string[], roleRows: RoleTemplateRow[]) {
 export async function listAdminUsersData() {
   const context = await requireStaffPermission("can_manage_users");
   const supabase = await createClient();
-  const adminClient = createAdminClient();
 
   const [roles, membershipsResult, extraRolesResult] = await Promise.all([
     getAllowedRoles(context.organizationId),
@@ -66,10 +65,7 @@ export async function listAdminUsersData() {
   const memberships = membershipsResult.data ?? [];
   const userIds = memberships.map((membership) => membership.user_id as string);
   const profilesResult = userIds.length
-    ? await adminClient
-        .from("profiles")
-        .select("id, first_name, last_name, display_name, email, username, is_active")
-        .in("id", userIds)
+    ? await supabase.rpc("admin_org_user_profiles", { org_id: context.organizationId })
     : { data: [] as Array<Record<string, unknown>>, error: null };
   if (profilesResult.error) throw profilesResult.error;
 
