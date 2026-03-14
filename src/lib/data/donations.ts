@@ -48,7 +48,7 @@ export async function listDonationsForStaff(filters?: {
   let query = supabase
     .from("donations")
     .select(
-      "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, created_by, created_at, campaign_id, campaigns(name,status), contacts(id,first_name,last_name,email), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))"
+      "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, created_by, created_at, campaign_id, campaigns(name,status), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))"
     )
     .eq("organization_id", context.organizationId)
     .order("donation_date", { ascending: false })
@@ -99,7 +99,7 @@ export async function getDonationById(id: string) {
   const { data, error } = await supabase
     .from("donations")
     .select(
-      "*, contacts(first_name,last_name,email), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))"
+      "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))"
     )
     .eq("organization_id", context.organizationId)
     .eq("id", id)

@@ -18,6 +18,8 @@ type DonorOption = {
   email: string | null;
   phone: string | null;
   organization_name: string | null;
+  city: string | null;
+  state: string | null;
 };
 
 type DonationForm = {
@@ -64,6 +66,12 @@ function donorLabel(contact: DonorOption) {
   if (contact.organization_name?.trim()) return contact.organization_name;
   if (contact.preferred_name?.trim()) return contact.preferred_name;
   return `${contact.first_name ?? ""} ${contact.last_name ?? ""}`.trim() || "Unnamed donor";
+}
+
+function donorDetails(contact: DonorOption) {
+  const location = [contact.city?.trim(), contact.state?.trim()].filter(Boolean).join(", ");
+  const bits = [location, contact.email?.trim(), contact.phone?.trim()].filter(Boolean);
+  return bits.length > 0 ? bits.join(" • ") : "No city/state, email, or phone on file";
 }
 
 function getDonorFromRow(donation: DonationRow) {
@@ -120,6 +128,8 @@ export function DonationsManagement({
   const [form, setForm] = useState<DonationForm>(EMPTY_DONATION_FORM);
   const [donorOptions, setDonorOptions] = useState<DonorOption[]>([]);
   const [donorSearch, setDonorSearch] = useState("");
+  const [donorDropdownOpen, setDonorDropdownOpen] = useState(false);
+  const [donorLoading, setDonorLoading] = useState(false);
   const [newDonorMode, setNewDonorMode] = useState(false);
   const [newDonorForm, setNewDonorForm] = useState<NewDonorForm>(EMPTY_NEW_DONOR_FORM);
 
@@ -149,13 +159,29 @@ export function DonationsManagement({
     setLoading(false);
   }
 
-  async function searchDonors() {
+  async function searchDonors(searchValue?: string) {
+    setDonorLoading(true);
     const params = new URLSearchParams();
     params.set("limit", "30");
-    if (donorSearch.trim()) params.set("q", donorSearch.trim());
+    const q = (searchValue ?? donorSearch).trim();
+    if (q) params.set("q", q);
     const response = await fetch(`/api/contacts?${params.toString()}`);
     const payload = await response.json().catch(() => null);
     if (response.ok) setDonorOptions((payload?.contacts ?? []) as DonorOption[]);
+    setDonorLoading(false);
+  }
+
+  async function handleDonorTypeahead(nextValue: string) {
+    setDonorSearch(nextValue);
+    setForm((prev) => ({ ...prev, donorId: "" }));
+    setDonorDropdownOpen(true);
+    await searchDonors(nextValue);
+  }
+
+  function chooseDonor(contact: DonorOption) {
+    setForm((prev) => ({ ...prev, donorId: contact.id }));
+    setDonorSearch(donorLabel(contact));
+    setDonorDropdownOpen(false);
   }
 
   function resetFormState() {
@@ -163,6 +189,7 @@ export function DonationsManagement({
     setNewDonorMode(false);
     setNewDonorForm(EMPTY_NEW_DONOR_FORM);
     setDonorSearch("");
+    setDonorDropdownOpen(false);
     setError(null);
   }
 
@@ -171,7 +198,7 @@ export function DonationsManagement({
     setMode("create");
     setSelectedDonation(null);
     setEditingInfo(true);
-    await searchDonors();
+    await searchDonors("");
   }
 
   async function openInfo(donation: DonationRow) {
@@ -190,6 +217,20 @@ export function DonationsManagement({
       memo: String(donation.memo ?? ""),
       allocations: getAllocationsFromRow(donation)
     });
+    if (donor) {
+      const selectedDonor: DonorOption = {
+        id: String(donor.id ?? ""),
+        first_name: (donor.first_name as string | null) ?? null,
+        last_name: (donor.last_name as string | null) ?? null,
+        preferred_name: (donor.preferred_name as string | null) ?? null,
+        email: (donor.email as string | null) ?? null,
+        phone: (donor.phone as string | null) ?? null,
+        organization_name: (donor.organization_name as string | null) ?? null,
+        city: (donor.city as string | null) ?? null,
+        state: (donor.state as string | null) ?? null
+      };
+      setDonorSearch(donorLabel(selectedDonor));
+    }
     if (donor?.id) {
       setDonorOptions((prev) => [
         {
@@ -199,12 +240,15 @@ export function DonationsManagement({
           preferred_name: (donor.preferred_name as string | null) ?? null,
           email: (donor.email as string | null) ?? null,
           phone: (donor.phone as string | null) ?? null,
-          organization_name: (donor.organization_name as string | null) ?? null
+          organization_name: (donor.organization_name as string | null) ?? null,
+          city: (donor.city as string | null) ?? null,
+          state: (donor.state as string | null) ?? null
         },
         ...prev.filter((entry) => entry.id !== String(donor.id))
       ]);
     }
-    await searchDonors();
+    setDonorDropdownOpen(false);
+    await searchDonors("");
   }
 
   function closeModal() {
@@ -453,16 +497,48 @@ export function DonationsManagement({
                 </div>
                 {!newDonorMode || mode !== "create" ? (
                   <div className="space-y-2">
-                    <label className="block text-sm font-medium text-slate-700">Search Existing Donor</label>
-                    <div className="flex gap-2">
-                      <Input value={donorSearch} onChange={(event) => setDonorSearch(event.target.value)} placeholder="Search by name, email, phone..." disabled={!editable} />
-                      <Button type="button" variant="secondary" onClick={searchDonors} disabled={!editable}>Search</Button>
-                    </div>
                     <label className="block text-sm font-medium text-slate-700">Donor</label>
-                    <select className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.donorId} onChange={(event) => setForm((prev) => ({ ...prev, donorId: event.target.value }))} disabled={!editable}>
-                      <option value="">Select donor</option>
-                      {donorOptions.map((contact) => <option key={contact.id} value={contact.id}>{donorLabel(contact)}</option>)}
-                    </select>
+                    <div className="relative">
+                      <Input
+                        value={donorSearch}
+                        onChange={(event) => void handleDonorTypeahead(event.target.value)}
+                        onFocus={() => {
+                          if (!editable) return;
+                          setDonorDropdownOpen(true);
+                          void searchDonors(donorSearch);
+                        }}
+                        onBlur={() => {
+                          window.setTimeout(() => setDonorDropdownOpen(false), 150);
+                        }}
+                        placeholder="Start typing donor name, city, state, email, or phone..."
+                        disabled={!editable}
+                      />
+                      {editable && donorDropdownOpen ? (
+                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                          {donorLoading ? (
+                            <p className="px-3 py-2 text-sm text-slate-500">Searching donors...</p>
+                          ) : donorOptions.length === 0 ? (
+                            <p className="px-3 py-2 text-sm text-slate-500">No donors found.</p>
+                          ) : (
+                            donorOptions.map((contact) => (
+                              <button
+                                key={contact.id}
+                                type="button"
+                                className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => chooseDonor(contact)}
+                              >
+                                <p className="text-sm font-medium text-slate-900">{donorLabel(contact)}</p>
+                                <p className="text-xs text-slate-600">{donorDetails(contact)}</p>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Matching results display name, city/state, email, and phone.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2">
@@ -516,7 +592,16 @@ export function DonationsManagement({
                 {editable ? (
                   <Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
                 ) : (
-                  <Button type="button" onClick={() => setEditingInfo(true)}>Edit Donation</Button>
+                  <Button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setEditingInfo(true);
+                    }}
+                  >
+                    Edit Donation
+                  </Button>
                 )}
                 {mode === "info" && selectedDonation ? (
                   <Link href={`${detailBasePath}/${String(selectedDonation.id)}`}>

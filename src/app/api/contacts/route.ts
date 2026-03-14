@@ -15,14 +15,16 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from("contacts")
-      .select("id, first_name, last_name, preferred_name, email, phone, organization_name")
+      .select(
+        "id, first_name, last_name, preferred_name, email, phone, organization_name, city, state"
+      )
       .eq("organization_id", context.organizationId)
       .order("last_name", { ascending: true })
       .limit(limit);
     if (q) {
       const like = `%${q}%`;
       query = query.or(
-        `first_name.ilike.${like},last_name.ilike.${like},preferred_name.ilike.${like},email.ilike.${like},organization_name.ilike.${like}`
+        `first_name.ilike.${like},last_name.ilike.${like},preferred_name.ilike.${like},email.ilike.${like},phone.ilike.${like},organization_name.ilike.${like},city.ilike.${like},state.ilike.${like}`
       );
     }
 
