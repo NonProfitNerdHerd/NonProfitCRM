@@ -138,8 +138,9 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 30)
     .map((row) => {
+      if (!row.related_contact_id) return null;
       const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
-      const contactType =
+      const contactType: "Personal" | "Organization" =
         contact?.organization_name && String(contact.organization_name).trim().length > 0
           ? "Organization"
           : "Personal";
@@ -163,7 +164,21 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
           : "Unknown",
         summary: row.action_summary
       };
-    });
+    })
+    .filter(
+      (
+        row
+      ): row is {
+        contactId: string;
+        contactName: string;
+        contactType: "Personal" | "Organization";
+        mostRecentActivityType: string;
+        mostRecentActivityDateTime: string;
+        mostRecentActivityDateTimeLabel: string;
+        modifiedBy: string;
+        summary: string;
+      } => Boolean(row)
+    );
 
   return {
     range,
