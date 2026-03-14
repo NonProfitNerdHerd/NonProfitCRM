@@ -29,14 +29,14 @@ export default async function StaffSearchPage({ searchParams }: PageProps) {
         <Section
           title="Donations"
           rows={results.donations}
-          href={(row) => `/staff/donations/${row.id as string}`}
+          href={(row) => `/staff/financial/donations/${row.id as string}`}
           label={(row) => `Donation $${row.amount as string}`}
           subtitle={(row) => (row.donation_date as string) ?? ""}
         />
         <Section
           title="Campaigns"
           rows={results.campaigns}
-          href={(row) => `/staff/campaigns/${row.id as string}`}
+          href={(row) => `/staff/financial/campaigns/${row.id as string}`}
           label={(row) => (row.name as string) ?? "Campaign"}
           subtitle={(row) => `${(row.status as string) ?? ""} ${(row.description as string) ?? ""}`.trim()}
         />

@@ -56,6 +56,22 @@ export async function listPortalMemberships() {
   return data ?? [];
 }
 
+export async function updateMembershipStatus(input: {
+  membershipId: string;
+  status: "active" | "inactive";
+}) {
+  const context = await requireStaffPermission("can_manage_memberships");
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("memberships")
+    .update({ status: input.status })
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.membershipId);
+
+  if (error) throw error;
+}
+
 export async function listMembershipTypes() {
   const context = await requireStaffPermission("can_manage_memberships");
   const supabase = await createClient();

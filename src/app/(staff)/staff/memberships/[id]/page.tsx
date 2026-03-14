@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Card, CardHeader } from "@/components/ui/card";
 import { getMembership } from "@/lib/data/memberships";
 import { formatDate } from "@/lib/utils";
+import { MembershipStatusToggle } from "@/components/memberships/membership-status-toggle";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -37,7 +38,10 @@ export default async function MembershipDetailPage({ params }: PageProps) {
         </div>
         <div>
           <p className="text-slate-500">Status</p>
-          <p>{membership.status}</p>
+          <MembershipStatusToggle
+            membershipId={membership.id as string}
+            initialStatus={membership.status as string}
+          />
         </div>
         <div>
           <p className="text-slate-500">Level</p>

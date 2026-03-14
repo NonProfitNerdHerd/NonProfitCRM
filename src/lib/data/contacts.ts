@@ -2,16 +2,25 @@ import { createClient } from "@/lib/supabase/server";
 import { ContactInput } from "@/lib/validation/contact";
 import { requireStaffPermission } from "@/lib/auth/guards";
 
-export async function listContacts() {
+export async function listContacts(mode: "all" | "personal" | "organizations" = "all") {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("contacts_safe_view")
     .select("*")
     .eq("organization_id", context.organizationId)
     .order("last_name", { ascending: true })
     .limit(200);
+
+  if (mode === "personal") {
+    query = query.is("organization_name", null);
+  }
+  if (mode === "organizations") {
+    query = query.not("organization_name", "is", null).neq("organization_name", "");
+  }
+
+  const { data, error } = await query;
 
   if (error) throw error;
   return data ?? [];

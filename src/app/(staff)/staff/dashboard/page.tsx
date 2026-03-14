@@ -4,7 +4,9 @@ import { requireStaffPermission } from "@/lib/auth/guards";
 import { formatCurrency } from "@/lib/utils";
 import { dashboardTaskBuckets } from "@/lib/data/tasks";
 import { listProjects } from "@/lib/data/projects";
-import { MyTasksTabs as MyTaskTabsClient } from "@/components/dashboard/my-tasks-tabs";
+import { DashboardTabs } from "@/components/dashboard/dashboard-tabs";
+import { listMyNotifications } from "@/lib/data/notifications";
+import { type NotificationItem } from "@/components/notifications/notifications-list";
 
 export default async function StaffDashboardPage() {
   const context = await requireStaffPermission("can_view_dashboard");
@@ -15,7 +17,8 @@ export default async function StaffDashboardPage() {
     { count: donationCount },
     { data: donationTotal },
     buckets,
-    projects
+    projects,
+    notifications
   ] =
     await Promise.all([
       supabase
@@ -32,7 +35,8 @@ export default async function StaffDashboardPage() {
         .eq("organization_id", context.organizationId)
         .limit(1000),
       dashboardTaskBuckets(),
-      listProjects()
+      listProjects(),
+      listMyNotifications()
     ]);
 
   const raised = (donationTotal ?? []).reduce(
@@ -58,12 +62,15 @@ export default async function StaffDashboardPage() {
       </div>
       <Card>
         <CardHeader
-          title="My Tasks"
-          subtitle="Overdue, upcoming, open, and recently completed assignments"
+          title="Workspace"
+          subtitle="Switch between My Tasks and Notifications"
         />
         <div>
-          {/* Client tab control for personalized task workflow */}
-          <MyTaskTabsClient buckets={buckets} projects={projects} />
+          <DashboardTabs
+            buckets={buckets}
+            projects={projects}
+            notifications={notifications as NotificationItem[]}
+          />
         </div>
       </Card>
     </div>

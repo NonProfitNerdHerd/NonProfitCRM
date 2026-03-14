@@ -5,36 +5,72 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 type MenuItem = {
+  id: string;
   href: string;
   label: string;
+  matches: (pathname: string) => boolean;
   children?: Array<{ href: string; label: string }>;
 };
 
 const menu: MenuItem[] = [
-  { href: "/staff/dashboard", label: "Dashboard" },
-  { href: "/staff/contacts", label: "Contacts" },
-  { href: "/staff/donations", label: "Donations" },
-  { href: "/staff/campaigns", label: "Campaigns" },
   {
+    id: "dashboard",
+    href: "/staff/dashboard",
+    label: "Dashboard",
+    matches: (pathname) => pathname.startsWith("/staff/dashboard")
+  },
+  {
+    id: "notifications",
+    href: "/staff/notifications",
+    label: "Notifications",
+    matches: (pathname) => pathname.startsWith("/staff/notifications")
+  },
+  {
+    id: "contacts",
+    href: "/staff/contacts",
+    label: "Contacts",
+    matches: (pathname) => pathname.startsWith("/staff/contacts"),
+    children: [
+      { href: "/staff/contacts/personal", label: "Personal" },
+      { href: "/staff/contacts/organizations", label: "Organizations" }
+    ]
+  },
+  {
+    id: "financial",
+    href: "/staff/financial",
+    label: "Financial",
+    matches: (pathname) =>
+      pathname.startsWith("/staff/financial") ||
+      pathname.startsWith("/staff/donations") ||
+      pathname.startsWith("/staff/campaigns"),
+    children: [
+      { href: "/staff/financial/campaigns", label: "Campaigns" },
+      { href: "/staff/financial/donations", label: "Donations" }
+    ]
+  },
+  {
+    id: "projects",
     href: "/staff/projects",
     label: "Projects",
+    matches: (pathname) => pathname.startsWith("/staff/projects") || pathname.startsWith("/staff/tasks"),
     children: [{ href: "/staff/tasks", label: "Tasks" }]
   },
-  { href: "/staff/memberships", label: "Memberships" },
   {
+    id: "memberships",
+    href: "/staff/memberships",
+    label: "Memberships",
+    matches: (pathname) => pathname.startsWith("/staff/memberships")
+  },
+  {
+    id: "administration",
     href: "/staff/admin/users",
     label: "Administration",
+    matches: (pathname) => pathname.startsWith("/staff/admin"),
     children: [
       { href: "/staff/admin/users", label: "Users" },
       { href: "/staff/admin/roles", label: "Roles" }
     ]
-  },
-  { href: "/staff/notifications", label: "Notifications" },
-  { href: "/staff/organizations", label: "Organizations" },
-  { href: "/staff/admin/settings", label: "Organization Settings" },
-  { href: "/staff/audit", label: "Audit Log" },
-  { href: "/staff/reports", label: "Reporting" },
-  { href: "/staff/imports", label: "Imports" }
+  }
 ];
 
 export function StaffSidebar() {
@@ -50,7 +86,7 @@ export function StaffSidebar() {
       </div>
       <nav className="space-y-1">
         {menu.map((item) => {
-          const isActive = pathname.startsWith(item.href);
+          const isActive = item.matches(pathname);
           return (
             <div key={item.href}>
               <Link
@@ -64,7 +100,7 @@ export function StaffSidebar() {
               >
                 {item.label}
               </Link>
-              {item.children ? (
+              {isActive && item.children ? (
                 <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
                   {item.children.map((child) => {
                     const childActive = pathname.startsWith(child.href);

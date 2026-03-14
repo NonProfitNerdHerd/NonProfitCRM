@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { formatDate } from "@/lib/utils";
 
-type TaskRecord = {
+export type TaskRecord = {
   id: string;
   title: string;
   description: string | null;
@@ -17,16 +17,18 @@ type TaskRecord = {
   projects?: Array<{ name: string }> | { name: string } | null;
 };
 
+export type MyTaskBuckets = {
+  overdue: TaskRecord[];
+  upcoming: TaskRecord[];
+  allTasks: TaskRecord[];
+  recentlyCompleted: TaskRecord[];
+};
+
 export function MyTasksTabs({
   buckets,
   projects
 }: {
-  buckets: {
-    overdue: TaskRecord[];
-    upcoming: TaskRecord[];
-    allTasks: TaskRecord[];
-    recentlyCompleted: TaskRecord[];
-  };
+  buckets: MyTaskBuckets;
   projects: Array<{ id: string; name: string }>;
 }) {
   const [activeTab, setActiveTab] = useState<"overdue" | "upcoming" | "all" | "completed">(
