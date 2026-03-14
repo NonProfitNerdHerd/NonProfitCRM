@@ -52,31 +52,33 @@ export function ContactsAnalyticsDashboard({
 
       {loading ? <p className="text-sm text-slate-500">Updating trends...</p> : null}
 
-      <LineChart
-        title="Personal Contacts Trend"
-        yAxisLabel="Contacts"
-        xAxisLabel="Time"
-        series={[
-          {
-            name: "Personal Contacts",
-            color: "#2563EB",
-            points: payload.personal.map((point) => ({ label: point.label, y: point.y }))
-          }
-        ]}
-      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <LineChart
+          title="Personal Contacts Trend"
+          yAxisLabel="Contacts"
+          xAxisLabel="Time"
+          series={[
+            {
+              name: "Personal Contacts",
+              color: "#2563EB",
+              points: payload.personal.map((point) => ({ label: point.label, y: point.y }))
+            }
+          ]}
+        />
 
-      <LineChart
-        title="Organizational Contacts Trend"
-        yAxisLabel="Contacts"
-        xAxisLabel="Time"
-        series={[
-          {
-            name: "Organizational Contacts",
-            color: "#7C3AED",
-            points: payload.organizations.map((point) => ({ label: point.label, y: point.y }))
-          }
-        ]}
-      />
+        <LineChart
+          title="Organizational Contacts Trend"
+          yAxisLabel="Contacts"
+          xAxisLabel="Time"
+          series={[
+            {
+              name: "Organizational Contacts",
+              color: "#7C3AED",
+              points: payload.organizations.map((point) => ({ label: point.label, y: point.y }))
+            }
+          ]}
+        />
+      </div>
     </div>
   );
 }

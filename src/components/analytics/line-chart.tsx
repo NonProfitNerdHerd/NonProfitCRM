@@ -30,7 +30,7 @@ export function LineChart({
   series: ChartSeries[];
 }) {
   const width = 860;
-  const height = 320;
+  const height = 300;
   const left = 58;
   const right = 18;
   const top = 22;
@@ -49,9 +49,11 @@ export function LineChart({
 
   if (pointCount === 0) {
     return (
-      <div className="rounded-md border border-slate-200 p-4">
+      <div className="flex h-[400px] flex-col rounded-md border border-slate-200 p-4">
         <p className="text-sm font-semibold text-slate-900">{title}</p>
-        <p className="mt-6 text-sm text-slate-500">No data available for this range.</p>
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-slate-500">No data available for this range.</p>
+        </div>
       </div>
     );
   }
@@ -60,9 +62,9 @@ export function LineChart({
   const labelStep = Math.max(1, Math.ceil(pointCount / 6));
 
   return (
-    <div className="rounded-md border border-slate-200 p-4">
+    <div className="flex h-[400px] flex-col rounded-md border border-slate-200 p-4">
       <p className="mb-3 text-sm font-semibold text-slate-900">{title}</p>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-[300px] w-full flex-1">
         <line x1={left} y1={top} x2={left} y2={top + plotHeight} stroke="#CBD5E1" strokeWidth="1" />
         <line
           x1={left}
