@@ -36,13 +36,17 @@ export async function PATCH(request: Request, { params }: RouteProps) {
     await updateDonationForStaff({
       donationId: id,
       contactId: parsed.data.contactId,
+            organizationId: parsed.data.organizationId,
       date: parsed.data.date,
       totalAmount,
       allocations,
       paymentType: parsed.data.paymentType,
       checkNumber: parsed.data.checkNumber,
       transactionId: parsed.data.transactionId,
-      memo: parsed.data.memo
+            memo: parsed.data.memo,
+            sourceSystem: parsed.data.sourceSystem,
+            externalDonationId: parsed.data.externalDonationId,
+            recurring: parsed.data.recurring
     });
 
     return NextResponse.json({ ok: true });

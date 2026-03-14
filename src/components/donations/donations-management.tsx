@@ -24,12 +24,16 @@ type DonorOption = {
 
 type DonationForm = {
   donorId: string;
+  organizationId: string;
   donationDate: string;
   totalAmount: string;
   paymentType: "Cash" | "Check" | "Card";
   checkNumber: string;
   transactionId: string;
   memo: string;
+  sourceSystem: string;
+  externalDonationId: string;
+  recurring: boolean;
   allocations: Array<{ campaignId: string; amount: string }>;
 };
 
@@ -44,12 +48,16 @@ type NewDonorForm = {
 
 const EMPTY_DONATION_FORM: DonationForm = {
   donorId: "",
+  organizationId: "",
   donationDate: "",
   totalAmount: "",
   paymentType: "Cash",
   checkNumber: "",
   transactionId: "",
   memo: "",
+  sourceSystem: "Spreadsheet / Manual",
+  externalDonationId: "",
+  recurring: false,
   allocations: [{ campaignId: "", amount: "" }]
 };
 
@@ -100,12 +108,14 @@ export function DonationsManagement({
   initialDonations,
   campaigns,
   detailBasePath,
-  campaignBasePath
+  campaignBasePath,
+  fixedContact
 }: {
   initialDonations: DonationRow[];
   campaigns: CampaignOption[];
   detailBasePath: string;
   campaignBasePath: string;
+  fixedContact?: { id: string; displayName: string };
 }) {
   const [rows, setRows] = useState(initialDonations);
   const [filters, setFilters] = useState({
@@ -152,6 +162,7 @@ export function DonationsManagement({
     if (activeFilters.dateFrom) params.set("dateFrom", activeFilters.dateFrom);
     if (activeFilters.dateTo) params.set("dateTo", activeFilters.dateTo);
     if (activeFilters.donor.trim()) params.set("donor", activeFilters.donor.trim());
+    if (fixedContact?.id) params.set("contactId", fixedContact.id);
     const response = await fetch(`/api/donations?${params.toString()}`);
     const payload = await response.json().catch(() => null);
     if (response.ok) setRows((payload?.donations ?? []) as DonationRow[]);
@@ -195,10 +206,14 @@ export function DonationsManagement({
 
   async function openCreate() {
     resetFormState();
+    if (fixedContact?.id) {
+      setForm((prev) => ({ ...prev, donorId: fixedContact.id }));
+      setDonorSearch(fixedContact.displayName);
+    }
     setMode("create");
     setSelectedDonation(null);
     setEditingInfo(true);
-    await searchDonors("");
+    if (!fixedContact?.id) await searchDonors("");
   }
 
   async function openInfo(donation: DonationRow) {
@@ -209,12 +224,16 @@ export function DonationsManagement({
     const donor = getDonorFromRow(donation);
     setForm({
       donorId: String(donor?.id ?? ""),
+      organizationId: String(donation.crm_organization_id ?? ""),
       donationDate: String(donation.donation_date ?? ""),
       totalAmount: String(donation.amount ?? ""),
       paymentType: String(donation.payment_type ?? "Cash") as "Cash" | "Check" | "Card",
       checkNumber: String(donation.check_number ?? ""),
       transactionId: String(donation.transaction_id ?? ""),
       memo: String(donation.memo ?? ""),
+      sourceSystem: String(donation.source_platform ?? "Spreadsheet / Manual"),
+      externalDonationId: String(donation.external_transaction_id ?? ""),
+      recurring: Boolean(donation.is_recurring ?? false),
       allocations: getAllocationsFromRow(donation)
     });
     if (donor) {
@@ -230,6 +249,8 @@ export function DonationsManagement({
         state: (donor.state as string | null) ?? null
       };
       setDonorSearch(donorLabel(selectedDonor));
+    } else if (fixedContact?.displayName) {
+      setDonorSearch(fixedContact.displayName);
     }
     if (donor?.id) {
       setDonorOptions((prev) => [
@@ -248,7 +269,12 @@ export function DonationsManagement({
       ]);
     }
     setDonorDropdownOpen(false);
-    await searchDonors("");
+    if (!fixedContact?.id) {
+      await searchDonors("");
+    } else {
+      setForm((prev) => ({ ...prev, donorId: fixedContact.id }));
+      setDonorSearch(fixedContact.displayName);
+    }
   }
 
   function closeModal() {
@@ -259,6 +285,7 @@ export function DonationsManagement({
   }
 
   async function createDonorIfNeeded() {
+    if (fixedContact?.id) return fixedContact.id;
     if (!newDonorMode || mode !== "create") return form.donorId;
     const firstName = newDonorForm.firstName.trim();
     const displayName = newDonorForm.displayName.trim();
@@ -327,12 +354,16 @@ export function DonationsManagement({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           contactId: donorId,
+          organizationId: form.organizationId || undefined,
           date: form.donationDate,
           totalAmount: totalAmountNumber,
           paymentType: form.paymentType,
           checkNumber: form.checkNumber || undefined,
           transactionId: form.transactionId || undefined,
           memo: form.memo || undefined,
+          sourceSystem: form.sourceSystem || undefined,
+          externalDonationId: form.externalDonationId || undefined,
+          recurring: form.recurring,
           allocations
         })
       });
@@ -364,8 +395,9 @@ export function DonationsManagement({
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
-      <section className="rounded-md border border-slate-200 p-4">
-        <div className="grid gap-3 md:grid-cols-5">
+      {!fixedContact ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="grid gap-3 md:grid-cols-5">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-600">Campaign</label>
             <select
@@ -406,13 +438,14 @@ export function DonationsManagement({
             <label className="mb-1 block text-xs font-medium text-slate-600">Donor</label>
             <Input value={filters.donor} placeholder="Search donor..." onChange={(event) => setFilters((prev) => ({ ...prev, donor: event.target.value }))} />
           </div>
-        </div>
-        <div className="mt-3">
-          <Button type="button" variant="secondary" onClick={() => refreshRows()}>
-            {loading ? "Filtering..." : "Apply Filters"}
-          </Button>
-        </div>
-      </section>
+          </div>
+          <div className="mt-3">
+            <Button type="button" variant="secondary" onClick={() => refreshRows()}>
+              {loading ? "Filtering..." : "Apply Filters"}
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-md border border-slate-200 p-4">
         <div className="overflow-x-auto">
@@ -440,6 +473,13 @@ export function DonationsManagement({
                     return (campaign?.name as string) ?? null;
                   })
                   .filter(Boolean) as string[];
+                const fallbackCampaign = Array.isArray(donation.campaigns)
+                  ? donation.campaigns[0]
+                  : donation.campaigns;
+                const campaignDisplay =
+                  allocationNames.length > 0
+                    ? allocationNames.join(", ")
+                    : String(fallbackCampaign?.name ?? "-");
                 const primaryCampaignId = allocations[0]?.campaign_id as string | undefined;
                 return (
                   <tr className="border-b border-slate-100" key={String(donation.id)}>
@@ -453,10 +493,14 @@ export function DonationsManagement({
                         {formatDate(String(donation.donation_date ?? ""))}
                       </button>
                     </td>
-                    <td className="py-2">{String(donor?.first_name ?? "")} {String(donor?.last_name ?? "")}</td>
                     <td className="py-2">
-                      {allocationNames.length > 0 ? (
-                        primaryCampaignId ? <Link href={`${campaignBasePath}/${primaryCampaignId}`}>{allocationNames.join(", ")}</Link> : allocationNames.join(", ")
+                      {fixedContact?.displayName
+                        ? fixedContact.displayName
+                        : `${String(donor?.first_name ?? "")} ${String(donor?.last_name ?? "")}`.trim() || "-"}
+                    </td>
+                    <td className="py-2">
+                      {campaignDisplay !== "-" ? (
+                        primaryCampaignId ? <Link href={`${campaignBasePath}/${primaryCampaignId}`}>{campaignDisplay}</Link> : campaignDisplay
                       ) : "-"}
                     </td>
                     <td className="py-2">{formatCurrency(Number(donation.amount ?? 0), donation.currency as string)}</td>
@@ -489,7 +533,7 @@ export function DonationsManagement({
               <section className="rounded-md border border-slate-200 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold">Donor</p>
-                  {mode === "create" ? (
+                  {mode === "create" && !fixedContact ? (
                     <Button type="button" variant="secondary" disabled={!editable} onClick={() => setNewDonorMode((prev) => !prev)}>
                       {newDonorMode ? "Use Existing Donor" : "Create New Donor"}
                     </Button>
@@ -498,47 +542,53 @@ export function DonationsManagement({
                 {!newDonorMode || mode !== "create" ? (
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-slate-700">Donor</label>
-                    <div className="relative">
-                      <Input
-                        value={donorSearch}
-                        onChange={(event) => void handleDonorTypeahead(event.target.value)}
-                        onFocus={() => {
-                          if (!editable) return;
-                          setDonorDropdownOpen(true);
-                          void searchDonors(donorSearch);
-                        }}
-                        onBlur={() => {
-                          window.setTimeout(() => setDonorDropdownOpen(false), 150);
-                        }}
-                        placeholder="Start typing donor name, city, state, email, or phone..."
-                        disabled={!editable}
-                      />
-                      {editable && donorDropdownOpen ? (
-                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white shadow-lg">
-                          {donorLoading ? (
-                            <p className="px-3 py-2 text-sm text-slate-500">Searching donors...</p>
-                          ) : donorOptions.length === 0 ? (
-                            <p className="px-3 py-2 text-sm text-slate-500">No donors found.</p>
-                          ) : (
-                            donorOptions.map((contact) => (
-                              <button
-                                key={contact.id}
-                                type="button"
-                                className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => chooseDonor(contact)}
-                              >
-                                <p className="text-sm font-medium text-slate-900">{donorLabel(contact)}</p>
-                                <p className="text-xs text-slate-600">{donorDetails(contact)}</p>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      Matching results display name, city/state, email, and phone.
-                    </p>
+                    {fixedContact?.id ? (
+                      <Input value={fixedContact.displayName} disabled />
+                    ) : (
+                      <div className="relative">
+                        <Input
+                          value={donorSearch}
+                          onChange={(event) => void handleDonorTypeahead(event.target.value)}
+                          onFocus={() => {
+                            if (!editable) return;
+                            setDonorDropdownOpen(true);
+                            void searchDonors(donorSearch);
+                          }}
+                          onBlur={() => {
+                            window.setTimeout(() => setDonorDropdownOpen(false), 150);
+                          }}
+                          placeholder="Start typing donor name, city, state, email, or phone..."
+                          disabled={!editable}
+                        />
+                        {editable && donorDropdownOpen ? (
+                          <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                            {donorLoading ? (
+                              <p className="px-3 py-2 text-sm text-slate-500">Searching donors...</p>
+                            ) : donorOptions.length === 0 ? (
+                              <p className="px-3 py-2 text-sm text-slate-500">No donors found.</p>
+                            ) : (
+                              donorOptions.map((contact) => (
+                                <button
+                                  key={contact.id}
+                                  type="button"
+                                  className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => chooseDonor(contact)}
+                                >
+                                  <p className="text-sm font-medium text-slate-900">{donorLabel(contact)}</p>
+                                  <p className="text-xs text-slate-600">{donorDetails(contact)}</p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                    {!fixedContact?.id ? (
+                      <p className="text-xs text-slate-500">
+                        Matching results display name, city/state, email, and phone.
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2">
@@ -560,6 +610,10 @@ export function DonationsManagement({
                   <div><label className="mb-1 block text-sm font-medium text-slate-700">Payment Type</label><select className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.paymentType} onChange={(event) => setForm((prev) => ({ ...prev, paymentType: event.target.value as "Cash" | "Check" | "Card", checkNumber: "", transactionId: "" }))} disabled={!editable}><option value="Cash">Cash</option><option value="Check">Check</option><option value="Card">Card / Credit</option></select></div>
                   {form.paymentType === "Check" ? <div><label className="mb-1 block text-sm font-medium text-slate-700">Check Number</label><Input value={form.checkNumber} onChange={(event) => setForm((prev) => ({ ...prev, checkNumber: event.target.value }))} required={editable} disabled={!editable} /></div> : null}
                   {form.paymentType === "Card" ? <div><label className="mb-1 block text-sm font-medium text-slate-700">Transaction ID</label><Input value={form.transactionId} onChange={(event) => setForm((prev) => ({ ...prev, transactionId: event.target.value }))} required={editable} disabled={!editable} /></div> : null}
+                  <div><label className="mb-1 block text-sm font-medium text-slate-700">Source System</label><Input value={form.sourceSystem} onChange={(event) => setForm((prev) => ({ ...prev, sourceSystem: event.target.value }))} disabled={!editable} /></div>
+                  <div><label className="mb-1 block text-sm font-medium text-slate-700">External Donation ID</label><Input value={form.externalDonationId} onChange={(event) => setForm((prev) => ({ ...prev, externalDonationId: event.target.value }))} disabled={!editable} /></div>
+                  <div><label className="mb-1 block text-sm font-medium text-slate-700">Related Organization ID (optional)</label><Input value={form.organizationId} onChange={(event) => setForm((prev) => ({ ...prev, organizationId: event.target.value }))} disabled={!editable} /></div>
+                  <div className="flex items-center gap-2"><input id="recurring-donation" type="checkbox" checked={form.recurring} onChange={(event) => setForm((prev) => ({ ...prev, recurring: event.target.checked }))} disabled={!editable} /><label htmlFor="recurring-donation" className="text-sm font-medium text-slate-700">Recurring Donation</label></div>
                   <div className="md:col-span-2"><label className="mb-1 block text-sm font-medium text-slate-700">Memo / Notes</label><textarea className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.memo} onChange={(event) => setForm((prev) => ({ ...prev, memo: event.target.value }))} disabled={!editable} /></div>
                 </div>
               </section>

@@ -5,7 +5,8 @@ import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { DonationsManagement } from "@/components/donations/donations-management";
 
 type ContactProfileTabsProps = {
   contactId: string;
@@ -46,15 +47,6 @@ export function ContactProfileTabs({
   const [activeTab, setActiveTab] = useState<
     "activity" | "contactInfo" | "donations" | "notes" | "tasks" | "memberships"
   >("activity");
-  const [donationForm, setDonationForm] = useState({
-    campaignId: "",
-    date: new Date().toISOString().slice(0, 10),
-    amount: "",
-    paymentType: "Cash",
-    checkNumber: "",
-    transactionId: "",
-    memo: ""
-  });
   const [noteBody, setNoteBody] = useState("");
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [followUpAssignedToUserId, setFollowUpAssignedToUserId] = useState("");
@@ -103,48 +95,6 @@ export function ContactProfileTabs({
     setFollowUpBody("");
     setFollowUpAssignedToUserId("");
     setFollowUpSuspenseDate("");
-  }
-
-  async function submitDonation(event: React.FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-    setMessage(null);
-
-    const response = await fetch("/api/donations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contactId,
-        campaignId: donationForm.campaignId,
-        date: donationForm.date,
-        amount: Number(donationForm.amount),
-        paymentType: donationForm.paymentType,
-        checkNumber: donationForm.checkNumber || undefined,
-        transactionId: donationForm.transactionId || undefined,
-        memo: donationForm.memo || undefined
-      })
-    });
-
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      setError(payload?.message ?? "Unable to save donation.");
-      setLoading(false);
-      return;
-    }
-
-    setMessage("Donation added.");
-    setDonationForm({
-      campaignId: "",
-      date: new Date().toISOString().slice(0, 10),
-      amount: "",
-      paymentType: "Cash",
-      checkNumber: "",
-      transactionId: "",
-      memo: ""
-    });
-    setLoading(false);
-    router.refresh();
   }
 
   async function submitNote(event: React.FormEvent) {
@@ -387,134 +337,21 @@ export function ContactProfileTabs({
       ) : null}
 
       {activeTab === "donations" ? (
-        <div className="space-y-4">
-          <div className="space-y-2">
-            {donations.length === 0 ? (
-              <p className="text-sm text-slate-500">No donations recorded.</p>
-            ) : (
-              donations.map((donation) => {
-                const campaign = Array.isArray(donation.campaigns)
-                  ? donation.campaigns[0]
-                  : donation.campaigns;
-                return (
-                  <button
-                    type="button"
-                    key={donation.id as string}
-                    className="w-full rounded-md border border-slate-200 p-3 text-left text-sm"
-                    onClick={() =>
-                      openItem({
-                        id: String(donation.id ?? ""),
-                        itemType: "Donation",
-                        title: formatCurrency(Number(donation.amount ?? 0)),
-                        summary: String(donation.memo ?? "Donation record"),
-                        createdBy: String(donation.created_by ?? "Unknown"),
-                        createdAt: (donation.created_at as string) ?? null,
-                        metadata: [
-                          { label: "Payment", value: String(donation.payment_type ?? "-") },
-                          {
-                            label: "Reference",
-                            value: String(
-                              donation.check_number ?? donation.transaction_id ?? "None"
-                            )
-                          },
-                          { label: "Campaign", value: String(campaign?.name ?? "-") }
-                        ]
-                      })
-                    }
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium text-slate-900">
-                        {formatCurrency(Number(donation.amount ?? 0))}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {formatDate(donation.donation_date as string)}
-                      </p>
-                    </div>
-                    <p className="text-xs text-slate-600">
-                      {(donation.payment_type as string) ?? "-"} • Campaign:{" "}
-                      {(campaign?.name as string) ?? "-"}
-                    </p>
-                  </button>
-                );
-              })
-            )}
-          </div>
-
-          <form onSubmit={submitDonation} className="rounded-md border border-slate-200 p-4">
-            <p className="mb-2 text-sm font-semibold">Add Donation</p>
-            <div className="grid gap-3 md:grid-cols-3">
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={donationForm.campaignId}
-                onChange={(event) =>
-                  setDonationForm((prev) => ({ ...prev, campaignId: event.target.value }))
-                }
-              >
-                <option value="">Select Campaign</option>
-                {campaigns.map((campaign) => (
-                  <option key={campaign.id as string} value={campaign.id as string}>
-                    {campaign.name as string}
-                  </option>
-                ))}
-              </select>
-              <Input
-                type="date"
-                value={donationForm.date}
-                onChange={(event) =>
-                  setDonationForm((prev) => ({ ...prev, date: event.target.value }))
-                }
-              />
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="Amount"
-                value={donationForm.amount}
-                onChange={(event) =>
-                  setDonationForm((prev) => ({ ...prev, amount: event.target.value }))
-                }
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={donationForm.paymentType}
-                onChange={(event) =>
-                  setDonationForm((prev) => ({ ...prev, paymentType: event.target.value }))
-                }
-              >
-                <option value="Cash">Cash</option>
-                <option value="Check">Check</option>
-                <option value="Card">Card</option>
-              </select>
-              {donationForm.paymentType === "Check" ? (
-                <Input
-                  placeholder="Check Number"
-                  value={donationForm.checkNumber}
-                  onChange={(event) =>
-                    setDonationForm((prev) => ({ ...prev, checkNumber: event.target.value }))
-                  }
-                />
-              ) : null}
-              {donationForm.paymentType === "Card" ? (
-                <Input
-                  placeholder="Transaction ID"
-                  value={donationForm.transactionId}
-                  onChange={(event) =>
-                    setDonationForm((prev) => ({ ...prev, transactionId: event.target.value }))
-                  }
-                />
-              ) : null}
-              <Input
-                placeholder="Memo"
-                value={donationForm.memo}
-                onChange={(event) =>
-                  setDonationForm((prev) => ({ ...prev, memo: event.target.value }))
-                }
-              />
-            </div>
-            <Button className="mt-3" type="submit" disabled={loading}>
-              Add Donation
-            </Button>
-          </form>
-        </div>
+        <DonationsManagement
+          initialDonations={donations}
+          campaigns={campaigns.map((campaign) => ({
+            id: String(campaign.id ?? ""),
+            name: String(campaign.name ?? "")
+          }))}
+          detailBasePath="/staff/donations"
+          campaignBasePath="/staff/campaigns"
+          fixedContact={{
+            id: contactId,
+            displayName:
+              String(contactInfo.preferredName || "").trim() ||
+              `${contactInfo.firstName} ${contactInfo.lastName}`.trim()
+          }}
+        />
       ) : null}
 
       {activeTab === "notes" ? (

@@ -7,6 +7,7 @@ export async function listDonationsForStaff(filters?: {
   dateFrom?: string;
   dateTo?: string;
   donorId?: string;
+  contactId?: string;
   donorQuery?: string;
 }) {
   const context = await requireStaffPermission("can_view_donations");
@@ -28,7 +29,9 @@ export async function listDonationsForStaff(filters?: {
   }
 
   let filteredDonorIds: string[] | null = null;
-  if (filters?.donorId) {
+  if (filters?.contactId) {
+    filteredDonorIds = [filters.contactId];
+  } else if (filters?.donorId) {
     filteredDonorIds = [filters.donorId];
   } else if (filters?.donorQuery?.trim()) {
     const like = `%${filters.donorQuery.trim()}%`;
@@ -48,7 +51,7 @@ export async function listDonationsForStaff(filters?: {
   let query = supabase
     .from("donations")
     .select(
-      "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, created_by, created_at, campaign_id, campaigns(name,status), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))"
+      "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, crm_organization_id, memo, created_by, created_at, campaign_id, campaigns(name,status), crm_organizations(id,name), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))"
     )
     .eq("organization_id", context.organizationId)
     .order("donation_date", { ascending: false })
@@ -99,7 +102,7 @@ export async function getDonationById(id: string) {
   const { data, error } = await supabase
     .from("donations")
     .select(
-      "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))"
+      "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), crm_organizations(id,name,description), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))"
     )
     .eq("organization_id", context.organizationId)
     .eq("id", id)
@@ -112,12 +115,16 @@ export async function getDonationById(id: string) {
 export async function updateDonationForStaff(input: {
   donationId: string;
   contactId: string;
+  organizationId?: string;
   date: string;
   totalAmount: number;
   paymentType: "Cash" | "Check" | "Card";
   checkNumber?: string;
   transactionId?: string;
   memo?: string;
+  sourceSystem?: string;
+  externalDonationId?: string;
+  recurring?: boolean;
   allocations: Array<{ campaignId: string; amount: number }>;
 }) {
   const context = await requireStaffPermission("can_edit_donations");
@@ -167,6 +174,7 @@ export async function updateDonationForStaff(input: {
     .from("donations")
     .update({
       contact_id: input.contactId,
+        crm_organization_id: input.organizationId ?? null,
       campaign_id: primaryCampaignId,
       amount: input.totalAmount,
       donation_date: input.date,
@@ -174,6 +182,9 @@ export async function updateDonationForStaff(input: {
       check_number: input.checkNumber ?? null,
       transaction_id: input.transactionId ?? null,
       memo: input.memo ?? null,
+        source_platform: input.sourceSystem ?? null,
+        external_transaction_id: input.externalDonationId ?? null,
+        is_recurring: Boolean(input.recurring),
       campaign: primaryCampaign?.name ?? null,
       updated_at: new Date().toISOString()
     })
@@ -211,4 +222,94 @@ export async function updateDonationForStaff(input: {
       .in("campaign_id", removeCampaignIds);
     if (cleanupError) throw cleanupError;
   }
+}
+
+export async function createDonationForStaff(input: {
+  contactId: string;
+  organizationId?: string;
+  date: string;
+  totalAmount: number;
+  paymentType: "Cash" | "Check" | "Card";
+  allocations: Array<{ campaignId: string; amount: number }>;
+  checkNumber?: string;
+  transactionId?: string;
+  memo?: string;
+  sourceSystem?: string;
+  externalDonationId?: string;
+  recurring?: boolean;
+}) {
+  const context = await requireStaffPermission("can_create_donations");
+  const supabase = await createClient();
+
+  if (!Number.isFinite(input.totalAmount) || input.totalAmount <= 0) {
+    throw new Error("Total Donation Amount is required.");
+  }
+  if (!input.allocations.length) {
+    throw new Error("At least one campaign allocation is required.");
+  }
+  const allocatedTotal = input.allocations.reduce(
+    (sum, allocation) => sum + Number(allocation.amount || 0),
+    0
+  );
+  if (Math.abs(allocatedTotal - input.totalAmount) > 0.009) {
+    throw new Error("Split allocations must exactly match Total Donation Amount.");
+  }
+
+  const campaignIds = Array.from(new Set(input.allocations.map((allocation) => allocation.campaignId)));
+  const { data: campaigns, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id, name, status")
+    .eq("organization_id", context.organizationId)
+    .in("id", campaignIds);
+  if (campaignError) throw campaignError;
+  if (!campaigns || campaigns.length !== campaignIds.length) {
+    throw new Error("One or more selected campaigns are not valid.");
+  }
+  if (campaigns.some((campaign) => campaign.status !== "Active")) {
+    throw new Error("Donation must be tied to an active campaign.");
+  }
+
+  const primaryCampaignId = input.allocations[0]?.campaignId;
+  const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
+
+  const { data, error } = await supabase
+    .from("donations")
+    .insert({
+      organization_id: context.organizationId,
+      contact_id: input.contactId,
+      crm_organization_id: input.organizationId ?? null,
+      campaign_id: primaryCampaignId,
+      amount: input.totalAmount,
+      currency: "USD",
+      donation_date: input.date,
+      status: "posted",
+      payment_type: input.paymentType,
+      check_number: input.checkNumber ?? null,
+      transaction_id: input.transactionId ?? null,
+      memo: input.memo ?? null,
+      source: "manual",
+      source_platform: input.sourceSystem ?? null,
+      external_transaction_id: input.externalDonationId ?? null,
+      is_recurring: Boolean(input.recurring),
+      campaign: primaryCampaign?.name ?? null,
+      created_by: context.userId
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+
+  const { error: allocationsError } = await supabase.from("donation_allocations").upsert(
+    input.allocations.map((allocation) => ({
+      organization_id: context.organizationId,
+      donation_id: data.id,
+      campaign_id: allocation.campaignId,
+      allocation_amount: allocation.amount,
+      created_by: context.userId
+    })),
+    { onConflict: "donation_id,campaign_id" }
+  );
+  if (allocationsError) throw allocationsError;
+
+  return data.id;
 }

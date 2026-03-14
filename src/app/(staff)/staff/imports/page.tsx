@@ -1,5 +1,5 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { ImportForm } from "@/components/forms/import-form";
+import { ImportWizard } from "@/components/imports/import-wizard";
 import { requireStaffPermission } from "@/lib/auth/guards";
 
 export default async function ImportsPage() {
@@ -9,9 +9,9 @@ export default async function ImportsPage() {
     <Card>
       <CardHeader
         title="Imports & Migrations"
-        subtitle="CSV import pipeline with source mapping, idempotency, and audit lineage"
+        subtitle="Enterprise import wizard with staging, duplicate review, commit, and rollback."
       />
-      <ImportForm />
+      <ImportWizard />
     </Card>
   );
 }

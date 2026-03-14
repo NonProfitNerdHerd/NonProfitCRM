@@ -3,6 +3,7 @@ import { z } from "zod";
 export const donationSchema = z
   .object({
     contactId: z.string().uuid(),
+    organizationId: z.string().uuid().optional(),
     date: z.string().min(1),
     totalAmount: z.coerce.number().positive().optional(),
     amount: z.coerce.number().positive().optional(),
@@ -18,7 +19,10 @@ export const donationSchema = z
     paymentType: z.enum(["Cash", "Check", "Card"]),
     checkNumber: z.string().optional(),
     transactionId: z.string().optional(),
-    memo: z.string().optional()
+    memo: z.string().optional(),
+    sourceSystem: z.string().optional(),
+    externalDonationId: z.string().optional(),
+    recurring: z.boolean().optional()
   })
   .superRefine((value, ctx) => {
     const totalAmount = value.totalAmount ?? value.amount;

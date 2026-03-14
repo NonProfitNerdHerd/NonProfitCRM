@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { donationSchema } from "@/lib/validation/donation";
-import { addDonationForContact } from "@/lib/data/contact-profile";
-import { listDonationsForStaff } from "@/lib/data/donations";
+import { createDonationForStaff, listDonationsForStaff } from "@/lib/data/donations";
 
 export async function GET(request: Request) {
   try {
@@ -11,6 +10,7 @@ export async function GET(request: Request) {
       paymentType: url.searchParams.get("paymentType") ?? undefined,
       dateFrom: url.searchParams.get("dateFrom") ?? undefined,
       dateTo: url.searchParams.get("dateTo") ?? undefined,
+      contactId: url.searchParams.get("contactId") ?? undefined,
       donorQuery: url.searchParams.get("donor") ?? undefined
     });
     return NextResponse.json({ donations });
@@ -53,15 +53,19 @@ export async function POST(request: Request) {
       );
     }
 
-    const id = await addDonationForContact({
+    const id = await createDonationForStaff({
       contactId: parsed.data.contactId,
+      organizationId: parsed.data.organizationId,
       date: parsed.data.date,
       totalAmount,
       allocations,
       paymentType: parsed.data.paymentType,
       checkNumber: parsed.data.checkNumber,
       transactionId: parsed.data.transactionId,
-      memo: parsed.data.memo
+      memo: parsed.data.memo,
+      sourceSystem: parsed.data.sourceSystem,
+      externalDonationId: parsed.data.externalDonationId,
+      recurring: parsed.data.recurring
     });
 
     return NextResponse.json({ id });
