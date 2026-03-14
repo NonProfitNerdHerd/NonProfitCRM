@@ -1,6 +1,26 @@
 import { NextResponse } from "next/server";
 import { donationSchema } from "@/lib/validation/donation";
 import { addDonationForContact } from "@/lib/data/contact-profile";
+import { listDonationsForStaff } from "@/lib/data/donations";
+
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const donations = await listDonationsForStaff({
+      campaignId: url.searchParams.get("campaignId") ?? undefined,
+      paymentType: url.searchParams.get("paymentType") ?? undefined,
+      dateFrom: url.searchParams.get("dateFrom") ?? undefined,
+      dateTo: url.searchParams.get("dateTo") ?? undefined,
+      donorQuery: url.searchParams.get("donor") ?? undefined
+    });
+    return NextResponse.json({ donations });
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "Failed to load donations" },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -13,11 +33,31 @@ export async function POST(request: Request) {
       );
     }
 
+    const totalAmount = parsed.data.totalAmount ?? parsed.data.amount;
+    const allocations =
+      parsed.data.allocations && parsed.data.allocations.length > 0
+        ? parsed.data.allocations
+        : parsed.data.campaignId && totalAmount
+          ? [{ campaignId: parsed.data.campaignId, amount: totalAmount }]
+          : [];
+    if (!totalAmount) {
+      return NextResponse.json(
+        { message: "Total Donation Amount is required." },
+        { status: 400 }
+      );
+    }
+    if (allocations.length === 0) {
+      return NextResponse.json(
+        { message: "At least one campaign allocation is required." },
+        { status: 400 }
+      );
+    }
+
     const id = await addDonationForContact({
       contactId: parsed.data.contactId,
-      campaignId: parsed.data.campaignId,
       date: parsed.data.date,
-      amount: parsed.data.amount,
+      totalAmount,
+      allocations,
       paymentType: parsed.data.paymentType,
       checkNumber: parsed.data.checkNumber,
       transactionId: parsed.data.transactionId,

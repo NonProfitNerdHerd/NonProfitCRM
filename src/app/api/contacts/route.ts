@@ -2,7 +2,43 @@ import { NextResponse } from "next/server";
 import { contactSchema } from "@/lib/validation/contact";
 import { createContact } from "@/lib/data/contacts";
 import { logAuditEvent } from "@/lib/data/audit";
-import { requireSessionContext } from "@/lib/auth/guards";
+import { requireSessionContext, requireStaffPermission } from "@/lib/auth/guards";
+import { createClient } from "@/lib/supabase/server";
+
+export async function GET(request: Request) {
+  try {
+    const context = await requireStaffPermission("can_view_contacts");
+    const supabase = await createClient();
+    const url = new URL(request.url);
+    const q = url.searchParams.get("q")?.trim() ?? "";
+    const limit = Math.min(Number(url.searchParams.get("limit") ?? 20) || 20, 100);
+
+    let query = supabase
+      .from("contacts")
+      .select("id, first_name, last_name, preferred_name, email, phone, organization_name")
+      .eq("organization_id", context.organizationId)
+      .order("last_name", { ascending: true })
+      .limit(limit);
+    if (q) {
+      const like = `%${q}%`;
+      query = query.or(
+        `first_name.ilike.${like},last_name.ilike.${like},preferred_name.ilike.${like},email.ilike.${like},organization_name.ilike.${like}`
+      );
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return NextResponse.json({ contacts: data ?? [] });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        message: error instanceof Error ? error.message : "Unable to load contacts"
+      },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(request: Request) {
   try {

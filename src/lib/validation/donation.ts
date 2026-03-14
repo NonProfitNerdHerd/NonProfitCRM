@@ -3,15 +3,78 @@ import { z } from "zod";
 export const donationSchema = z
   .object({
     contactId: z.string().uuid(),
-    campaignId: z.string().uuid(),
     date: z.string().min(1),
-    amount: z.coerce.number().positive(),
+    totalAmount: z.coerce.number().positive().optional(),
+    amount: z.coerce.number().positive().optional(),
+    campaignId: z.string().uuid().optional(),
+    allocations: z
+      .array(
+        z.object({
+          campaignId: z.string().uuid(),
+          amount: z.coerce.number().positive()
+        })
+      )
+      .optional(),
     paymentType: z.enum(["Cash", "Check", "Card"]),
     checkNumber: z.string().optional(),
     transactionId: z.string().optional(),
     memo: z.string().optional()
   })
   .superRefine((value, ctx) => {
+    const totalAmount = value.totalAmount ?? value.amount;
+    if (totalAmount === undefined || !Number.isFinite(totalAmount) || totalAmount <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["totalAmount"],
+        message: "Total Donation Amount is required."
+      });
+    }
+
+    const allocations =
+      value.allocations && value.allocations.length > 0
+        ? value.allocations
+        : value.campaignId && totalAmount
+          ? [{ campaignId: value.campaignId, amount: totalAmount }]
+          : [];
+
+    if (allocations.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["allocations"],
+        message: "At least one campaign allocation is required."
+      });
+    }
+
+    const seenCampaigns = new Set<string>();
+    for (const [index, allocation] of allocations.entries()) {
+      if (seenCampaigns.has(allocation.campaignId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["allocations", index, "campaignId"],
+          message: "Each campaign can only appear once in a split donation."
+        });
+      }
+      seenCampaigns.add(allocation.campaignId);
+      if (!Number.isFinite(allocation.amount) || allocation.amount <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["allocations", index, "amount"],
+          message: "Allocation amount must be greater than zero."
+        });
+      }
+    }
+
+    if (totalAmount) {
+      const allocated = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
+      if (Math.abs(allocated - totalAmount) > 0.009) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["allocations"],
+          message: "Split allocations must exactly match the Total Donation Amount."
+        });
+      }
+    }
+
     if (value.paymentType === "Check" && !value.checkNumber?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

@@ -132,10 +132,10 @@ export async function getContactProfileData(contactId: string) {
 
 export async function addDonationForContact(input: {
   contactId: string;
-  campaignId: string;
   date: string;
-  amount: number;
+  totalAmount: number;
   paymentType: "Cash" | "Check" | "Card";
+  allocations: Array<{ campaignId: string; amount: number }>;
   checkNumber?: string;
   transactionId?: string;
   memo?: string;
@@ -143,24 +143,30 @@ export async function addDonationForContact(input: {
   const context = await requireStaffPermission("can_create_donations");
   const supabase = await createClient();
 
-  const { data: campaign, error: campaignError } = await supabase
+  const campaignIds = Array.from(new Set(input.allocations.map((allocation) => allocation.campaignId)));
+  const { data: campaigns, error: campaignError } = await supabase
     .from("campaigns")
     .select("id, name, status")
     .eq("organization_id", context.organizationId)
-    .eq("id", input.campaignId)
-    .maybeSingle();
+    .in("id", campaignIds);
   if (campaignError) throw campaignError;
-  if (!campaign || campaign.status !== "Active") {
+  if (!campaigns || campaigns.length !== campaignIds.length) {
+    throw new Error("One or more selected campaigns are not valid.");
+  }
+  if (campaigns.some((campaign) => campaign.status !== "Active")) {
     throw new Error("Donation must be tied to an active campaign.");
   }
+
+  const primaryCampaignId = input.allocations[0]?.campaignId;
+  const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
 
   const { data, error } = await supabase
     .from("donations")
     .insert({
       organization_id: context.organizationId,
       contact_id: input.contactId,
-      campaign_id: input.campaignId,
-      amount: input.amount,
+      campaign_id: primaryCampaignId,
+      amount: input.totalAmount,
       currency: "USD",
       donation_date: input.date,
       status: "posted",
@@ -169,7 +175,7 @@ export async function addDonationForContact(input: {
       transaction_id: input.transactionId ?? null,
       memo: input.memo ?? null,
       source: "manual",
-      campaign: campaign.name,
+      campaign: primaryCampaign?.name ?? null,
       created_by: context.userId
     })
     .select("id")
@@ -177,11 +183,23 @@ export async function addDonationForContact(input: {
 
   if (error) throw error;
 
+  const { error: allocationsError } = await supabase.from("donation_allocations").upsert(
+    input.allocations.map((allocation) => ({
+      organization_id: context.organizationId,
+      donation_id: data.id,
+      campaign_id: allocation.campaignId,
+      allocation_amount: allocation.amount,
+      created_by: context.userId
+    })),
+    { onConflict: "donation_id,campaign_id" }
+  );
+  if (allocationsError) throw allocationsError;
+
   await recordActivity({
     entityType: "donation",
     entityId: data.id,
     actionType: "created",
-    actionSummary: `Added donation of $${input.amount.toFixed(2)}`,
+    actionSummary: `Added donation of $${input.totalAmount.toFixed(2)}`,
     relatedContactId: input.contactId
   });
 
