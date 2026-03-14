@@ -142,7 +142,10 @@ export async function listAdminUsersData() {
       )
     ]
       .filter(Boolean)
-      .filter((role): role is { id: string; key: string; name: string } => Boolean(role?.id));
+      .filter((role): role is { id: string; key: string; name: string } => Boolean(role?.id))
+      .filter(
+        (role, idx, all) => all.findIndex((candidate) => candidate.id === role.id) === idx
+      );
 
     return {
       membership_id: membership.id as string,

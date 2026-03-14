@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -21,6 +21,20 @@ type UserRow = {
   roles: Array<{ id: string; key: string; name: string }>;
 };
 
+type UserFormState = {
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  email: string;
+  username: string;
+  isActive: boolean;
+  roleTemplateIds: string[];
+};
+
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export function UsersManagement({
   initialUsers,
   roles
@@ -29,11 +43,26 @@ export function UsersManagement({
   roles: RoleTemplate[];
 }) {
   const [users, setUsers] = useState(initialUsers);
-  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"name" | "role" | "status">("name");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [creating, setCreating] = useState(false);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [createForm, setCreateForm] = useState({
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null);
+  const [allowAdminRemoval, setAllowAdminRemoval] = useState(false);
+  const [createForm, setCreateForm] = useState<UserFormState>({
+    firstName: "",
+    lastName: "",
+    displayName: "",
+    email: "",
+    username: "",
+    isActive: true,
+    roleTemplateIds: [] as string[]
+  });
+  const [editForm, setEditForm] = useState<UserFormState>({
     firstName: "",
     lastName: "",
     displayName: "",
@@ -43,29 +72,100 @@ export function UsersManagement({
     roleTemplateIds: [] as string[]
   });
 
-  async function createUser(event: React.FormEvent) {
-    event.preventDefault();
-    setCreating(true);
+  const administratorRoleId = roles.find((role) => role.key === "administrator")?.id ?? null;
+  const filteredUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const rows = users.filter((user) => {
+      if (statusFilter === "active" && !user.is_active) return false;
+      if (statusFilter === "inactive" && user.is_active) return false;
+      if (!query) return true;
+      const searchPayload = [
+        user.display_name,
+        `${user.first_name} ${user.last_name}`.trim(),
+        user.email,
+        user.username,
+        user.roles.map((role) => role.name).join(" ")
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchPayload.includes(query);
+    });
+
+    return rows.sort((a, b) => {
+      if (sortBy === "status") {
+        return Number(b.is_active) - Number(a.is_active);
+      }
+      if (sortBy === "role") {
+        const aRole = a.roles.map((role) => role.name).join(", ");
+        const bRole = b.roles.map((role) => role.name).join(", ");
+        return aRole.localeCompare(bRole);
+      }
+      const aName = (a.display_name || `${a.first_name} ${a.last_name}`).trim();
+      const bName = (b.display_name || `${b.first_name} ${b.last_name}`).trim();
+      return aName.localeCompare(bName);
+    });
+  }, [search, sortBy, statusFilter, users]);
+
+  async function refreshUsers() {
+    const refreshed = await fetch("/api/admin/users");
+    const payload = await refreshed.json().catch(() => null);
+    if (refreshed.ok) {
+      setUsers(payload?.users ?? []);
+    }
+  }
+
+  function validateForm(form: UserFormState, userId?: string) {
+    if (!form.firstName.trim() || !form.lastName.trim()) {
+      return "First Name and Last Name are required.";
+    }
+    if (!isValidEmail(form.email.trim())) {
+      return "Please enter a valid email address.";
+    }
+    if (form.roleTemplateIds.length === 0) {
+      return "At least one role is required.";
+    }
+
+    const normalizedEmail = form.email.trim().toLowerCase();
+    const duplicateEmail = users.some(
+      (row) => row.user_id !== userId && row.email.trim().toLowerCase() === normalizedEmail
+    );
+    if (duplicateEmail) {
+      return "A user with this email already exists.";
+    }
+
+    const normalizedUsername = form.username.trim().toLowerCase();
+    if (normalizedUsername) {
+      const duplicateUsername = users.some(
+        (row) =>
+          row.user_id !== userId &&
+          (row.username || "").trim().toLowerCase() === normalizedUsername
+      );
+      if (duplicateUsername) {
+        return "A user with this username already exists.";
+      }
+    }
+
+    return null;
+  }
+
+  function openEditModal(user: UserRow) {
+    setEditingUser(user);
+    setAllowAdminRemoval(false);
+    setEditForm({
+      firstName: user.first_name,
+      lastName: user.last_name,
+      displayName: user.display_name,
+      email: user.email,
+      username: user.username,
+      isActive: user.is_active,
+      roleTemplateIds: user.roles.map((role) => role.id)
+    });
     setError(null);
     setMessage(null);
-    const response = await fetch("/api/admin/users", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(createForm)
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      setError(payload?.message ?? "Failed to create user.");
-      setCreating(false);
-      return;
-    }
+  }
 
-    const refreshed = await fetch("/api/admin/users");
-    const refreshedPayload = await refreshed.json().catch(() => null);
-    if (refreshed.ok) {
-      setUsers(refreshedPayload?.users ?? []);
-    }
-
+  function closeCreateModal() {
+    setIsCreateOpen(false);
     setCreateForm({
       firstName: "",
       lastName: "",
@@ -75,25 +175,89 @@ export function UsersManagement({
       isActive: true,
       roleTemplateIds: []
     });
+  }
+
+  function closeEditModal() {
+    setEditingUser(null);
+    setAllowAdminRemoval(false);
+  }
+
+  async function createUser(event: FormEvent) {
+    event.preventDefault();
+    setCreating(true);
+    setError(null);
+    setMessage(null);
+
+    const validationError = validateForm(createForm);
+    if (validationError) {
+      setError(validationError);
+      setCreating(false);
+      return;
+    }
+
+    const response = await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...createForm,
+        firstName: createForm.firstName.trim(),
+        lastName: createForm.lastName.trim(),
+        displayName: createForm.displayName.trim(),
+        email: createForm.email.trim(),
+        username: createForm.username.trim() || undefined
+      })
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      setError(payload?.message ?? "Failed to create user.");
+      setCreating(false);
+      return;
+    }
+
+    await refreshUsers();
+    closeCreateModal();
     setMessage("User created successfully.");
     setCreating(false);
   }
 
-  async function saveRow(user: UserRow) {
-    setSavingUserId(user.user_id);
+  async function saveUserEdits(event: FormEvent) {
+    event.preventDefault();
+    if (!editingUser) return;
+    setSavingUserId(editingUser.user_id);
     setError(null);
     setMessage(null);
-    const response = await fetch(`/api/admin/users/${user.user_id}`, {
+
+    const validationError = validateForm(editForm, editingUser.user_id);
+    if (validationError) {
+      setError(validationError);
+      setSavingUserId(null);
+      return;
+    }
+
+    const hadAdministratorRole =
+      administratorRoleId !== null &&
+      editingUser.roles.some((role) => role.id === administratorRoleId);
+    const hasAdministratorRoleNow =
+      administratorRoleId !== null && editForm.roleTemplateIds.includes(administratorRoleId);
+    if (hadAdministratorRole && !hasAdministratorRoleNow && !allowAdminRemoval) {
+      setError(
+        "This user currently has Administrator role. Check confirmation below to remove it."
+      );
+      setSavingUserId(null);
+      return;
+    }
+
+    const response = await fetch(`/api/admin/users/${editingUser.user_id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        firstName: user.first_name,
-        lastName: user.last_name,
-        displayName: user.display_name,
-        email: user.email,
-        username: user.username || undefined,
-        isActive: user.is_active,
-        roleTemplateIds: user.roles.map((role) => role.id)
+        firstName: editForm.firstName.trim(),
+        lastName: editForm.lastName.trim(),
+        displayName: editForm.displayName.trim(),
+        email: editForm.email.trim(),
+        username: editForm.username.trim() || undefined,
+        isActive: editForm.isActive,
+        roleTemplateIds: editForm.roleTemplateIds
       })
     });
     const payload = await response.json().catch(() => null);
@@ -103,7 +267,9 @@ export function UsersManagement({
       return;
     }
 
-    setMessage("User updated.");
+    await refreshUsers();
+    closeEditModal();
+    setMessage("User and role updated successfully.");
     setSavingUserId(null);
   }
 
@@ -116,216 +282,310 @@ export function UsersManagement({
     }));
   }
 
-  function toggleRowRole(userId: string, role: RoleTemplate) {
-    setUsers((prev) =>
-      prev.map((row) => {
-        if (row.user_id !== userId) return row;
-        const exists = row.roles.some((currentRole) => currentRole.id === role.id);
-        return {
-          ...row,
-          roles: exists
-            ? row.roles.filter((currentRole) => currentRole.id !== role.id)
-            : [...row.roles, { id: role.id, key: role.key, name: role.name }]
-        };
-      })
-    );
+  function toggleEditRole(roleId: string) {
+    setEditForm((prev) => ({
+      ...prev,
+      roleTemplateIds: prev.roleTemplateIds.includes(roleId)
+        ? prev.roleTemplateIds.filter((id) => id !== roleId)
+        : [...prev.roleTemplateIds, roleId]
+    }));
   }
 
   return (
     <div className="space-y-4">
-      <section className="rounded-md border border-slate-200 p-4">
-        <p className="mb-2 text-sm font-semibold">Create User</p>
-        <form className="grid gap-3 md:grid-cols-3" onSubmit={createUser}>
-          <Input
-            placeholder="First Name"
-            value={createForm.firstName}
-            onChange={(event) => setCreateForm((prev) => ({ ...prev, firstName: event.target.value }))}
-          />
-          <Input
-            placeholder="Last Name"
-            value={createForm.lastName}
-            onChange={(event) => setCreateForm((prev) => ({ ...prev, lastName: event.target.value }))}
-          />
-          <Input
-            placeholder="Display Name"
-            value={createForm.displayName}
-            onChange={(event) => setCreateForm((prev) => ({ ...prev, displayName: event.target.value }))}
-          />
-          <Input
-            placeholder="Email"
-            value={createForm.email}
-            onChange={(event) => setCreateForm((prev) => ({ ...prev, email: event.target.value }))}
-          />
-          <Input
-            placeholder="Username"
-            value={createForm.username}
-            onChange={(event) => setCreateForm((prev) => ({ ...prev, username: event.target.value }))}
-          />
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={createForm.isActive}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, isActive: event.target.checked }))
-              }
-            />
-            Active
-          </label>
-          <div className="md:col-span-3">
-            <p className="mb-1 text-xs text-slate-600">Assign Role(s)</p>
-            <div className="grid gap-2 md:grid-cols-3">
-              {roles.map((role) => (
-                <label key={role.id} className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={createForm.roleTemplateIds.includes(role.id)}
-                    onChange={() => toggleCreateRole(role.id)}
-                  />
-                  {role.name}
-                </label>
-              ))}
-            </div>
-          </div>
-          <Button disabled={creating} type="submit">
-            {creating ? "Creating..." : "Create User"}
-          </Button>
-        </form>
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 p-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Users</h3>
+          <p className="text-xs text-slate-600">
+            View, create, and manage users and role assignments.
+          </p>
+        </div>
+        <Button type="button" onClick={() => setIsCreateOpen(true)}>
+          New User
+        </Button>
       </section>
 
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
-      <section className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-slate-600">
-              <th className="py-2">Name</th>
-              <th className="py-2">Email</th>
-              <th className="py-2">Username</th>
-              <th className="py-2">Active</th>
-              <th className="py-2">Roles</th>
-              <th className="py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user.user_id} className="border-b border-slate-100 align-top">
-                <td className="py-2">
-                  <div className="grid gap-1">
-                    <Input
-                      value={user.first_name}
-                      onChange={(event) =>
-                        setUsers((prev) =>
-                          prev.map((row) =>
-                            row.user_id === user.user_id
-                              ? { ...row, first_name: event.target.value }
-                              : row
-                          )
-                        )
-                      }
-                      placeholder="First"
-                    />
-                    <Input
-                      value={user.last_name}
-                      onChange={(event) =>
-                        setUsers((prev) =>
-                          prev.map((row) =>
-                            row.user_id === user.user_id
-                              ? { ...row, last_name: event.target.value }
-                              : row
-                          )
-                        )
-                      }
-                      placeholder="Last"
-                    />
-                    <Input
-                      value={user.display_name}
-                      onChange={(event) =>
-                        setUsers((prev) =>
-                          prev.map((row) =>
-                            row.user_id === user.user_id
-                              ? { ...row, display_name: event.target.value }
-                              : row
-                          )
-                        )
-                      }
-                      placeholder="Display"
-                    />
-                  </div>
-                </td>
-                <td className="py-2">
-                  <Input
-                    value={user.email}
-                    onChange={(event) =>
-                      setUsers((prev) =>
-                        prev.map((row) =>
-                          row.user_id === user.user_id ? { ...row, email: event.target.value } : row
-                        )
-                      )
-                    }
-                  />
-                </td>
-                <td className="py-2">
-                  <Input
-                    value={user.username}
-                    onChange={(event) =>
-                      setUsers((prev) =>
-                        prev.map((row) =>
-                          row.user_id === user.user_id
-                            ? { ...row, username: event.target.value }
-                            : row
-                        )
-                      )
-                    }
-                  />
-                </td>
-                <td className="py-2">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={user.is_active}
-                      onChange={(event) =>
-                        setUsers((prev) =>
-                          prev.map((row) =>
-                            row.user_id === user.user_id
-                              ? { ...row, is_active: event.target.checked }
-                              : row
-                          )
-                        )
-                      }
-                    />
-                    {user.is_active ? "Active" : "Inactive"}
-                  </label>
-                </td>
-                <td className="py-2">
-                  <div className="grid gap-1">
-                    {roles.map((role) => (
-                      <label key={`${user.user_id}-${role.id}`} className="inline-flex items-center gap-2 text-xs">
-                        <input
-                          type="checkbox"
-                          checked={user.roles.some((rowRole) => rowRole.id === role.id)}
-                          onChange={() => toggleRowRole(user.user_id, role)}
-                        />
-                        {role.name}
-                      </label>
-                    ))}
-                  </div>
-                </td>
-                <td className="py-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={savingUserId === user.user_id}
-                    onClick={() => saveRow(user)}
-                  >
-                    {savingUserId === user.user_id ? "Saving..." : "Save"}
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <section className="grid gap-3 rounded-md border border-slate-200 p-4 md:grid-cols-4">
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search by name, email, username, or role..."
+          className="md:col-span-2"
+        />
+        <select
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          value={sortBy}
+          onChange={(event) => setSortBy(event.target.value as "name" | "role" | "status")}
+        >
+          <option value="name">Sort by Name</option>
+          <option value="role">Sort by Role</option>
+          <option value="status">Sort by Status</option>
+        </select>
+        <select
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          value={statusFilter}
+          onChange={(event) =>
+            setStatusFilter(event.target.value as "all" | "active" | "inactive")
+          }
+        >
+          <option value="all">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
       </section>
+
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {filteredUsers.length === 0 ? (
+          <p className="text-sm text-slate-500">No users match your current filters.</p>
+        ) : (
+          filteredUsers.map((user) => (
+            <article key={user.user_id} className="rounded-md border border-slate-200 p-4">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {user.display_name || `${user.first_name} ${user.last_name}`.trim() || "-"}
+                  </p>
+                  <p className="text-xs text-slate-500">{user.email || "-"}</p>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-1 text-[11px] font-medium ${
+                    user.is_active ? "bg-green-100 text-green-800" : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {user.is_active ? "Active" : "Inactive"}
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-600">Username: {user.username || "-"}</p>
+              <div className="mt-2">
+                <p className="mb-1 text-xs font-medium text-slate-600">Role(s)</p>
+                <div className="flex flex-wrap gap-1">
+                  {user.roles.length === 0 ? (
+                    <span className="text-xs text-slate-500">No roles assigned</span>
+                  ) : (
+                    user.roles.map((role) => (
+                      <span
+                        key={`${user.user_id}-${role.id}`}
+                        className="rounded-full bg-brand-50 px-2 py-1 text-[11px] text-brand-700"
+                      >
+                        {role.name}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-3 w-full"
+                onClick={() => openEditModal(user)}
+              >
+                Edit User and Role
+              </Button>
+            </article>
+          ))
+        )}
+      </section>
+
+      {isCreateOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="text-base font-semibold text-slate-900">New User</h4>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={closeCreateModal}
+              >
+                Cancel
+              </button>
+            </div>
+            <form className="space-y-3" onSubmit={createUser}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Input
+                  placeholder="First Name"
+                  value={createForm.firstName}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, firstName: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Last Name"
+                  value={createForm.lastName}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, lastName: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Display Name"
+                  value={createForm.displayName}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, displayName: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Email"
+                  type="email"
+                  value={createForm.email}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, email: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Username"
+                  value={createForm.username}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({ ...prev, username: event.target.value }))
+                  }
+                />
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={createForm.isActive}
+                    onChange={(event) =>
+                      setCreateForm((prev) => ({ ...prev, isActive: event.target.checked }))
+                    }
+                  />
+                  Active
+                </label>
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs text-slate-600">Assign Role(s)</p>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {roles.map((role) => (
+                    <label key={role.id} className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={createForm.roleTemplateIds.includes(role.id)}
+                        onChange={() => toggleCreateRole(role.id)}
+                      />
+                      {role.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button disabled={creating} type="submit">
+                  {creating ? "Creating..." : "Create User"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={closeCreateModal}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {editingUser ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="text-base font-semibold text-slate-900">Edit User and Role</h4>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={closeEditModal}
+              >
+                Cancel
+              </button>
+            </div>
+            <form className="space-y-3" onSubmit={saveUserEdits}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Input
+                  placeholder="First Name"
+                  value={editForm.firstName}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, firstName: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Last Name"
+                  value={editForm.lastName}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, lastName: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Display Name"
+                  value={editForm.displayName}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, displayName: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, email: event.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Username"
+                  value={editForm.username}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, username: event.target.value }))
+                  }
+                />
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editForm.isActive}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({ ...prev, isActive: event.target.checked }))
+                    }
+                  />
+                  Active
+                </label>
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs text-slate-600">Assign Role(s)</p>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {roles.map((role) => (
+                    <label key={role.id} className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={editForm.roleTemplateIds.includes(role.id)}
+                        onChange={() => toggleEditRole(role.id)}
+                      />
+                      {role.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {administratorRoleId !== null &&
+              editingUser.roles.some((role) => role.id === administratorRoleId) &&
+              !editForm.roleTemplateIds.includes(administratorRoleId) ? (
+                <label className="inline-flex items-center gap-2 text-sm text-amber-700">
+                  <input
+                    type="checkbox"
+                    checked={allowAdminRemoval}
+                    onChange={(event) => setAllowAdminRemoval(event.target.checked)}
+                  />
+                  Confirm removal of Administrator role
+                </label>
+              ) : null}
+
+              <div className="flex gap-2">
+                <Button type="submit" disabled={savingUserId === editingUser.user_id}>
+                  {savingUserId === editingUser.user_id ? "Saving..." : "Save"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={closeEditModal}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
