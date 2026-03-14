@@ -45,7 +45,9 @@ export async function getContactProfileData(contactId: string) {
   ] = await Promise.all([
     supabase
       .from("contacts")
-      .select("id, organization_id, first_name, last_name, preferred_name, email, phone, created_at")
+      .select(
+        "id, organization_id, first_name, last_name, preferred_name, organization_name, donor_status, member_status, email, alternate_email, phone, alternate_phone, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at"
+      )
       .eq("organization_id", context.organizationId)
       .eq("id", contactId)
       .maybeSingle(),

@@ -96,6 +96,7 @@ export default async function ContactDetailPage({ params }: PageProps) {
         />
         <ContactProfileTabs
           contactId={contact.id}
+          contactDetails={contact as Record<string, unknown>}
           taskUrgency={profile.taskUrgency}
           activity={profile.activity}
           donations={profile.donations}

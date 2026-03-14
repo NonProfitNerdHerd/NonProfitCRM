@@ -75,6 +75,66 @@ export function ContactForm() {
           <label className="mb-1 block text-sm font-medium">Phone</label>
           <Input {...register("phone")} />
         </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Alternate Email</label>
+          <Input type="email" {...register("alternate_email")} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Alternate Phone</label>
+          <Input {...register("alternate_phone")} />
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 p-3">
+        <p className="mb-2 text-sm font-semibold text-slate-900">Physical Address</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Address Line 1</label>
+            <Input {...register("address_line_1")} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Address Line 2</label>
+            <Input {...register("address_line_2")} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">City</label>
+            <Input {...register("city")} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">State</label>
+            <Input {...register("state")} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Zip</label>
+            <Input {...register("postal_code")} />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 p-3">
+        <p className="mb-2 text-sm font-semibold text-slate-900">Mailing Address</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Mailing Address Line 1</label>
+            <Input {...register("mailing_address_line_1")} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Mailing Address Line 2</label>
+            <Input {...register("mailing_address_line_2")} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Mailing City</label>
+            <Input {...register("mailing_city")} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Mailing State</label>
+            <Input {...register("mailing_state")} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Mailing Zip</label>
+            <Input {...register("mailing_postal_code")} />
+          </div>
+        </div>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <div>

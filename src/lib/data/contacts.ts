@@ -53,7 +53,19 @@ export async function createContact(input: ContactInput) {
       last_name: input.last_name,
       preferred_name: input.preferred_name || null,
       email: input.email || null,
+      alternate_email: input.alternate_email || null,
       phone: input.phone || null,
+      alternate_phone: input.alternate_phone || null,
+      address_line_1: input.address_line_1 || null,
+      address_line_2: input.address_line_2 || null,
+      city: input.city || null,
+      state: input.state || null,
+      postal_code: input.postal_code || null,
+      mailing_address_line_1: input.mailing_address_line_1 || null,
+      mailing_address_line_2: input.mailing_address_line_2 || null,
+      mailing_city: input.mailing_city || null,
+      mailing_state: input.mailing_state || null,
+      mailing_postal_code: input.mailing_postal_code || null,
       organization_name: input.organization_name || null,
       donor_status: input.donor_status,
       member_status: input.member_status,
@@ -65,4 +77,40 @@ export async function createContact(input: ContactInput) {
 
   if (error) throw error;
   return data.id;
+}
+
+export async function updateContact(contactId: string, input: ContactInput) {
+  const context = await requireStaffPermission("can_edit_contacts");
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("contacts")
+    .update({
+      first_name: input.first_name,
+      last_name: input.last_name,
+      preferred_name: input.preferred_name || null,
+      email: input.email || null,
+      alternate_email: input.alternate_email || null,
+      phone: input.phone || null,
+      alternate_phone: input.alternate_phone || null,
+      address_line_1: input.address_line_1 || null,
+      address_line_2: input.address_line_2 || null,
+      city: input.city || null,
+      state: input.state || null,
+      postal_code: input.postal_code || null,
+      mailing_address_line_1: input.mailing_address_line_1 || null,
+      mailing_address_line_2: input.mailing_address_line_2 || null,
+      mailing_city: input.mailing_city || null,
+      mailing_state: input.mailing_state || null,
+      mailing_postal_code: input.mailing_postal_code || null,
+      organization_name: input.organization_name || null,
+      donor_status: input.donor_status,
+      member_status: input.member_status,
+      updated_by: context.userId,
+      updated_at: new Date().toISOString()
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("id", contactId);
+
+  if (error) throw error;
 }

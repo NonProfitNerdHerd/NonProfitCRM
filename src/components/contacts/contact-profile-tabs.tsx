@@ -9,6 +9,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 
 type ContactProfileTabsProps = {
   contactId: string;
+  contactDetails: Record<string, unknown>;
   taskUrgency: "default" | "yellow" | "red";
   activity: Array<Record<string, unknown>>;
   donations: Array<Record<string, unknown>>;
@@ -31,6 +32,7 @@ type WorkbenchItem = {
 
 export function ContactProfileTabs({
   contactId,
+  contactDetails,
   taskUrgency,
   activity,
   donations,
@@ -42,7 +44,7 @@ export function ContactProfileTabs({
 }: ContactProfileTabsProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<
-    "activity" | "donations" | "notes" | "tasks" | "memberships"
+    "activity" | "contactInfo" | "donations" | "notes" | "tasks" | "memberships"
   >("activity");
   const [donationForm, setDonationForm] = useState({
     campaignId: "",
@@ -59,6 +61,30 @@ export function ContactProfileTabs({
   const [followUpSuspenseDate, setFollowUpSuspenseDate] = useState("");
   const [followUpTaskDescription, setFollowUpTaskDescription] = useState("");
   const [selectedItem, setSelectedItem] = useState<WorkbenchItem | null>(null);
+  const [showContactInfoModal, setShowContactInfoModal] = useState(false);
+  const [contactInfo, setContactInfo] = useState({
+    firstName: String(contactDetails.first_name ?? ""),
+    lastName: String(contactDetails.last_name ?? ""),
+    preferredName: String(contactDetails.preferred_name ?? ""),
+    organizationName: String(contactDetails.organization_name ?? ""),
+    donorStatus: String(contactDetails.donor_status ?? "prospect"),
+    memberStatus: String(contactDetails.member_status ?? "none"),
+    email: String(contactDetails.email ?? ""),
+    alternateEmail: String(contactDetails.alternate_email ?? ""),
+    phone: String(contactDetails.phone ?? ""),
+    alternatePhone: String(contactDetails.alternate_phone ?? ""),
+    addressLine1: String(contactDetails.address_line_1 ?? ""),
+    addressLine2: String(contactDetails.address_line_2 ?? ""),
+    city: String(contactDetails.city ?? ""),
+    state: String(contactDetails.state ?? ""),
+    postalCode: String(contactDetails.postal_code ?? ""),
+    mailingAddressLine1: String(contactDetails.mailing_address_line_1 ?? ""),
+    mailingAddressLine2: String(contactDetails.mailing_address_line_2 ?? ""),
+    mailingCity: String(contactDetails.mailing_city ?? ""),
+    mailingState: String(contactDetails.mailing_state ?? ""),
+    mailingPostalCode: String(contactDetails.mailing_postal_code ?? "")
+  });
+  const [contactInfoDraft, setContactInfoDraft] = useState(contactInfo);
   const [followUpType, setFollowUpType] = useState<"task" | "note">("task");
   const [followUpBody, setFollowUpBody] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -199,11 +225,63 @@ export function ContactProfileTabs({
     router.refresh();
   }
 
+  async function submitContactInfo(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    const response = await fetch(`/api/contacts/${contactId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        first_name: contactInfoDraft.firstName,
+        last_name: contactInfoDraft.lastName,
+        preferred_name: contactInfoDraft.preferredName,
+        organization_name: contactInfoDraft.organizationName,
+        donor_status: contactInfoDraft.donorStatus,
+        member_status: contactInfoDraft.memberStatus,
+        email: contactInfoDraft.email,
+        alternate_email: contactInfoDraft.alternateEmail,
+        phone: contactInfoDraft.phone,
+        alternate_phone: contactInfoDraft.alternatePhone,
+        address_line_1: contactInfoDraft.addressLine1,
+        address_line_2: contactInfoDraft.addressLine2,
+        city: contactInfoDraft.city,
+        state: contactInfoDraft.state,
+        postal_code: contactInfoDraft.postalCode,
+        mailing_address_line_1: contactInfoDraft.mailingAddressLine1,
+        mailing_address_line_2: contactInfoDraft.mailingAddressLine2,
+        mailing_city: contactInfoDraft.mailingCity,
+        mailing_state: contactInfoDraft.mailingState,
+        mailing_postal_code: contactInfoDraft.mailingPostalCode
+      })
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      setError(payload?.message ?? "Unable to update contact information.");
+      setLoading(false);
+      return;
+    }
+
+    setContactInfo(contactInfoDraft);
+    setShowContactInfoModal(false);
+    setMessage("Contact information updated.");
+    setLoading(false);
+    router.refresh();
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <TabButton active={activeTab === "activity"} onClick={() => setActiveTab("activity")}>
           Activity Information
+        </TabButton>
+        <TabButton
+          active={activeTab === "contactInfo"}
+          onClick={() => setActiveTab("contactInfo")}
+        >
+          Contact Information
         </TabButton>
         <TabButton active={activeTab === "donations"} onClick={() => setActiveTab("donations")}>
           Donations
@@ -260,6 +338,51 @@ export function ContactProfileTabs({
               </button>
             ))
           )}
+        </div>
+      ) : null}
+
+      {activeTab === "contactInfo" ? (
+        <div className="space-y-4 rounded-md border border-slate-200 p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-900">Contact Information</p>
+            <Button
+              type="button"
+              onClick={() => {
+                setContactInfoDraft(contactInfo);
+                setShowContactInfoModal(true);
+              }}
+            >
+              Edit
+            </Button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Physical Address</p>
+              <p className="text-sm text-slate-800">
+                {contactInfo.addressLine1 || "-"}
+                {contactInfo.addressLine2 ? `, ${contactInfo.addressLine2}` : ""}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Mailing Address</p>
+              <p className="text-sm text-slate-800">
+                {contactInfo.mailingAddressLine1 || "-"}
+                {contactInfo.mailingAddressLine2
+                  ? `, ${contactInfo.mailingAddressLine2}`
+                  : ""}
+              </p>
+            </div>
+            <LabeledValue label="City" value={contactInfo.city} />
+            <LabeledValue label="State" value={contactInfo.state} />
+            <LabeledValue label="Zip" value={contactInfo.postalCode} />
+            <LabeledValue label="Mailing City" value={contactInfo.mailingCity} />
+            <LabeledValue label="Mailing State" value={contactInfo.mailingState} />
+            <LabeledValue label="Mailing Zip" value={contactInfo.mailingPostalCode} />
+            <LabeledValue label="Phone Number" value={contactInfo.phone} />
+            <LabeledValue label="Alternate Phone Number" value={contactInfo.alternatePhone} />
+            <LabeledValue label="Email" value={contactInfo.email} />
+            <LabeledValue label="Alternate Email" value={contactInfo.alternateEmail} />
+          </div>
         </div>
       ) : null}
 
@@ -567,6 +690,243 @@ export function ContactProfileTabs({
         </div>
       ) : null}
 
+      {showContactInfoModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-5 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-slate-900">Edit Contact Information</h3>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setShowContactInfoModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            <form className="space-y-4" onSubmit={submitContactInfo}>
+              <section className="rounded-md border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-900">Core Contact</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="First Name">
+                    <Input
+                      value={contactInfoDraft.firstName}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({ ...prev, firstName: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Last Name">
+                    <Input
+                      value={contactInfoDraft.lastName}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({ ...prev, lastName: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Display / Preferred Name">
+                    <Input
+                      value={contactInfoDraft.preferredName}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          preferredName: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Organization Name">
+                    <Input
+                      value={contactInfoDraft.organizationName}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          organizationName: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+              </section>
+
+              <section className="rounded-md border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-900">Contact Methods</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Phone Number">
+                    <Input
+                      value={contactInfoDraft.phone}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({ ...prev, phone: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Alternate Phone Number">
+                    <Input
+                      value={contactInfoDraft.alternatePhone}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          alternatePhone: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Email">
+                    <Input
+                      type="email"
+                      value={contactInfoDraft.email}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({ ...prev, email: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Alternate Email">
+                    <Input
+                      type="email"
+                      value={contactInfoDraft.alternateEmail}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          alternateEmail: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+              </section>
+
+              <section className="rounded-md border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-900">Physical Address</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Physical Address Line 1">
+                    <Input
+                      value={contactInfoDraft.addressLine1}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          addressLine1: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Physical Address Line 2">
+                    <Input
+                      value={contactInfoDraft.addressLine2}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          addressLine2: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="City">
+                    <Input
+                      value={contactInfoDraft.city}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({ ...prev, city: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="State">
+                    <Input
+                      value={contactInfoDraft.state}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({ ...prev, state: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Zip">
+                    <Input
+                      value={contactInfoDraft.postalCode}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          postalCode: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+              </section>
+
+              <section className="rounded-md border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-900">Mailing Address</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Mailing Address Line 1">
+                    <Input
+                      value={contactInfoDraft.mailingAddressLine1}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          mailingAddressLine1: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Mailing Address Line 2">
+                    <Input
+                      value={contactInfoDraft.mailingAddressLine2}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          mailingAddressLine2: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Mailing City">
+                    <Input
+                      value={contactInfoDraft.mailingCity}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          mailingCity: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Mailing State">
+                    <Input
+                      value={contactInfoDraft.mailingState}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          mailingState: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Mailing Zip">
+                    <Input
+                      value={contactInfoDraft.mailingPostalCode}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          mailingPostalCode: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+              </section>
+
+              <div className="flex gap-2">
+                <Button type="submit" disabled={loading}>
+                  {loading ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowContactInfoModal(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
       {selectedItem ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-xl">
@@ -665,5 +1025,23 @@ function TabButton({
     >
       {children}
     </button>
+  );
+}
+
+function LabeledValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="text-sm text-slate-800">{value || "-"}</p>
+    </div>
+  );
+}
+
+function FormField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
+      {children}
+    </div>
   );
 }
