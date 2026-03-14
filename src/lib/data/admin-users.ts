@@ -64,13 +64,39 @@ export async function listAdminUsersData() {
 
   const memberships = membershipsResult.data ?? [];
   const userIds = memberships.map((membership) => membership.user_id as string);
-  const profilesResult = userIds.length
-    ? await supabase.rpc("admin_org_user_profiles", { org_id: context.organizationId })
-    : { data: [] as Array<Record<string, unknown>>, error: null };
-  if (profilesResult.error) throw profilesResult.error;
+  let profilesData: Array<Record<string, unknown>> = [];
+  if (userIds.length > 0) {
+    const profilesResult = await supabase.rpc("admin_org_user_profiles", {
+      org_id: context.organizationId
+    });
+    if (profilesResult.error) {
+      try {
+        const adminClient = createAdminClient();
+        const adminProfilesResult = await adminClient
+          .from("profiles")
+          .select("id, first_name, last_name, display_name, email, username, is_active")
+          .in("id", userIds);
+        if (adminProfilesResult.error) throw adminProfilesResult.error;
+        profilesData = (adminProfilesResult.data ?? []) as Array<Record<string, unknown>>;
+      } catch {
+        // Keep the page usable even if neither RPC nor admin key are available.
+        profilesData = userIds.map((id) => ({
+          id,
+          first_name: "",
+          last_name: "",
+          display_name: "",
+          email: "",
+          username: "",
+          is_active: true
+        }));
+      }
+    } else {
+      profilesData = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+    }
+  }
 
   const profileMap = new Map<string, Record<string, unknown>>();
-  for (const profile of profilesResult.data ?? []) {
+  for (const profile of profilesData) {
     profileMap.set(profile.id as string, profile);
   }
 
