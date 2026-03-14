@@ -108,3 +108,107 @@ export async function getDonationById(id: string) {
   if (error) throw error;
   return data;
 }
+
+export async function updateDonationForStaff(input: {
+  donationId: string;
+  contactId: string;
+  date: string;
+  totalAmount: number;
+  paymentType: "Cash" | "Check" | "Card";
+  checkNumber?: string;
+  transactionId?: string;
+  memo?: string;
+  allocations: Array<{ campaignId: string; amount: number }>;
+}) {
+  const context = await requireStaffPermission("can_edit_donations");
+  const supabase = await createClient();
+
+  if (!Number.isFinite(input.totalAmount) || input.totalAmount <= 0) {
+    throw new Error("Total Donation Amount is required.");
+  }
+  if (!input.allocations.length) {
+    throw new Error("At least one campaign allocation is required.");
+  }
+  const allocatedTotal = input.allocations.reduce(
+    (sum, allocation) => sum + Number(allocation.amount || 0),
+    0
+  );
+  if (Math.abs(allocatedTotal - input.totalAmount) > 0.009) {
+    throw new Error("Split allocations must exactly match Total Donation Amount.");
+  }
+
+  const { data: existingDonation, error: donationLookupError } = await supabase
+    .from("donations")
+    .select("id")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.donationId)
+    .maybeSingle();
+  if (donationLookupError) throw donationLookupError;
+  if (!existingDonation) throw new Error("Donation not found.");
+
+  const campaignIds = Array.from(new Set(input.allocations.map((allocation) => allocation.campaignId)));
+  const { data: campaigns, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id, name, status")
+    .eq("organization_id", context.organizationId)
+    .in("id", campaignIds);
+  if (campaignError) throw campaignError;
+  if (!campaigns || campaigns.length !== campaignIds.length) {
+    throw new Error("One or more selected campaigns are invalid.");
+  }
+  if (campaigns.some((campaign) => campaign.status !== "Active")) {
+    throw new Error("Donation allocations must use active campaigns.");
+  }
+
+  const primaryCampaignId = input.allocations[0].campaignId;
+  const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
+
+  const { error: donationUpdateError } = await supabase
+    .from("donations")
+    .update({
+      contact_id: input.contactId,
+      campaign_id: primaryCampaignId,
+      amount: input.totalAmount,
+      donation_date: input.date,
+      payment_type: input.paymentType,
+      check_number: input.checkNumber ?? null,
+      transaction_id: input.transactionId ?? null,
+      memo: input.memo ?? null,
+      campaign: primaryCampaign?.name ?? null,
+      updated_at: new Date().toISOString()
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.donationId);
+  if (donationUpdateError) throw donationUpdateError;
+
+  const { error: allocationsUpsertError } = await supabase.from("donation_allocations").upsert(
+    input.allocations.map((allocation) => ({
+      organization_id: context.organizationId,
+      donation_id: input.donationId,
+      campaign_id: allocation.campaignId,
+      allocation_amount: allocation.amount,
+      created_by: context.userId
+    })),
+    { onConflict: "donation_id,campaign_id" }
+  );
+  if (allocationsUpsertError) throw allocationsUpsertError;
+
+  const { data: existingAllocations, error: existingAllocationsError } = await supabase
+    .from("donation_allocations")
+    .select("campaign_id")
+    .eq("organization_id", context.organizationId)
+    .eq("donation_id", input.donationId);
+  if (existingAllocationsError) throw existingAllocationsError;
+  const removeCampaignIds = (existingAllocations ?? [])
+    .map((row) => row.campaign_id as string)
+    .filter((campaignId) => !campaignIds.includes(campaignId));
+  if (removeCampaignIds.length > 0) {
+    const { error: cleanupError } = await supabase
+      .from("donation_allocations")
+      .delete()
+      .eq("organization_id", context.organizationId)
+      .eq("donation_id", input.donationId)
+      .in("campaign_id", removeCampaignIds);
+    if (cleanupError) throw cleanupError;
+  }
+}
