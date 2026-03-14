@@ -360,7 +360,8 @@ export async function validateImportBatch(input: {
     }
 
     const key = duplicateKeyForRow(normalizedRow, matchBy);
-    const duplicateCandidates = key && (batchKeyCount.get(key) ?? 0) > 1 ? [{ type: "batch", key }] : [];
+    const duplicateCandidates: Array<Record<string, unknown>> =
+      key && (batchKeyCount.get(key) ?? 0) > 1 ? [{ type: "batch", key }] : [];
     const existingMatches = await findExistingByMatch({
       entityType,
       organizationId: context.organizationId,
