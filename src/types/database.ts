@@ -44,7 +44,8 @@ export type PermissionKey =
   | "can_view_dashboard"
   | "can_view_financial_summaries"
   | "can_view_member_records"
-  | "can_manage_role_templates";
+  | "can_manage_role_templates"
+  | "can_create_projects";
 
 export type Database = {
   public: {

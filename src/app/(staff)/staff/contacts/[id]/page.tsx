@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { Card, CardHeader } from "@/components/ui/card";
-import { getContact } from "@/lib/data/contacts";
-import { listContactNotes } from "@/lib/data/activity";
+import { getContactProfileData } from "@/lib/data/contact-profile";
 import { formatDate } from "@/lib/utils";
+import { ContactProfileTabs } from "@/components/contacts/contact-profile-tabs";
+import { createClient } from "@/lib/supabase/server";
+import { requireStaffPermission } from "@/lib/auth/guards";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -10,62 +12,88 @@ type PageProps = {
 
 export default async function ContactDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const contact = await getContact(id);
+  const context = await requireStaffPermission("can_view_contacts");
+  const profile = await getContactProfileData(id);
+  const contact = profile.contact;
   if (!contact) notFound();
 
-  const notes = await listContactNotes(id);
+  const supabase = await createClient();
+  const { data: staffUsers } = await supabase
+    .from("organization_memberships")
+    .select("user_id")
+    .eq("organization_id", context.organizationId)
+    .eq("is_active", true);
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader
-          title={`${contact.first_name} ${contact.last_name}`}
-          subtitle="Contact detail profile"
+          title={`${contact.first_name} ${contact.last_name}${contact.preferred_name ? ` (${contact.preferred_name})` : ""}`}
+          subtitle="Contact profile"
         />
-        <div className="grid gap-3 text-sm md:grid-cols-3">
+        <div className="grid gap-3 text-sm md:grid-cols-2">
           <div>
-            <p className="text-slate-500">Email</p>
-            <p>{contact.email ?? "-"}</p>
+            <p className="text-slate-500">Email(s)</p>
+            <div className="space-y-1">
+              {(profile.emails.length ? profile.emails : [{ email: contact.email, label: "primary" }]).map(
+                (entry) => (
+                  <p key={`${entry.email}-${entry.label}`}>
+                    {entry.email ?? "-"}{" "}
+                    <span className="text-xs text-slate-500">({entry.label ?? "primary"})</span>
+                  </p>
+                )
+              )}
+            </div>
           </div>
           <div>
-            <p className="text-slate-500">Phone</p>
-            <p>{contact.phone ?? "-"}</p>
+            <p className="text-slate-500">Phone(s)</p>
+            <div className="space-y-1">
+              {(profile.phones.length ? profile.phones : [{ phone: contact.phone, label: "primary" }]).map(
+                (entry) => (
+                  <p key={`${entry.phone}-${entry.label}`}>
+                    {entry.phone ?? "-"}{" "}
+                    <span className="text-xs text-slate-500">({entry.label ?? "primary"})</span>
+                  </p>
+                )
+              )}
+            </div>
           </div>
           <div>
-            <p className="text-slate-500">Birthdate</p>
-            <p>{formatDate(contact.birthdate)}</p>
+            <p className="text-slate-500">Organizations</p>
+            <p>
+              {profile.organizations.length === 0
+                ? "-"
+                : profile.organizations
+                    .map((entry) => {
+                      const org = Array.isArray(entry.crm_organizations)
+                        ? entry.crm_organizations[0]
+                        : entry.crm_organizations;
+                      return (org?.name as string) ?? "";
+                    })
+                    .filter(Boolean)
+                    .join(", ")}
+            </p>
           </div>
           <div>
-            <p className="text-slate-500">Donor Status</p>
-            <p>{contact.donor_status}</p>
-          </div>
-          <div>
-            <p className="text-slate-500">Member Status</p>
-            <p>{contact.member_status}</p>
-          </div>
-          <div>
-            <p className="text-slate-500">Tags</p>
-            <p>{(contact.tags ?? []).join(", ") || "-"}</p>
+            <p className="text-slate-500">Created</p>
+            <p>{formatDate(contact.created_at)}</p>
           </div>
         </div>
       </Card>
       <Card>
-        <CardHeader title="Notes & Activity" subtitle="Visibility-classified notes" />
-        <div className="space-y-3">
-          {notes.length === 0 ? (
-            <p className="text-sm text-slate-500">No notes recorded.</p>
-          ) : (
-            notes.map((note) => (
-              <article key={note.id} className="rounded-md border border-slate-200 p-3">
-                <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
-                  <span>{note.note_type}</span>
-                  <span>{note.visibility_classification}</span>
-                </div>
-                <p className="text-sm text-slate-800">{note.body}</p>
-              </article>
-            ))
-          )}
-        </div>
+        <CardHeader
+          title="Contact Workbench"
+          subtitle="Activity, donations, notes, follow-up tasks, and relationship workflows"
+        />
+        <ContactProfileTabs
+          contactId={contact.id}
+          taskUrgency={profile.taskUrgency}
+          activity={profile.activity}
+          donations={profile.donations}
+          notes={profile.notes}
+          tasks={profile.tasks}
+          staffUsers={(staffUsers ?? []) as Array<{ user_id: string }>}
+        />
       </Card>
     </div>
   );

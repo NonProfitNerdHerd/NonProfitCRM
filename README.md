@@ -259,3 +259,48 @@ Run migrations in order:
 - add organization custom role templates
 - add webhook/API key management for integrations
 - add richer saved report filters, joins, and scheduled delivery
+
+---
+
+## 8) CRM Workspace Extension (Contacts, Organizations, Tasks, Projects, Search)
+
+This branch now includes a modern CRM-style staff workspace with:
+
+- Contact profile tabs (Activity, Donations, Notes, Tasks)
+- Organization relationship management (`crm_organizations` + contact links)
+- Full task system with subtasks (`tasks.parent_task_id`)
+- Project model with role-gated creation (`projects`)
+- Global search across contacts/donations/tasks/notes/organizations/projects
+- Activity log stream (`activity_log`) for contact timeline and system actions
+- Dashboard "My Tasks" buckets (Overdue, Upcoming, All Tasks, Recently Completed)
+
+### New/Extended Data Model
+
+- `crm_organizations`
+- `contact_organization_links`
+- `contact_emails`
+- `contact_phones`
+- `projects`
+- `activity_log`
+- Extended `tasks` with:
+  - `project_id`
+  - `crm_organization_id`
+  - `parent_task_id` (subtasks)
+- Extended `donations` with:
+  - `payment_type`
+  - `check_number`
+  - `transaction_id`
+  - `memo`
+  - check/card conditional validation constraint
+
+### Role-based Project Creation
+
+Project creation is enforced in both UI and backend via `app.can_create_projects(org_id)`, allowing only:
+
+- `administrator`
+- `executive_staff`
+- `executive_leader`
+
+### Migrations
+
+- `202603130004_crm_tasks_projects_search.sql` adds schema extensions, policy enforcement, search indexes, and task roll-up trigger.

@@ -81,3 +81,18 @@ export async function requirePortalIdentity(): Promise<SessionContext> {
 
   return context;
 }
+
+export async function requireProjectCreator(): Promise<SessionContext> {
+  const context = await requireSessionContext();
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("can_create_projects", {
+    org_id: context.organizationId
+  });
+
+  if (error || !data) {
+    redirect("/unauthorized");
+  }
+
+  return context;
+}

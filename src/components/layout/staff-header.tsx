@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { GlobalSearch } from "@/components/search/global-search";
 
 export async function StaffHeader({ organizationId }: { organizationId: string }) {
   const supabase = await createClient();
@@ -13,7 +14,14 @@ export async function StaffHeader({ organizationId }: { organizationId: string }
   } = await supabase.auth.getUser();
 
   return (
-    <header className="mb-6 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
+    <header className="mb-6 space-y-3 rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
+      <div className="flex items-center justify-between gap-4">
+        <GlobalSearch />
+        <div className="text-right">
+          <p className="text-xs text-slate-500">Signed in as</p>
+          <p className="text-sm font-medium text-slate-900">{user?.email ?? "-"}</p>
+        </div>
+      </div>
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
           Organization Context
@@ -21,10 +29,6 @@ export async function StaffHeader({ organizationId }: { organizationId: string }
         <p className="text-sm font-semibold text-slate-900">
           {organization?.name ?? "Unknown Organization"}
         </p>
-      </div>
-      <div className="text-right">
-        <p className="text-xs text-slate-500">Signed in as</p>
-        <p className="text-sm font-medium text-slate-900">{user?.email ?? "-"}</p>
       </div>
     </header>
   );
