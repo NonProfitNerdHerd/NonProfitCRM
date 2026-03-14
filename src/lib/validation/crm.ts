@@ -1,12 +1,23 @@
 import { z } from "zod";
 
-export const campaignSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  status: z.enum(["Active", "Inactive"]).default("Active"),
-  startDate: z.string().optional(),
-  endDate: z.string().optional()
-});
+export const campaignSchema = z
+  .object({
+    name: z.string().trim().min(1, "Campaign Name is required."),
+    description: z.string().optional(),
+    status: z.enum(["Active", "Inactive"]).default("Active"),
+    startDate: z.string().optional(),
+    endDate: z.string().optional()
+  })
+  .refine(
+    (input) => {
+      if (!input.startDate || !input.endDate) return true;
+      return input.endDate >= input.startDate;
+    },
+    {
+      message: "End Date cannot be before Start Date.",
+      path: ["endDate"]
+    }
+  );
 
 export const projectSchema = z.object({
   name: z.string().min(1),
