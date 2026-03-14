@@ -327,3 +327,206 @@ do update set
   is_pii = excluded.is_pii,
   visibility_classification = excluded.visibility_classification,
   required_permission_key = excluded.required_permission_key;
+
+insert into public.permissions (key, name, description, category)
+values
+  ('can_create_projects', 'Create Projects', 'Create CRM projects', 'projects')
+on conflict (key) do update
+set
+  name = excluded.name,
+  description = excluded.description,
+  category = excluded.category;
+
+insert into public.role_templates (organization_id, key, name, description, is_system_template)
+values
+  (null, 'executive_leader', 'Executive Leader', 'Leadership role with project creation rights', true)
+on conflict (key) where organization_id is null
+do update set
+  name = excluded.name,
+  description = excluded.description,
+  is_system_template = excluded.is_system_template;
+
+insert into public.role_template_permissions (role_template_id, permission_id)
+select rt.id, p.id
+from public.role_templates rt
+join public.permissions p on p.key = 'can_create_projects'
+where rt.organization_id is null
+  and rt.key in ('administrator', 'executive_staff', 'executive_leader')
+on conflict (role_template_id, permission_id) do nothing;
+
+with org as (
+  select id as organization_id
+  from public.organizations
+  where slug = 'demo-community-foundation'
+),
+contacts as (
+  select c.id, c.organization_id, c.first_name, c.last_name, c.email, c.phone
+  from public.contacts c
+  join org on org.organization_id = c.organization_id
+),
+crm_org_seed as (
+  insert into public.crm_organizations (organization_id, name, description)
+  select org.organization_id, v.name, v.description
+  from org
+  cross join (
+    values
+      ('Hope Partners', 'Regional nonprofit partner organization'),
+      ('Northside Outreach', 'Community outreach organization')
+  ) as v(name, description)
+  on conflict (organization_id, name) do update set description = excluded.description
+  returning id, organization_id, name
+),
+project_seed as (
+  insert into public.projects (organization_id, name, description, status)
+  select org.organization_id, 'Spring Donor Renewal', '30-day renewal outreach effort', 'active'
+  from org
+  on conflict (organization_id, name) do update set description = excluded.description
+  returning id, organization_id
+),
+email_seed as (
+  insert into public.contact_emails (organization_id, contact_id, email, label, is_primary)
+  select c.organization_id, c.id, c.email, 'primary', true
+  from contacts c
+  where c.email is not null
+  on conflict (organization_id, contact_id, email) do nothing
+),
+phone_seed as (
+  insert into public.contact_phones (organization_id, contact_id, phone, label, is_primary)
+  select c.organization_id, c.id, c.phone, 'primary', true
+  from contacts c
+  where c.phone is not null
+  on conflict (organization_id, contact_id, phone) do nothing
+),
+relationship_seed as (
+  insert into public.contact_relationships (organization_id, contact_id, related_contact_id, relationship_type, relationship_label)
+  select c1.organization_id, c1.id, c2.id, 'spouse', 'Spouse'
+  from contacts c1
+  join contacts c2 on c1.organization_id = c2.organization_id and c1.id <> c2.id
+  order by c1.id, c2.id
+  limit 1
+  on conflict (organization_id, contact_id, related_contact_id, relationship_type) do nothing
+),
+org_link_seed as (
+  insert into public.contact_organization_links (organization_id, contact_id, crm_organization_id, relationship_type)
+  select c.organization_id, c.id, co.id, 'member'
+  from contacts c
+  join crm_org_seed co on co.organization_id = c.organization_id
+  on conflict (organization_id, contact_id, crm_organization_id) do nothing
+),
+task_seed as (
+  insert into public.tasks (
+    organization_id,
+    title,
+    description,
+    due_date,
+    status,
+    priority,
+    contact_id,
+    project_id,
+    crm_organization_id
+  )
+  select
+    c.organization_id,
+    concat('Follow up with ', c.first_name, ' ', c.last_name),
+    'Discuss renewal and giving plan',
+    current_date + interval '7 days',
+    'todo',
+    'high',
+    c.id,
+    p.id,
+    co.id
+  from contacts c
+  join project_seed p on p.organization_id = c.organization_id
+  join crm_org_seed co on co.organization_id = c.organization_id
+  where co.name = 'Hope Partners'
+  limit 1
+  returning id, organization_id, contact_id, project_id
+),
+subtask_seed as (
+  insert into public.tasks (
+    organization_id,
+    title,
+    description,
+    due_date,
+    status,
+    priority,
+    contact_id,
+    project_id,
+    parent_task_id
+  )
+  select
+    ts.organization_id,
+    'Prepare call notes',
+    'Review past donations and latest interactions',
+    current_date + interval '2 days',
+    'in_progress',
+    'medium',
+    ts.contact_id,
+    ts.project_id,
+    ts.id
+  from task_seed ts
+  returning id, organization_id, contact_id
+),
+note_seed as (
+  insert into public.notes (
+    organization_id,
+    contact_id,
+    note_type,
+    body
+  )
+  select
+    c.organization_id,
+    c.id,
+    'call',
+    'Discussed campaign goals and interest in recurring support.'
+  from contacts c
+  limit 1
+  returning id, organization_id, contact_id
+),
+donation_seed as (
+  insert into public.donations (
+    organization_id,
+    contact_id,
+    amount,
+    currency,
+    donation_date,
+    status,
+    payment_type,
+    check_number,
+    source,
+    source_platform,
+    memo
+  )
+  select
+    c.organization_id,
+    c.id,
+    275.00,
+    'USD',
+    current_date - interval '3 days',
+    'posted',
+    'Check',
+    'CHK-2026-9001',
+    'manual',
+    'staff_entry',
+    'Spring campaign support'
+  from contacts c
+  limit 1
+  on conflict do nothing
+  returning id, organization_id, contact_id
+)
+insert into public.activity_log (
+  organization_id,
+  entity_type,
+  entity_id,
+  related_contact_id,
+  action_type,
+  action_summary,
+  performed_by_user_id
+)
+select organization_id, 'task', id, contact_id, 'created', 'Created task from seed data', null from task_seed
+union all
+select organization_id, 'subtask', id, contact_id, 'created', 'Created subtask from seed data', null from subtask_seed
+union all
+select organization_id, 'note', id, contact_id, 'created', 'Created note from seed data', null from note_seed
+union all
+select organization_id, 'donation', id, contact_id, 'created', 'Created donation from seed data', null from donation_seed;
