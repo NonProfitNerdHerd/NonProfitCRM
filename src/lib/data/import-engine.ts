@@ -80,6 +80,26 @@ function parseCommunicationPreferences(value: unknown) {
     .filter((entry) => allowed.has(entry));
 }
 
+function importSchemaErrorMessage(error: unknown) {
+  const value = error as { message?: string; details?: string; hint?: string; code?: string };
+  const pieces = [value?.message, value?.details, value?.hint].filter(Boolean);
+  return pieces.join(" ").toLowerCase();
+}
+
+function isMissingImportJobsColumns(error: unknown) {
+  const message = importSchemaErrorMessage(error);
+  return message.includes("import_mode") || message.includes("dry_run");
+}
+
+function isMissingImportStagingSchema(error: unknown) {
+  const message = importSchemaErrorMessage(error);
+  return (
+    message.includes("import_staging_rows") ||
+    message.includes("import_duplicate_decisions") ||
+    message.includes("import_row_change_log")
+  );
+}
+
 function normalizeMappedRow(entityType: ImportEntityType, mappedRow: Record<string, unknown>) {
   const config = IMPORT_ENTITY_CONFIG[entityType];
   const normalized: Record<string, unknown> = {};
@@ -230,29 +250,52 @@ export async function stageImportBatch(input: {
   const context = await requireStaffPermission("can_manage_imports");
   const supabase = await createClient();
 
-  const { data: job, error: jobError } = await supabase
+  const jobPayload = {
+    organization_id: context.organizationId,
+    source_platform: input.sourceSystem,
+    source_type: input.fileType,
+    target_domain: input.entityType,
+    original_file_name: input.fileName,
+    status: "mapped",
+    import_mode: input.importMode,
+    dry_run: input.importMode === "dry_run",
+    source_metadata: {
+      headers: input.headers,
+      relationship_settings: input.relationshipSettings ?? [],
+      match_by: input.matchBy ?? IMPORT_ENTITY_CONFIG[input.entityType].defaultMatchBy
+    },
+    duplicate_strategy: "none",
+    total_rows: input.rows.length,
+    created_by: context.userId
+  };
+
+  let { data: job, error: jobError } = await supabase
     .from("import_jobs")
-    .insert({
-      organization_id: context.organizationId,
-      source_platform: input.sourceSystem,
-      source_type: input.fileType,
-      target_domain: input.entityType,
-      original_file_name: input.fileName,
-      status: "mapped",
-      import_mode: input.importMode,
-      dry_run: input.importMode === "dry_run",
-      source_metadata: {
-        headers: input.headers,
-        relationship_settings: input.relationshipSettings ?? [],
-        match_by: input.matchBy ?? IMPORT_ENTITY_CONFIG[input.entityType].defaultMatchBy
-      },
-      duplicate_strategy: "none",
-      total_rows: input.rows.length,
-      created_by: context.userId
-    })
+    .insert(jobPayload)
     .select("id")
     .single();
+
+  if (jobError && isMissingImportJobsColumns(jobError)) {
+    const {
+      import_mode: _importMode,
+      dry_run: _dryRun,
+      ...legacyJobPayload
+    } = jobPayload as typeof jobPayload & { import_mode?: string; dry_run?: boolean };
+    void _importMode;
+    void _dryRun;
+
+    const retry = await supabase
+      .from("import_jobs")
+      .insert(legacyJobPayload)
+      .select("id")
+      .single();
+    job = retry.data;
+    jobError = retry.error;
+  }
   if (jobError) throw jobError;
+  if (!job?.id) {
+    throw new Error("Unable to create import batch job.");
+  }
 
   const mappingRows = input.mappings
     .filter((mapping) => !mapping.ignore && mapping.targetField)
@@ -283,7 +326,14 @@ export async function stageImportBatch(input: {
   });
   if (stagingRows.length > 0) {
     const { error: stagingError } = await supabase.from("import_staging_rows").insert(stagingRows);
-    if (stagingError) throw stagingError;
+    if (stagingError) {
+      if (isMissingImportStagingSchema(stagingError)) {
+        throw new Error(
+          "Import engine tables are missing in this environment. Please run the latest Supabase migrations (202603130017 and newer), then retry."
+        );
+      }
+      throw stagingError;
+    }
   }
 
   return { jobId: job.id, totalRows: input.rows.length };

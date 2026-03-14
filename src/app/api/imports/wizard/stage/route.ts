@@ -18,8 +18,15 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(result);
   } catch (error) {
+    const problem = error as { message?: string; details?: string; hint?: string; code?: string };
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Unable to stage import batch" },
+      {
+        message:
+          error instanceof Error ? error.message : "Unable to stage import batch",
+        details: problem?.details ?? null,
+        hint: problem?.hint ?? null,
+        code: problem?.code ?? null
+      },
       { status: 500 }
     );
   }
