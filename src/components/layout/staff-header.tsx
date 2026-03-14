@@ -19,31 +19,26 @@ export async function StaffHeader({ organizationId }: { organizationId: string }
   return (
     <header className="mb-6">
       <div
-        className="flex items-center justify-between border border-slate-200 bg-white px-5 py-3 shadow-sm"
+        className="rounded-[10px] border border-slate-200 bg-white px-5 py-3 shadow-lg shadow-slate-200/60"
         style={{
           borderTopLeftRadius: 0,
-          borderTopRightRadius: 0,
-          borderBottomLeftRadius: 5,
-          borderBottomRightRadius: 5
+          borderTopRightRadius: 0
         }}
       >
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Organization
-          </p>
-          <p className="text-sm font-semibold text-slate-900">
-            {organization?.name ?? "Unknown Organization"}
-          </p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="w-full md:basis-2/3">
+            <GlobalSearch />
+          </div>
+          <div className="w-full text-left md:basis-1/3 md:text-right">
+            <p className="text-sm font-semibold text-slate-900">
+              {organization?.name ?? "Unknown Organization"}
+            </p>
+            <div className="mt-1 flex items-center gap-1 text-sm md:justify-end">
+              <span className="text-slate-500">Signed in as</span>
+              <span className="font-medium text-slate-900">{displayIdentity}</span>
+            </div>
+          </div>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-slate-500">Signed in as</p>
-          <p className="text-sm font-medium text-slate-900">{displayIdentity}</p>
-        </div>
-      </div>
-      <div
-        className="mt-[10px] rounded-[10px] border border-slate-200 bg-white px-5 py-3 shadow-sm"
-      >
-        <GlobalSearch />
       </div>
     </header>
   );

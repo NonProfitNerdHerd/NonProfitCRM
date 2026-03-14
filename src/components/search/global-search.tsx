@@ -75,7 +75,7 @@ export function GlobalSearch() {
   const total = useMemo(() => (payload ? entityCount(payload.results) : 0), [payload]);
 
   return (
-    <div className="relative w-full max-w-xl">
+    <div className="relative w-full">
       <Input
         value={query}
         onFocus={() => {
@@ -89,7 +89,7 @@ export function GlobalSearch() {
             setOpen(false);
           }
         }}
-        placeholder="Search contacts, donations, campaigns, tasks, notes, organizations, projects, memberships..."
+        placeholder="search"
       />
       {query ? (
         <button
