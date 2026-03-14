@@ -7,6 +7,23 @@ type TrendPoint = {
   total: number;
 };
 
+type DistributionPoint = {
+  label: string;
+  amount: number;
+  percentage: number;
+};
+
+type CampaignDistributionRow = {
+  campaign_id: string;
+  campaign_name: string;
+  total: number | string;
+};
+
+type PaymentDistributionRow = {
+  payment_type: string;
+  total: number | string;
+};
+
 type LatestActivityRow = {
   related_contact_id: string | null;
   action_type: string;
@@ -202,26 +219,87 @@ export async function getFinancialAnalytics(range: AnalyticsRangeKey) {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
 
-  const [{ data: trend, error: trendError }, { data: transactions, error: transactionsError }] =
-    await Promise.all([
-      supabase.rpc("donation_trend_series", {
-        org_id: context.organizationId,
-        range_key: range
-      }),
-      supabase
-        .from("donations")
-        .select(
-          "id, donation_date, amount, payment_type, contact_id, campaign_id, contacts(first_name,last_name), campaigns(name)"
-        )
-        .eq("organization_id", context.organizationId)
-        .order("donation_date", { ascending: false })
-        .limit(30)
-    ]);
+  const [
+    { data: trend, error: trendError },
+    { data: transactions, error: transactionsError },
+    { data: campaignDistributionRaw, error: campaignDistributionError },
+    { data: paymentTypeDistributionRaw, error: paymentTypeDistributionError }
+  ] = await Promise.all([
+    supabase.rpc("donation_trend_series", {
+      org_id: context.organizationId,
+      range_key: range
+    }),
+    supabase
+      .from("donations")
+      .select(
+        "id, donation_date, amount, payment_type, contact_id, campaign_id, contacts(first_name,last_name), campaigns(name)"
+      )
+      .eq("organization_id", context.organizationId)
+      .order("donation_date", { ascending: false })
+      .limit(30),
+    supabase.rpc("campaign_fund_distribution", {
+      org_id: context.organizationId,
+      range_key: range
+    }),
+    supabase.rpc("payment_type_distribution", {
+      org_id: context.organizationId,
+      range_key: range
+    })
+  ]);
 
   if (trendError) throw trendError;
   if (transactionsError) throw transactionsError;
+  if (campaignDistributionError) throw campaignDistributionError;
+  if (paymentTypeDistributionError) throw paymentTypeDistributionError;
 
   const mode = financialGranularity(range);
+  const campaignRows =
+    (campaignDistributionRaw as CampaignDistributionRow[] | null | undefined) ?? [];
+  const paymentRows =
+    (paymentTypeDistributionRaw as PaymentDistributionRow[] | null | undefined) ?? [];
+  const totalFunds = campaignRows.reduce((sum, row) => sum + Number(row.total ?? 0), 0);
+
+  const campaignDistribution: DistributionPoint[] = campaignRows.map((row) => ({
+    label: row.campaign_name || "Unassigned Campaign",
+    amount: Number(row.total ?? 0),
+    percentage: totalFunds > 0 ? (Number(row.total ?? 0) / totalFunds) * 100 : 0
+  }));
+
+  const normalizedPaymentMap = new Map<string, number>([
+    ["Cash", 0],
+    ["Credit", 0],
+    ["Check", 0]
+  ]);
+  for (const row of paymentRows) {
+    const key = String(row.payment_type ?? "").toLowerCase();
+    const normalized =
+      key === "card" || key === "credit" || key === "credit_card"
+        ? "Credit"
+        : key === "check"
+          ? "Check"
+          : key === "cash"
+            ? "Cash"
+            : key
+              ? key.charAt(0).toUpperCase() + key.slice(1)
+              : "Unknown";
+    normalizedPaymentMap.set(
+      normalized,
+      (normalizedPaymentMap.get(normalized) ?? 0) + Number(row.total ?? 0)
+    );
+  }
+  const paymentTotal = Array.from(normalizedPaymentMap.values()).reduce(
+    (sum, value) => sum + value,
+    0
+  );
+  const transactionTypeDistribution: DistributionPoint[] = Array.from(
+    normalizedPaymentMap.entries()
+  )
+    .map(([label, amount]) => ({
+      label,
+      amount,
+      percentage: paymentTotal > 0 ? (amount / paymentTotal) * 100 : 0
+    }))
+    .filter((entry) => entry.amount > 0 || ["Cash", "Credit", "Check"].includes(entry.label));
 
   return {
     range,
@@ -232,6 +310,9 @@ export async function getFinancialAnalytics(range: AnalyticsRangeKey) {
         label: formatShortDate(row.bucket_start, mode),
         y: Number(row.total)
       })) ?? [],
+    campaignDistribution,
+    transactionTypeDistribution,
+    totalDonations: totalFunds,
     recentTransactions: transactions ?? []
   };
 }

@@ -4,12 +4,16 @@ import Link from "next/link";
 import { useState } from "react";
 import { ANALYTICS_RANGES, type AnalyticsRangeKey } from "@/lib/analytics/config";
 import { LineChart } from "@/components/analytics/line-chart";
+import { PieChart } from "@/components/analytics/pie-chart";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 type FinancialAnalyticsPayload = {
   range: AnalyticsRangeKey;
   granularity: "day" | "week" | "month" | "year";
   trend: Array<{ x: string; label: string; y: number }>;
+  campaignDistribution: Array<{ label: string; amount: number; percentage: number }>;
+  transactionTypeDistribution: Array<{ label: string; amount: number; percentage: number }>;
+  totalDonations: number;
   recentTransactions: Array<Record<string, unknown>>;
 };
 
@@ -21,7 +25,23 @@ export function FinancialAnalyticsDashboard({
   const [payload, setPayload] = useState(initial);
   const [range, setRange] = useState<AnalyticsRangeKey>(initial.range);
   const [loading, setLoading] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expandedReport, setExpandedReport] = useState<"trend" | "funds" | "types" | null>(null);
+
+  const campaignPalette = ["#2563EB", "#7C3AED", "#0891B2", "#16A34A", "#D97706", "#DC2626", "#4F46E5"];
+  const paymentPalette: Record<string, string> = {
+    Cash: "#16A34A",
+    Credit: "#2563EB",
+    Check: "#D97706"
+  };
+  const trendTotal = payload.trend.reduce((sum, point) => sum + Number(point.y ?? 0), 0);
+  const campaignSlices = payload.campaignDistribution.map((row, idx) => ({
+    ...row,
+    color: campaignPalette[idx % campaignPalette.length]
+  }));
+  const paymentSlices = payload.transactionTypeDistribution.map((row, idx) => ({
+    ...row,
+    color: paymentPalette[row.label] ?? campaignPalette[idx % campaignPalette.length]
+  }));
 
   async function onRangeChange(nextRange: AnalyticsRangeKey) {
     setRange(nextRange);
@@ -55,47 +75,91 @@ export function FinancialAnalyticsDashboard({
 
       {loading ? <p className="text-sm text-slate-500">Updating financial trend...</p> : null}
 
-      <LineChart
-        title="Donations Trend"
-        yAxisLabel="Donation Total"
-        xAxisLabel="Time"
-        size="mini"
-        onExpand={() => setExpanded(true)}
-        series={[
-          {
-            name: "Donations",
-            color: "#16A34A",
-            points: payload.trend.map((point) => ({ label: point.label, y: point.y }))
-          }
-        ]}
-      />
+      <div className="grid gap-4 xl:grid-cols-10">
+        <div className="xl:col-span-4">
+          <LineChart
+            title={`Donations Trend (${formatCurrency(trendTotal)})`}
+            yAxisLabel="Donation Total"
+            xAxisLabel="Time"
+            size="compact"
+            onExpand={() => setExpandedReport("trend")}
+            series={[
+              {
+                name: "Donations",
+                color: "#16A34A",
+                points: payload.trend.map((point) => ({ label: point.label, y: point.y }))
+              }
+            ]}
+          />
+        </div>
+        <div className="xl:col-span-3">
+          <PieChart
+            title="Fund Distribution"
+            slices={campaignSlices}
+            size="compact"
+            onExpand={() => setExpandedReport("funds")}
+            valueFormatter={(value) => formatCurrency(value)}
+          />
+        </div>
+        <div className="xl:col-span-3">
+          <PieChart
+            title="Transaction Type Distribution"
+            slices={paymentSlices}
+            size="compact"
+            onExpand={() => setExpandedReport("types")}
+            valueFormatter={(value) => formatCurrency(value)}
+          />
+        </div>
+      </div>
 
-      {expanded ? (
+      {expandedReport ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-[96vw] max-w-[1400px] rounded-xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
-              <h4 className="text-base font-semibold text-slate-900">Donations Trend (Expanded)</h4>
+              <h4 className="text-base font-semibold text-slate-900">
+                {expandedReport === "trend"
+                  ? "Donations Trend (Expanded)"
+                  : expandedReport === "funds"
+                    ? "Fund Distribution (Expanded)"
+                    : "Transaction Type Distribution (Expanded)"}
+              </h4>
               <button
                 type="button"
                 className="rounded-md border border-slate-200 px-2 py-1 text-xs"
-                onClick={() => setExpanded(false)}
+                onClick={() => setExpandedReport(null)}
               >
                 Close
               </button>
             </div>
-            <LineChart
-              title="Donations Trend"
-              yAxisLabel="Donation Total"
-              xAxisLabel="Time"
-              size="expanded"
-              series={[
-                {
-                  name: "Donations",
-                  color: "#16A34A",
-                  points: payload.trend.map((point) => ({ label: point.label, y: point.y }))
-                }
-              ]}
-            />
+            {expandedReport === "trend" ? (
+              <LineChart
+                title={`Donations Trend (${formatCurrency(trendTotal)})`}
+                yAxisLabel="Donation Total"
+                xAxisLabel="Time"
+                size="expanded"
+                series={[
+                  {
+                    name: "Donations",
+                    color: "#16A34A",
+                    points: payload.trend.map((point) => ({ label: point.label, y: point.y }))
+                  }
+                ]}
+              />
+            ) : expandedReport === "funds" ? (
+              <PieChart
+                title={`Fund Distribution (${formatCurrency(payload.totalDonations)})`}
+                slices={campaignSlices}
+                size="expanded"
+                valueFormatter={(value) => formatCurrency(value)}
+              />
+            ) : (
+              <PieChart
+                title={`Transaction Type Distribution (${formatCurrency(payload.totalDonations)})`}
+                slices={paymentSlices}
+                size="expanded"
+                valueFormatter={(value) => formatCurrency(value)}
+              />
+            )}
           </div>
         </div>
       ) : null}
