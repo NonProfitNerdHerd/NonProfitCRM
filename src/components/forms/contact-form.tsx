@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,6 +10,12 @@ import { Button } from "@/components/ui/button";
 
 const donorStatusOptions = ["prospect", "active", "lapsed", "inactive"] as const;
 const memberStatusOptions = ["none", "active", "lapsed", "cancelled"] as const;
+const communicationPreferenceOptions = [
+  "Marketing Email",
+  "Other Mail",
+  "Phone Calls",
+  "Newsletter"
+] as const;
 
 export function ContactForm() {
   const router = useRouter();
@@ -17,14 +23,22 @@ export function ContactForm() {
   const {
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isSubmitting }
   } = useForm<ContactInput>({
     resolver: zodResolver(contactSchema),
     defaultValues: {
       donor_status: "prospect",
-      member_status: "none"
+      member_status: "none",
+      communication_preferences: []
     }
   });
+  const communicationPreferences = watch("communication_preferences") ?? [];
+
+  useEffect(() => {
+    register("communication_preferences");
+  }, [register]);
 
   async function onSubmit(values: ContactInput) {
     setSubmitError(null);
@@ -62,6 +76,10 @@ export function ContactForm() {
             <p className="mt-1 text-xs text-red-700">{errors.last_name.message}</p>
           ) : null}
         </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm font-medium">Formal Letter Name</label>
+          <Input {...register("formal_letter_name")} placeholder="e.g. Mr. and Mrs. Jordan Smith" />
+        </div>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <div>
@@ -82,6 +100,18 @@ export function ContactForm() {
         <div>
           <label className="mb-1 block text-sm font-medium">Alternate Phone</label>
           <Input {...register("alternate_phone")} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Mobile Number</label>
+          <Input {...register("mobile_number")} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Emergency Contact</label>
+          <Input {...register("emergency_contact")} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Emergency Contact Phone Number</label>
+          <Input {...register("emergency_contact_phone")} />
         </div>
       </div>
 
@@ -162,6 +192,29 @@ export function ContactForm() {
               </option>
             ))}
           </select>
+        </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm font-medium">Preferences - Communication</label>
+          <div className="grid gap-2 rounded-md border border-slate-200 p-3 md:grid-cols-2">
+            {communicationPreferenceOptions.map((option) => {
+              const checked = communicationPreferences.includes(option);
+              return (
+                <label key={option} className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const next = event.target.checked
+                        ? [...communicationPreferences, option]
+                        : communicationPreferences.filter((entry) => entry !== option);
+                      setValue("communication_preferences", next, { shouldValidate: true });
+                    }}
+                  />
+                  {option}
+                </label>
+              );
+            })}
+          </div>
         </div>
       </div>
 

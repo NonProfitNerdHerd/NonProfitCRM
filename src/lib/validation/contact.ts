@@ -4,10 +4,17 @@ export const contactSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
   last_name: z.string().min(1, "Last name is required"),
   preferred_name: z.string().optional(),
+  formal_letter_name: z.string().optional(),
   email: z.string().email().optional().or(z.literal("")),
   alternate_email: z.string().email().optional().or(z.literal("")),
   phone: z.string().optional(),
+  mobile_number: z.string().optional(),
   alternate_phone: z.string().optional(),
+  emergency_contact: z.string().optional(),
+  emergency_contact_phone: z.string().optional(),
+  communication_preferences: z
+    .array(z.enum(["Marketing Email", "Other Mail", "Phone Calls", "Newsletter"]))
+    .default([]),
   address_line_1: z.string().optional(),
   address_line_2: z.string().optional(),
   city: z.string().optional(),
@@ -23,4 +30,4 @@ export const contactSchema = z.object({
   member_status: z.enum(["none", "active", "lapsed", "cancelled"])
 });
 
-export type ContactInput = z.infer<typeof contactSchema>;
+export type ContactInput = z.input<typeof contactSchema>;

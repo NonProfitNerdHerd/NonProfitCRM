@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { Card, CardHeader } from "@/components/ui/card";
 import { getContactProfileData } from "@/lib/data/contact-profile";
-import { formatDate } from "@/lib/utils";
 import { ContactProfileTabs } from "@/components/contacts/contact-profile-tabs";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaffPermission } from "@/lib/auth/guards";
@@ -66,26 +65,6 @@ export default async function ContactDetailPage({ params }: PageProps) {
                 )
               )}
             </div>
-          </div>
-          <div>
-            <p className="text-slate-500">Organizations</p>
-            <p>
-              {profile.organizations.length === 0
-                ? "-"
-                : profile.organizations
-                    .map((entry) => {
-                      const org = Array.isArray(entry.crm_organizations)
-                        ? entry.crm_organizations[0]
-                        : entry.crm_organizations;
-                      return (org?.name as string) ?? "";
-                    })
-                    .filter(Boolean)
-                    .join(", ")}
-            </p>
-          </div>
-          <div>
-            <p className="text-slate-500">Created</p>
-            <p>{formatDate(contact.created_at)}</p>
           </div>
         </div>
       </Card>

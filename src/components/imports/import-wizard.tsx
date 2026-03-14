@@ -29,7 +29,7 @@ const steps: Array<{ key: StepKey; label: string }> = [
   { key: "upload", label: "Step 2 Upload File" },
   { key: "mapping", label: "Step 3 Review Headers and Map Fields" },
   { key: "relationships", label: "Step 4 Define Keys and Relationships" },
-  { key: "validate", label: "Step 5 Validate and Review Duplicates" },
+  { key: "validate", label: "Step 5 Validate Data" },
   { key: "commit", label: "Step 6 Import Options and Commit" },
   { key: "results", label: "Step 7 Results, Audit, and Rollback" }
 ];
@@ -73,6 +73,7 @@ export function ImportWizard() {
   const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
   const [mappings, setMappings] = useState<MappingEntry[]>([]);
+  const [mappingPreviewIndex, setMappingPreviewIndex] = useState(0);
 
   const [relationshipSettings, setRelationshipSettings] = useState<
     Array<
@@ -157,6 +158,7 @@ export function ImportWizard() {
     setValidationRows([]);
     setCommitSummary(null);
     setResultRows([]);
+    setMappingPreviewIndex(0);
     setFileName(file.name);
     const lower = file.name.toLowerCase();
     const detectedType = lower.endsWith(".csv") ? "csv" : lower.endsWith(".xls") ? "xls" : "xlsx";
@@ -199,6 +201,7 @@ export function ImportWizard() {
     setPreviewRows(parsed.rows.slice(0, 5));
     setHeaders(nextHeaders);
     autoMap(nextHeaders, parsed.rows);
+    setMappingPreviewIndex(0);
   }
 
   async function ensureStagedBatch() {
@@ -250,30 +253,12 @@ export function ImportWizard() {
       setValidationSummary((payload.summary ?? {}) as Record<string, number>);
       setValidationRows((payload.rows ?? []) as Array<Record<string, unknown>>);
       setStep("validate");
-      setMessage("Validation completed. Review duplicates and unresolved rows before commit.");
+      setMessage("Validation completed. Review rows with errors or unresolved relationships.");
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Validation failed.");
     } finally {
       setLoading(false);
     }
-  }
-
-  async function applyDuplicateDecision(
-    stagingRowId: string,
-    decision: "create_new" | "update_existing" | "merge" | "skip" | "hold"
-  ) {
-    if (!jobId) return;
-    const response = await fetch("/api/imports/wizard/duplicate-decision", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jobId, stagingRowId, decision })
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      setError(payload?.message ?? "Unable to apply duplicate decision.");
-      return;
-    }
-    await runValidation();
   }
 
   async function commitBatch() {
@@ -442,6 +427,37 @@ export function ImportWizard() {
 
       {step === "mapping" ? (
         <section className="space-y-3 rounded-md border border-slate-200 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Record Preview Navigator</p>
+              <p className="text-xs text-slate-600">
+                Move between records to validate mapping against real source values.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setMappingPreviewIndex((prev) => Math.max(prev - 1, 0))}
+                disabled={mappingPreviewIndex === 0}
+              >
+                Previous
+              </Button>
+              <span className="text-xs text-slate-700">
+                Record {rows.length === 0 ? 0 : mappingPreviewIndex + 1} of {rows.length}
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  setMappingPreviewIndex((prev) => Math.min(prev + 1, Math.max(rows.length - 1, 0)))
+                }
+                disabled={rows.length === 0 || mappingPreviewIndex >= rows.length - 1}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
@@ -459,7 +475,9 @@ export function ImportWizard() {
                 {mappings.map((mapping, index) => (
                   <tr key={mapping.sourceHeader} className="border-b border-slate-100">
                     <td className="py-2">{mapping.sourceHeader}</td>
-                    <td className="py-2 text-slate-600">{mapping.sampleValue || "-"}</td>
+                    <td className="py-2 text-slate-600">
+                      {String((rows[mappingPreviewIndex] ?? {})[mapping.sourceHeader] ?? "-")}
+                    </td>
                     <td className="py-2">
                       <select
                         className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -605,17 +623,16 @@ export function ImportWizard() {
             <p className="text-sm text-slate-600">This import type has no relationship-key rules.</p>
           ) : null}
           <Button type="button" onClick={() => void runValidation()} disabled={loading}>
-            {loading ? "Validating..." : "Validate and Review Duplicates"}
+            {loading ? "Validating..." : "Validate Import Data"}
           </Button>
         </section>
       ) : null}
 
       {step === "validate" ? (
         <section className="space-y-3 rounded-md border border-slate-200 p-4">
-          <div className="grid gap-2 md:grid-cols-4">
+          <div className="grid gap-2 md:grid-cols-3">
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">Valid: {validationSummary?.valid ?? 0}</p>
             <p className="rounded-md bg-red-50 px-3 py-2 text-sm">Errors: {validationSummary?.errors ?? 0}</p>
-            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm">Duplicates: {validationSummary?.duplicates ?? 0}</p>
             <p className="rounded-md bg-orange-50 px-3 py-2 text-sm">Unresolved Relationships: {validationSummary?.unresolvedRelationships ?? 0}</p>
           </div>
           <div className="overflow-x-auto">
@@ -625,34 +642,20 @@ export function ImportWizard() {
                   <th className="py-2">Row</th>
                   <th className="py-2">Status</th>
                   <th className="py-2">Errors</th>
-                  <th className="py-2">Duplicate Candidates</th>
-                  <th className="py-2">Duplicate Decision</th>
+                  <th className="py-2">Relationship Resolution</th>
                 </tr>
               </thead>
               <tbody>
                 {validationRows.map((row) => {
                   const status = String(row.row_status ?? "-");
                   const errors = Array.isArray(row.validation_errors) ? row.validation_errors : [];
-                  const duplicateCandidates = Array.isArray(row.duplicate_candidates) ? row.duplicate_candidates : [];
+                  const relationshipResolution = row.relationship_resolution ?? {};
                   return (
                     <tr key={String(row.id)} className="border-b border-slate-100">
                       <td className="py-2">{String(row.row_index ?? "-")}</td>
                       <td className="py-2">{status}</td>
                       <td className="py-2 text-xs text-red-700">{errors.length > 0 ? JSON.stringify(errors) : "-"}</td>
-                      <td className="py-2 text-xs">{duplicateCandidates.length > 0 ? JSON.stringify(duplicateCandidates) : "-"}</td>
-                      <td className="py-2">
-                        {status === "duplicate" ? (
-                          <div className="flex flex-wrap gap-1">
-                            {(["create_new", "update_existing", "merge", "skip", "hold"] as const).map((decision) => (
-                              <Button key={decision} type="button" variant="secondary" onClick={() => void applyDuplicateDecision(String(row.id), decision)}>
-                                {decision}
-                              </Button>
-                            ))}
-                          </div>
-                        ) : (
-                          String(row.duplicate_decision ?? "-")
-                        )}
-                      </td>
+                      <td className="py-2 text-xs">{JSON.stringify(relationshipResolution)}</td>
                     </tr>
                   );
                 })}

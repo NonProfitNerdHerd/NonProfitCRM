@@ -31,6 +31,18 @@ type WorkbenchItem = {
   metadata: Array<{ label: string; value: string }>;
 };
 
+function parseCommunicationPreferences(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry)).filter(Boolean);
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([, isEnabled]) => Boolean(isEnabled))
+      .map(([label]) => label);
+  }
+  return [] as string[];
+}
+
 export function ContactProfileTabs({
   contactId,
   contactDetails,
@@ -58,13 +70,18 @@ export function ContactProfileTabs({
     firstName: String(contactDetails.first_name ?? ""),
     lastName: String(contactDetails.last_name ?? ""),
     preferredName: String(contactDetails.preferred_name ?? ""),
+    formalLetterName: String(contactDetails.formal_letter_name ?? ""),
     organizationName: String(contactDetails.organization_name ?? ""),
     donorStatus: String(contactDetails.donor_status ?? "prospect"),
     memberStatus: String(contactDetails.member_status ?? "none"),
     email: String(contactDetails.email ?? ""),
     alternateEmail: String(contactDetails.alternate_email ?? ""),
     phone: String(contactDetails.phone ?? ""),
+    mobileNumber: String(contactDetails.mobile_number ?? ""),
     alternatePhone: String(contactDetails.alternate_phone ?? ""),
+    emergencyContact: String(contactDetails.emergency_contact ?? ""),
+    emergencyContactPhone: String(contactDetails.emergency_contact_phone ?? ""),
+    communicationPreferences: parseCommunicationPreferences(contactDetails.communication_preferences),
     addressLine1: String(contactDetails.address_line_1 ?? ""),
     addressLine2: String(contactDetails.address_line_2 ?? ""),
     city: String(contactDetails.city ?? ""),
@@ -188,13 +205,18 @@ export function ContactProfileTabs({
         first_name: contactInfoDraft.firstName,
         last_name: contactInfoDraft.lastName,
         preferred_name: contactInfoDraft.preferredName,
+        formal_letter_name: contactInfoDraft.formalLetterName,
         organization_name: contactInfoDraft.organizationName,
         donor_status: contactInfoDraft.donorStatus,
         member_status: contactInfoDraft.memberStatus,
         email: contactInfoDraft.email,
         alternate_email: contactInfoDraft.alternateEmail,
         phone: contactInfoDraft.phone,
+        mobile_number: contactInfoDraft.mobileNumber,
         alternate_phone: contactInfoDraft.alternatePhone,
+        emergency_contact: contactInfoDraft.emergencyContact,
+        emergency_contact_phone: contactInfoDraft.emergencyContactPhone,
+        communication_preferences: contactInfoDraft.communicationPreferences,
         address_line_1: contactInfoDraft.addressLine1,
         address_line_2: contactInfoDraft.addressLine2,
         city: contactInfoDraft.city,
@@ -329,9 +351,24 @@ export function ContactProfileTabs({
             <LabeledValue label="Mailing State" value={contactInfo.mailingState} />
             <LabeledValue label="Mailing Zip" value={contactInfo.mailingPostalCode} />
             <LabeledValue label="Phone Number" value={contactInfo.phone} />
+            <LabeledValue label="Mobile Number" value={contactInfo.mobileNumber} />
             <LabeledValue label="Alternate Phone Number" value={contactInfo.alternatePhone} />
+            <LabeledValue label="Emergency Contact" value={contactInfo.emergencyContact} />
+            <LabeledValue
+              label="Emergency Contact Phone Number"
+              value={contactInfo.emergencyContactPhone}
+            />
             <LabeledValue label="Email" value={contactInfo.email} />
             <LabeledValue label="Alternate Email" value={contactInfo.alternateEmail} />
+            <LabeledValue label="Formal Letter Name" value={contactInfo.formalLetterName} />
+            <LabeledValue
+              label="Preferences - Communication"
+              value={
+                contactInfo.communicationPreferences.length > 0
+                  ? contactInfo.communicationPreferences.join(", ")
+                  : ""
+              }
+            />
           </div>
         </div>
       ) : null}
@@ -571,6 +608,17 @@ export function ContactProfileTabs({
                       }
                     />
                   </FormField>
+                  <FormField label="Formal Letter Name">
+                    <Input
+                      value={contactInfoDraft.formalLetterName}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          formalLetterName: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
                   <FormField label="Organization Name">
                     <Input
                       value={contactInfoDraft.organizationName}
@@ -607,6 +655,17 @@ export function ContactProfileTabs({
                       }
                     />
                   </FormField>
+                  <FormField label="Mobile Number">
+                    <Input
+                      value={contactInfoDraft.mobileNumber}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          mobileNumber: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
                   <FormField label="Email">
                     <Input
                       type="email"
@@ -628,6 +687,63 @@ export function ContactProfileTabs({
                       }
                     />
                   </FormField>
+                  <FormField label="Emergency Contact">
+                    <Input
+                      value={contactInfoDraft.emergencyContact}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          emergencyContact: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Emergency Contact Phone Number">
+                    <Input
+                      value={contactInfoDraft.emergencyContactPhone}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          emergencyContactPhone: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+              </section>
+
+              <section className="rounded-md border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-900">
+                  Preferences - Communication
+                </p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {["Marketing Email", "Other Mail", "Phone Calls", "Newsletter"].map(
+                    (option) => {
+                      const checked = contactInfoDraft.communicationPreferences.includes(option);
+                      return (
+                        <label
+                          key={option}
+                          className="flex items-center gap-2 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) =>
+                              setContactInfoDraft((prev) => ({
+                                ...prev,
+                                communicationPreferences: event.target.checked
+                                  ? Array.from(new Set([...prev.communicationPreferences, option]))
+                                  : prev.communicationPreferences.filter(
+                                      (entry) => entry !== option
+                                    )
+                              }))
+                            }
+                          />
+                          {option}
+                        </label>
+                      );
+                    }
+                  )}
                 </div>
               </section>
 

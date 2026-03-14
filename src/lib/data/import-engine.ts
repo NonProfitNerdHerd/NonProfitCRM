@@ -70,6 +70,16 @@ function parseNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function parseCommunicationPreferences(value: unknown) {
+  const allowed = new Set(["Marketing Email", "Other Mail", "Phone Calls", "Newsletter"]);
+  const raw = text(value);
+  if (!raw) return [];
+  return raw
+    .split(/[;,|]/)
+    .map((entry) => entry.trim())
+    .filter((entry) => allowed.has(entry));
+}
+
 function normalizeMappedRow(entityType: ImportEntityType, mappedRow: Record<string, unknown>) {
   const config = IMPORT_ENTITY_CONFIG[entityType];
   const normalized: Record<string, unknown> = {};
@@ -174,13 +184,6 @@ async function resolveRelationship(
   return { type: "resolved" as const, id: data[0].id as string };
 }
 
-function duplicateKeyForRow(normalizedRow: Record<string, unknown>, matchBy: string[]) {
-  const parts = matchBy
-    .map((field) => `${field}:${text(normalizedRow[field]).toLowerCase()}`)
-    .filter((part) => !part.endsWith(":"));
-  return parts.join("|");
-}
-
 async function findExistingByMatch(params: {
   entityType: ImportEntityType;
   organizationId: string;
@@ -243,7 +246,7 @@ export async function stageImportBatch(input: {
         relationship_settings: input.relationshipSettings ?? [],
         match_by: input.matchBy ?? IMPORT_ENTITY_CONFIG[input.entityType].defaultMatchBy
       },
-      duplicate_strategy: "review",
+      duplicate_strategy: "none",
       total_rows: input.rows.length,
       created_by: context.userId
     })
@@ -302,11 +305,8 @@ export async function validateImportBatch(input: {
 
   const entityType = toEntityType(text(job.target_domain));
   const config = IMPORT_ENTITY_CONFIG[entityType];
-  const matchBy =
-    input.matchBy && input.matchBy.length > 0
-      ? input.matchBy
-      : ((job.source_metadata as Record<string, unknown>)?.match_by as string[]) ??
-        config.defaultMatchBy;
+  void config;
+  void input.matchBy;
 
   const { data: rows, error: rowsError } = await supabase
     .from("import_staging_rows")
@@ -316,20 +316,9 @@ export async function validateImportBatch(input: {
     .order("row_index", { ascending: true });
   if (rowsError) throw rowsError;
 
-  const batchKeyCount = new Map<string, number>();
-  for (const row of rows ?? []) {
-    const key = duplicateKeyForRow(
-      (row.normalized_row as Record<string, unknown>) ?? {},
-      matchBy
-    );
-    if (!key) continue;
-    batchKeyCount.set(key, (batchKeyCount.get(key) ?? 0) + 1);
-  }
-
   const summary = {
     valid: 0,
     errors: 0,
-    duplicates: 0,
     unresolvedRelationships: 0
   };
 
@@ -359,33 +348,12 @@ export async function validateImportBatch(input: {
       }
     }
 
-    const key = duplicateKeyForRow(normalizedRow, matchBy);
-    const duplicateCandidates: Array<Record<string, unknown>> =
-      key && (batchKeyCount.get(key) ?? 0) > 1 ? [{ type: "batch", key }] : [];
-    const existingMatches = await findExistingByMatch({
-      entityType,
-      organizationId: context.organizationId,
-      sourcePlatform: text(job.source_platform),
-      normalizedRow,
-      matchBy
-    });
-    for (const existingMatch of existingMatches) {
-      duplicateCandidates.push({
-        type: "crm",
-        id: existingMatch.id,
-        matchField: existingMatch.matchField,
-        reason: `Match on ${existingMatch.matchField}`
-      });
-    }
-
     let rowStatus = "valid";
     if (validationErrors.length > 0) rowStatus = "error";
     else if (unresolved.length > 0) rowStatus = "unresolved_relationship";
-    else if (duplicateCandidates.length > 0) rowStatus = "duplicate";
 
     if (rowStatus === "valid") summary.valid += 1;
     if (rowStatus === "error") summary.errors += 1;
-    if (rowStatus === "duplicate") summary.duplicates += 1;
     if (rowStatus === "unresolved_relationship") summary.unresolvedRelationships += 1;
 
     const { error: rowUpdateError } = await supabase
@@ -393,7 +361,8 @@ export async function validateImportBatch(input: {
       .update({
         validation_errors: validationErrors,
         relationship_resolution: relationshipResolution,
-        duplicate_candidates: duplicateCandidates,
+        duplicate_candidates: [],
+        duplicate_decision: "pending",
         row_status: rowStatus
       })
       .eq("organization_id", context.organizationId)
@@ -405,7 +374,7 @@ export async function validateImportBatch(input: {
     .from("import_jobs")
     .update({
       status: "validated",
-      processed_rows: summary.valid + summary.errors + summary.duplicates + summary.unresolvedRelationships,
+      processed_rows: summary.valid + summary.errors + summary.unresolvedRelationships,
       successful_rows: summary.valid,
       failed_rows: summary.errors + summary.unresolvedRelationships,
       error_summary:
@@ -419,7 +388,7 @@ export async function validateImportBatch(input: {
   const { data: updatedRows } = await supabase
     .from("import_staging_rows")
     .select(
-      "id, row_index, row_status, validation_errors, duplicate_candidates, relationship_resolution, duplicate_decision"
+      "id, row_index, row_status, validation_errors, relationship_resolution"
     )
     .eq("organization_id", context.organizationId)
     .eq("import_job_id", job.id)
@@ -538,7 +507,10 @@ async function prepareEntityPayload(input: {
         email: text(normalized.email) || null,
         alternate_email: text(normalized.alternate_email) || null,
         phone: text(normalized.phone) || null,
+        mobile_number: text(normalized.mobile_number) || null,
         alternate_phone: text(normalized.alternate_phone) || null,
+        emergency_contact: text(normalized.emergency_contact) || null,
+        emergency_contact_phone: text(normalized.emergency_contact_phone) || null,
         address_line_1: text(normalized.address_line_1) || null,
         address_line_2: text(normalized.address_line_2) || null,
         city: text(normalized.city) || null,
@@ -549,6 +521,10 @@ async function prepareEntityPayload(input: {
         mailing_city: text(normalized.mailing_city) || null,
         mailing_state: text(normalized.mailing_state) || null,
         mailing_postal_code: text(normalized.mailing_postal_code) || null,
+        formal_letter_name: text(normalized.formal_letter_name) || null,
+        communication_preferences: parseCommunicationPreferences(
+          normalized.communication_preferences
+        ),
         donor_status: text(normalized.donor_status) || "prospect",
         member_status: text(normalized.member_status) || "none",
         organization_name: text(normalized.organization_name) || null,
@@ -739,7 +715,7 @@ export async function commitImportBatch(input: {
   const { data: rows, error: rowsError } = await supabase
     .from("import_staging_rows")
     .select(
-      "id, row_index, row_status, normalized_row, relationship_resolution, duplicate_candidates, duplicate_decision"
+      "id, row_index, row_status, normalized_row, relationship_resolution"
     )
     .eq("organization_id", context.organizationId)
     .eq("import_job_id", job.id)
@@ -752,17 +728,7 @@ export async function commitImportBatch(input: {
   let failed = 0;
 
   for (const row of rows ?? []) {
-    if (!["valid", "duplicate"].includes(text(row.row_status))) {
-      skipped += 1;
-      continue;
-    }
-
-    if (text(row.duplicate_decision) === "skip" || text(row.duplicate_decision) === "hold") {
-      await supabase
-        .from("import_staging_rows")
-        .update({ row_status: text(row.duplicate_decision) === "hold" ? "held" : "skipped" })
-        .eq("organization_id", context.organizationId)
-        .eq("id", row.id);
+    if (text(row.row_status) !== "valid") {
       skipped += 1;
       continue;
     }
