@@ -10,7 +10,6 @@ const createUserSchema = z.object({
   username: z.string().optional(),
   isActive: z.boolean().default(true),
   roleTemplateIds: z.array(z.string().uuid()).min(1),
-  password: z.string().optional()
 });
 
 export async function GET() {
@@ -36,8 +35,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const userId = await createAdminUser(parsed.data);
-    return NextResponse.json({ userId });
+    const result = await createAdminUser(parsed.data);
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Failed to create user" },

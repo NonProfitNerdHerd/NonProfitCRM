@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,7 +56,20 @@ export default function LoginPage() {
       if (signInError) {
         setError(signInError.message);
       } else {
-        router.replace("/staff/dashboard");
+        const {
+          data: { user }
+        } = await supabase.auth.getUser();
+        let mustChangePassword = false;
+        if (user) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("must_change_password")
+            .eq("id", user.id)
+            .maybeSingle();
+          mustChangePassword = Boolean(profile?.must_change_password);
+        }
+
+        router.replace(mustChangePassword ? "/change-password" : "/staff/dashboard");
         router.refresh();
       }
     } catch (authError) {
@@ -137,6 +151,11 @@ export default function LoginPage() {
           <Button className="w-full" type="submit" disabled={loading}>
             {loading ? "Signing in..." : "Sign in with password"}
           </Button>
+          <div className="text-right">
+            <Link href="/forgot-password" className="text-xs font-medium text-brand-700">
+              Forgot password?
+            </Link>
+          </div>
           <Button
             className="w-full"
             type="button"

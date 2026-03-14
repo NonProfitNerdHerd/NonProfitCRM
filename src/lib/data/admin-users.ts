@@ -22,8 +22,8 @@ export type AdminManagedUser = {
   roles: Array<{ id: string; key: string; name: string }>;
 };
 
-function randomPassword() {
-  return `Tmp!${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+function generateTemporaryPassword() {
+  return `Tmp!${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
 
 async function getAllowedRoles(organizationId: string) {
@@ -171,19 +171,23 @@ export async function createAdminUser(input: {
   username?: string;
   isActive: boolean;
   roleTemplateIds: string[];
-  password?: string;
 }) {
   const context = await requireStaffPermission("can_manage_users");
   const adminClient = createAdminClient();
   const roles = await getAllowedRoles(context.organizationId);
+  const email = input.email.trim();
+  if (!email) {
+    throw new Error("Email is required.");
+  }
   const validRoleIds = validateRoleIds(input.roleTemplateIds, roles);
   if (validRoleIds.length === 0) {
     throw new Error("At least one valid role is required.");
   }
+  const temporaryPassword = generateTemporaryPassword();
 
   const { data: createdUser, error: createError } = await adminClient.auth.admin.createUser({
-    email: input.email,
-    password: input.password || randomPassword(),
+    email,
+    password: temporaryPassword,
     email_confirm: true,
     user_metadata: {
       display_name: input.displayName || `${input.firstName} ${input.lastName}`.trim()
@@ -199,9 +203,10 @@ export async function createAdminUser(input: {
     first_name: input.firstName,
     last_name: input.lastName,
     display_name: input.displayName || `${input.firstName} ${input.lastName}`.trim(),
-    email: input.email,
+    email,
     username: input.username ?? null,
-    is_active: input.isActive
+    is_active: input.isActive,
+    must_change_password: true
   });
   if (profileError) throw profileError;
 
@@ -231,7 +236,7 @@ export async function createAdminUser(input: {
     if (additionalRolesError) throw additionalRolesError;
   }
 
-  return userId;
+  return { userId, temporaryPassword };
 }
 
 export async function updateAdminUser(input: {
@@ -298,4 +303,34 @@ export async function updateAdminUser(input: {
       );
     if (insertError) throw insertError;
   }
+}
+
+export async function resetAdminUserPassword(userId: string) {
+  const context = await requireStaffPermission("can_manage_users");
+  const adminClient = createAdminClient();
+  const temporaryPassword = generateTemporaryPassword();
+
+  const { data: membership, error: membershipError } = await adminClient
+    .from("organization_memberships")
+    .select("user_id")
+    .eq("organization_id", context.organizationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!membership) {
+    throw new Error("User is not a member of this organization.");
+  }
+
+  const { error: resetError } = await adminClient.auth.admin.updateUserById(userId, {
+    password: temporaryPassword
+  });
+  if (resetError) throw resetError;
+
+  const { error: profileError } = await adminClient
+    .from("profiles")
+    .update({ must_change_password: true, is_active: true })
+    .eq("id", userId);
+  if (profileError) throw profileError;
+
+  return { temporaryPassword };
 }

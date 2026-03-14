@@ -49,6 +49,7 @@ export function UsersManagement({
   const [creating, setCreating] = useState(false);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
@@ -162,6 +163,7 @@ export function UsersManagement({
     });
     setError(null);
     setMessage(null);
+    setCredentialMessage(null);
   }
 
   function closeCreateModal() {
@@ -187,6 +189,7 @@ export function UsersManagement({
     setCreating(true);
     setError(null);
     setMessage(null);
+    setCredentialMessage(null);
 
     const validationError = validateForm(createForm);
     if (validationError) {
@@ -217,6 +220,11 @@ export function UsersManagement({
     await refreshUsers();
     closeCreateModal();
     setMessage("User created successfully.");
+    if (payload?.temporaryPassword) {
+      setCredentialMessage(
+        `Temporary password for ${createForm.email.trim()}: ${String(payload.temporaryPassword)} (user must change this at first login).`
+      );
+    }
     setCreating(false);
   }
 
@@ -226,6 +234,7 @@ export function UsersManagement({
     setSavingUserId(editingUser.user_id);
     setError(null);
     setMessage(null);
+    setCredentialMessage(null);
 
     const validationError = validateForm(editForm, editingUser.user_id);
     if (validationError) {
@@ -273,6 +282,32 @@ export function UsersManagement({
     setSavingUserId(null);
   }
 
+  async function resetPasswordForUser() {
+    if (!editingUser) return;
+    setSavingUserId(editingUser.user_id);
+    setError(null);
+    setMessage(null);
+    setCredentialMessage(null);
+
+    const response = await fetch(`/api/admin/users/${editingUser.user_id}/reset-password`, {
+      method: "POST"
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      setError(payload?.message ?? "Failed to reset password.");
+      setSavingUserId(null);
+      return;
+    }
+
+    setCredentialMessage(
+      `Temporary password for ${editingUser.email || editingUser.user_id}: ${String(
+        payload?.temporaryPassword ?? ""
+      )} (user must change this at first login).`
+    );
+    setMessage("Password reset successfully.");
+    setSavingUserId(null);
+  }
+
   function toggleCreateRole(roleId: string) {
     setCreateForm((prev) => ({
       ...prev,
@@ -306,6 +341,11 @@ export function UsersManagement({
       </section>
 
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
+      {credentialMessage ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+          {credentialMessage}
+        </p>
+      ) : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
       <section className="grid gap-3 rounded-md border border-slate-200 p-4 md:grid-cols-4">
@@ -408,6 +448,7 @@ export function UsersManagement({
               <div className="grid gap-3 md:grid-cols-2">
                 <Input
                   placeholder="First Name"
+                  required
                   value={createForm.firstName}
                   onChange={(event) =>
                     setCreateForm((prev) => ({ ...prev, firstName: event.target.value }))
@@ -415,6 +456,7 @@ export function UsersManagement({
                 />
                 <Input
                   placeholder="Last Name"
+                  required
                   value={createForm.lastName}
                   onChange={(event) =>
                     setCreateForm((prev) => ({ ...prev, lastName: event.target.value }))
@@ -430,6 +472,7 @@ export function UsersManagement({
                 <Input
                   placeholder="Email"
                   type="email"
+                  required
                   value={createForm.email}
                   onChange={(event) =>
                     setCreateForm((prev) => ({ ...prev, email: event.target.value }))
@@ -499,6 +542,7 @@ export function UsersManagement({
               <div className="grid gap-3 md:grid-cols-2">
                 <Input
                   placeholder="First Name"
+                  required
                   value={editForm.firstName}
                   onChange={(event) =>
                     setEditForm((prev) => ({ ...prev, firstName: event.target.value }))
@@ -506,6 +550,7 @@ export function UsersManagement({
                 />
                 <Input
                   placeholder="Last Name"
+                  required
                   value={editForm.lastName}
                   onChange={(event) =>
                     setEditForm((prev) => ({ ...prev, lastName: event.target.value }))
@@ -521,6 +566,7 @@ export function UsersManagement({
                 <Input
                   placeholder="Email"
                   type="email"
+                  required
                   value={editForm.email}
                   onChange={(event) =>
                     setEditForm((prev) => ({ ...prev, email: event.target.value }))
@@ -577,6 +623,14 @@ export function UsersManagement({
               <div className="flex gap-2">
                 <Button type="submit" disabled={savingUserId === editingUser.user_id}>
                   {savingUserId === editingUser.user_id ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={savingUserId === editingUser.user_id}
+                  onClick={resetPasswordForUser}
+                >
+                  {savingUserId === editingUser.user_id ? "Working..." : "Reset Password"}
                 </Button>
                 <Button type="button" variant="secondary" onClick={closeEditModal}>
                   Cancel
