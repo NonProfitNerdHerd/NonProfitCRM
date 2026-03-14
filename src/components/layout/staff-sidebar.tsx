@@ -59,6 +59,12 @@ const menu: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/memberships")
   },
   {
+    id: "imports",
+    href: "/staff/imports",
+    label: "Imports",
+    matches: (pathname) => pathname.startsWith("/staff/imports")
+  },
+  {
     id: "reports",
     href: "/staff/reports",
     label: "Reports",

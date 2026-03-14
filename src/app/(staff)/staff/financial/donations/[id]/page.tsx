@@ -12,8 +12,12 @@ export default async function FinancialDonationDetailPage({ params }: PageProps)
   const { id } = await params;
   const donation = await getDonationById(id);
   if (!donation) notFound();
-  const donor = Array.isArray(donation.contacts) ? donation.contacts[0] : donation.contacts;
-  const campaign = Array.isArray(donation.campaigns) ? donation.campaigns[0] : donation.campaigns;
+  const donor = (
+    Array.isArray(donation.contacts) ? donation.contacts[0] : donation.contacts
+  ) as Record<string, unknown> | null;
+  const campaign = (
+    Array.isArray(donation.campaigns) ? donation.campaigns[0] : donation.campaigns
+  ) as Record<string, unknown> | null;
 
   return (
     <Card>
@@ -22,20 +26,20 @@ export default async function FinancialDonationDetailPage({ params }: PageProps)
         <div>
           <p className="text-slate-500">Donor</p>
           <p>
-            {donor?.first_name} {donor?.last_name}
+            {String(donor?.first_name ?? "")} {String(donor?.last_name ?? "")}
           </p>
         </div>
         <div>
           <p className="text-slate-500">Amount</p>
-          <p>{formatCurrency(donation.amount, donation.currency)}</p>
+          <p>{formatCurrency(Number(donation.amount ?? 0), (donation.currency as string) ?? undefined)}</p>
         </div>
         <div>
           <p className="text-slate-500">Date</p>
-          <p>{formatDate(donation.donation_date)}</p>
+          <p>{formatDate((donation.donation_date as string) ?? undefined)}</p>
         </div>
         <div>
           <p className="text-slate-500">Status</p>
-          <p>{donation.status}</p>
+          <p>{String(donation.status ?? "-")}</p>
         </div>
         <div>
           <p className="text-slate-500">Campaign</p>
@@ -64,11 +68,11 @@ export default async function FinancialDonationDetailPage({ params }: PageProps)
         </div>
         <div>
           <p className="text-slate-500">Source Platform</p>
-          <p>{donation.source_platform ?? "-"}</p>
+          <p>{String(donation.source_platform ?? "-")}</p>
         </div>
         <div>
           <p className="text-slate-500">External Transaction ID</p>
-          <p>{donation.external_transaction_id ?? "-"}</p>
+          <p>{String(donation.external_transaction_id ?? "-")}</p>
         </div>
         <div>
           <p className="text-slate-500">Created By</p>

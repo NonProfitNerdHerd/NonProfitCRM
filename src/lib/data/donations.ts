@@ -1,6 +1,41 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireStaffPermission, requirePortalIdentity } from "@/lib/auth/guards";
 
+export type DonationRecord = {
+  id: string;
+  amount: number;
+  currency: string | null;
+  donation_date: string | null;
+  status: string | null;
+  receipt_number?: string | null;
+  payment_type?: string | null;
+  check_number?: string | null;
+  transaction_id?: string | null;
+  external_transaction_id?: string | null;
+  source_platform?: string | null;
+  source?: string | null;
+  is_recurring?: boolean | null;
+  crm_organization_id?: string | null;
+  memo?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  campaign_id?: string | null;
+  contacts?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  campaigns?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  donation_allocations?: Array<Record<string, unknown>> | null;
+  [key: string]: unknown;
+};
+
+function isDonationOrgSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("crm_organization_id") || message.includes("crm_organizations");
+}
+
 export async function listDonationsForStaff(filters?: {
   campaignId?: string;
   paymentType?: string;
@@ -9,7 +44,7 @@ export async function listDonationsForStaff(filters?: {
   donorId?: string;
   contactId?: string;
   donorQuery?: string;
-}) {
+}): Promise<DonationRecord[]> {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
 
@@ -48,28 +83,40 @@ export async function listDonationsForStaff(filters?: {
     if (filteredDonorIds.length === 0) return [];
   }
 
-  let query = supabase
-    .from("donations")
-    .select(
-      "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, crm_organization_id, memo, created_by, created_at, campaign_id, campaigns(name,status), crm_organizations(id,name), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))"
-    )
-    .eq("organization_id", context.organizationId)
-    .order("donation_date", { ascending: false })
-    .limit(200);
+  async function runQuery(selectClause: string) {
+    let query = supabase
+      .from("donations")
+      .select(selectClause)
+      .eq("organization_id", context.organizationId)
+      .order("donation_date", { ascending: false })
+      .limit(200);
 
-  if (filteredDonationIds) query = query.in("id", filteredDonationIds);
-  if (filteredDonorIds) query = query.in("contact_id", filteredDonorIds);
-  if (filters?.paymentType) query = query.eq("payment_type", filters.paymentType);
-  if (filters?.dateFrom) query = query.gte("donation_date", filters.dateFrom);
-  if (filters?.dateTo) query = query.lte("donation_date", filters.dateTo);
+    if (filteredDonationIds) query = query.in("id", filteredDonationIds);
+    if (filteredDonorIds) query = query.in("contact_id", filteredDonorIds);
+    if (filters?.paymentType) query = query.eq("payment_type", filters.paymentType);
+    if (filters?.dateFrom) query = query.gte("donation_date", filters.dateFrom);
+    if (filters?.dateTo) query = query.lte("donation_date", filters.dateTo);
 
-  const { data, error } = await query;
+    return query;
+  }
+
+  const fullSelect =
+    "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, crm_organization_id, memo, created_by, created_at, campaign_id, campaigns(name,status), crm_organizations(id,name), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))";
+  const legacySelect =
+    "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, memo, created_by, created_at, campaign_id, campaigns(name,status), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))";
+
+  let { data, error } = await runQuery(fullSelect);
+  if (error && isDonationOrgSchemaError(error)) {
+    const fallbackResult = await runQuery(legacySelect);
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as unknown as DonationRecord[];
 }
 
-export async function listPortalDonations() {
+export async function listPortalDonations(): Promise<DonationRecord[]> {
   const context = await requirePortalIdentity();
   const supabase = await createClient();
 
@@ -92,24 +139,38 @@ export async function listPortalDonations() {
     .order("donation_date", { ascending: false });
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as unknown as DonationRecord[];
 }
 
-export async function getDonationById(id: string) {
+export async function getDonationById(id: string): Promise<DonationRecord | null> {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  const fullSelect =
+    "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), crm_organizations(id,name,description), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))";
+  const legacySelect =
+    "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))";
+
+  let { data, error } = await supabase
     .from("donations")
-    .select(
-      "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), crm_organizations(id,name,description), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))"
-    )
+    .select(fullSelect)
     .eq("organization_id", context.organizationId)
     .eq("id", id)
     .maybeSingle();
 
+  if (error && isDonationOrgSchemaError(error)) {
+    const fallbackResult = await supabase
+      .from("donations")
+      .select(legacySelect)
+      .eq("organization_id", context.organizationId)
+      .eq("id", id)
+      .maybeSingle();
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
+
   if (error) throw error;
-  return data;
+  return ((data as unknown as DonationRecord | null) ?? null) as DonationRecord | null;
 }
 
 export async function updateDonationForStaff(input: {
@@ -170,11 +231,9 @@ export async function updateDonationForStaff(input: {
   const primaryCampaignId = input.allocations[0].campaignId;
   const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
 
-  const { error: donationUpdateError } = await supabase
-    .from("donations")
-    .update({
+  const updatePayload = {
       contact_id: input.contactId,
-        crm_organization_id: input.organizationId ?? null,
+      crm_organization_id: input.organizationId ?? null,
       campaign_id: primaryCampaignId,
       amount: input.totalAmount,
       donation_date: input.date,
@@ -182,14 +241,29 @@ export async function updateDonationForStaff(input: {
       check_number: input.checkNumber ?? null,
       transaction_id: input.transactionId ?? null,
       memo: input.memo ?? null,
-        source_platform: input.sourceSystem ?? null,
-        external_transaction_id: input.externalDonationId ?? null,
-        is_recurring: Boolean(input.recurring),
+      source_platform: input.sourceSystem ?? null,
+      external_transaction_id: input.externalDonationId ?? null,
+      is_recurring: Boolean(input.recurring),
       campaign: primaryCampaign?.name ?? null,
       updated_at: new Date().toISOString()
-    })
+  };
+
+  let { error: donationUpdateError } = await supabase
+    .from("donations")
+    .update(updatePayload)
     .eq("organization_id", context.organizationId)
     .eq("id", input.donationId);
+
+  if (donationUpdateError && isDonationOrgSchemaError(donationUpdateError)) {
+    const { crm_organization_id: removedCrmOrgId, ...legacyUpdatePayload } = updatePayload;
+    void removedCrmOrgId;
+    const retryResult = await supabase
+      .from("donations")
+      .update(legacyUpdatePayload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", input.donationId);
+    donationUpdateError = retryResult.error;
+  }
   if (donationUpdateError) throw donationUpdateError;
 
   const { error: allocationsUpsertError } = await supabase.from("donation_allocations").upsert(
@@ -272,9 +346,7 @@ export async function createDonationForStaff(input: {
   const primaryCampaignId = input.allocations[0]?.campaignId;
   const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
 
-  const { data, error } = await supabase
-    .from("donations")
-    .insert({
+  const insertPayload = {
       organization_id: context.organizationId,
       contact_id: input.contactId,
       crm_organization_id: input.organizationId ?? null,
@@ -293,11 +365,22 @@ export async function createDonationForStaff(input: {
       is_recurring: Boolean(input.recurring),
       campaign: primaryCampaign?.name ?? null,
       created_by: context.userId
-    })
-    .select("id")
-    .single();
+  };
 
+  let { data, error } = await supabase.from("donations").insert(insertPayload).select("id").single();
+  if (error && isDonationOrgSchemaError(error)) {
+    const { crm_organization_id: removedCrmOrgId, ...legacyInsertPayload } = insertPayload;
+    void removedCrmOrgId;
+    const retryResult = await supabase
+      .from("donations")
+      .insert(legacyInsertPayload)
+      .select("id")
+      .single();
+    data = retryResult.data;
+    error = retryResult.error;
+  }
   if (error) throw error;
+  if (!data?.id) throw new Error("Donation insert did not return an id.");
 
   const { error: allocationsError } = await supabase.from("donation_allocations").upsert(
     input.allocations.map((allocation) => ({

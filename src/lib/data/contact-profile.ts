@@ -28,6 +28,52 @@ function taskUrgencyColor(
   return "default";
 }
 
+function isDonationOrgSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("crm_organization_id") || message.includes("crm_organizations");
+}
+
+async function fetchContactDonations(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  contactId: string
+) {
+  const fullSelect =
+    "id, donation_date, amount, payment_type, check_number, transaction_id, memo, source_platform, external_transaction_id, is_recurring, crm_organization_id, created_by, created_at, campaign_id, campaigns(name,status), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))";
+  const legacySelect =
+    "id, donation_date, amount, payment_type, check_number, transaction_id, memo, source_platform, external_transaction_id, is_recurring, created_by, created_at, campaign_id, campaigns(name,status), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))";
+
+  const fullResult = (await supabase
+    .from("donations")
+    .select(fullSelect)
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contactId)
+    .order("donation_date", { ascending: false })) as unknown as {
+    data: Array<Record<string, unknown>> | null;
+    error: unknown;
+  };
+
+  if (fullResult.error && isDonationOrgSchemaError(fullResult.error)) {
+    const legacyResult = (await supabase
+      .from("donations")
+      .select(legacySelect)
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("donation_date", { ascending: false })) as unknown as {
+      data: Array<Record<string, unknown>> | null;
+      error: unknown;
+    };
+    return legacyResult;
+  }
+
+  return fullResult;
+}
+
 export async function getContactProfileData(contactId: string) {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
@@ -69,14 +115,7 @@ export async function getContactProfileData(contactId: string) {
       .select("id, crm_organizations(id, name, description)")
       .eq("organization_id", context.organizationId)
       .eq("contact_id", contactId),
-    supabase
-      .from("donations")
-      .select(
-        "id, donation_date, amount, payment_type, check_number, transaction_id, memo, source_platform, external_transaction_id, is_recurring, crm_organization_id, created_by, created_at, campaign_id, campaigns(name,status), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))"
-      )
-      .eq("organization_id", context.organizationId)
-      .eq("contact_id", contactId)
-      .order("donation_date", { ascending: false }),
+    fetchContactDonations(supabase, context.organizationId, contactId),
     supabase
       .from("notes")
       .select("id, body, note_type, created_at, created_by")

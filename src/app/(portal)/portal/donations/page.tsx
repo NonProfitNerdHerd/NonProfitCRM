@@ -21,8 +21,8 @@ export default async function PortalDonationsPage() {
           <tbody>
             {donations.map((donation) => (
               <tr className="border-b border-slate-100" key={donation.id}>
-                <td className="py-2">{formatDate(donation.donation_date)}</td>
-                <td className="py-2">{formatCurrency(donation.amount, donation.currency)}</td>
+                <td className="py-2">{formatDate(donation.donation_date ?? undefined)}</td>
+                <td className="py-2">{formatCurrency(donation.amount, donation.currency ?? undefined)}</td>
                 <td className="py-2">{donation.status}</td>
                 <td className="py-2">{donation.receipt_number ?? "-"}</td>
               </tr>
