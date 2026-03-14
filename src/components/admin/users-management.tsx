@@ -50,6 +50,8 @@ export function UsersManagement({
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
+  const [copiedTempPassword, setCopiedTempPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
@@ -164,6 +166,8 @@ export function UsersManagement({
     setError(null);
     setMessage(null);
     setCredentialMessage(null);
+    setTemporaryPassword(null);
+    setCopiedTempPassword(false);
   }
 
   function closeCreateModal() {
@@ -190,6 +194,8 @@ export function UsersManagement({
     setError(null);
     setMessage(null);
     setCredentialMessage(null);
+    setTemporaryPassword(null);
+    setCopiedTempPassword(false);
 
     const validationError = validateForm(createForm);
     if (validationError) {
@@ -221,9 +227,13 @@ export function UsersManagement({
     closeCreateModal();
     setMessage("User created successfully.");
     if (payload?.temporaryPassword) {
+      setTemporaryPassword(String(payload.temporaryPassword));
+      setCopiedTempPassword(false);
       setCredentialMessage(
         `Temporary password for ${createForm.email.trim()}: ${String(payload.temporaryPassword)} (user must change this at first login).`
       );
+    } else {
+      setTemporaryPassword(null);
     }
     setCreating(false);
   }
@@ -235,6 +245,8 @@ export function UsersManagement({
     setError(null);
     setMessage(null);
     setCredentialMessage(null);
+    setTemporaryPassword(null);
+    setCopiedTempPassword(false);
 
     const validationError = validateForm(editForm, editingUser.user_id);
     if (validationError) {
@@ -304,8 +316,20 @@ export function UsersManagement({
         payload?.temporaryPassword ?? ""
       )} (user must change this at first login).`
     );
+    setTemporaryPassword(String(payload?.temporaryPassword ?? ""));
+    setCopiedTempPassword(false);
     setMessage("Password reset successfully.");
     setSavingUserId(null);
+  }
+
+  async function copyTemporaryPassword() {
+    if (!temporaryPassword) return;
+    try {
+      await navigator.clipboard.writeText(temporaryPassword);
+      setCopiedTempPassword(true);
+    } catch {
+      setError("Unable to copy password automatically. Please copy it manually.");
+    }
   }
 
   function toggleCreateRole(roleId: string) {
@@ -342,9 +366,17 @@ export function UsersManagement({
 
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {credentialMessage ? (
-        <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
-          {credentialMessage}
-        </p>
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+          <p>{credentialMessage}</p>
+          {temporaryPassword ? (
+            <div className="mt-2 flex items-center gap-2">
+              <Button type="button" variant="secondary" onClick={copyTemporaryPassword}>
+                Copy Temporary Password
+              </Button>
+              {copiedTempPassword ? <span className="text-green-700">Copied</span> : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
