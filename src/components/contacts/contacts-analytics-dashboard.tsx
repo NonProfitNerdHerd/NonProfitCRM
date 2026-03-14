@@ -3,12 +3,23 @@
 import { useState } from "react";
 import { ANALYTICS_RANGES, type AnalyticsRangeKey } from "@/lib/analytics/config";
 import { LineChart } from "@/components/analytics/line-chart";
+import Link from "next/link";
 
 type ContactAnalyticsPayload = {
   range: AnalyticsRangeKey;
   granularity: "day" | "week" | "month" | "year";
   personal: Array<{ x: string; label: string; y: number }>;
   organizations: Array<{ x: string; label: string; y: number }>;
+  latestModifiedContacts: Array<{
+    contactId: string;
+    contactName: string;
+    contactType: "Personal" | "Organization";
+    mostRecentActivityType: string;
+    mostRecentActivityDateTime: string;
+    mostRecentActivityDateTimeLabel: string;
+    modifiedBy: string;
+    summary: string;
+  }>;
 };
 
 export function ContactsAnalyticsDashboard({
@@ -19,6 +30,7 @@ export function ContactsAnalyticsDashboard({
   const [payload, setPayload] = useState<ContactAnalyticsPayload>(initial);
   const [range, setRange] = useState<AnalyticsRangeKey>(initial.range);
   const [loading, setLoading] = useState(false);
+  const [expandedChart, setExpandedChart] = useState<"personal" | "organizations" | null>(null);
 
   async function onRangeChange(nextRange: AnalyticsRangeKey) {
     setRange(nextRange);
@@ -57,6 +69,8 @@ export function ContactsAnalyticsDashboard({
           title="Personal Contacts Trend"
           yAxisLabel="Contacts"
           xAxisLabel="Time"
+          size="compact"
+          onExpand={() => setExpandedChart("personal")}
           series={[
             {
               name: "Personal Contacts",
@@ -70,6 +84,8 @@ export function ContactsAnalyticsDashboard({
           title="Organizational Contacts Trend"
           yAxisLabel="Contacts"
           xAxisLabel="Time"
+          size="compact"
+          onExpand={() => setExpandedChart("organizations")}
           series={[
             {
               name: "Organizational Contacts",
@@ -79,6 +95,82 @@ export function ContactsAnalyticsDashboard({
           ]}
         />
       </div>
+
+      <section className="rounded-md border border-slate-200 p-4">
+        <h3 className="text-sm font-semibold text-slate-900">Latest Modified Contacts</h3>
+        <p className="mb-3 text-xs text-slate-600">
+          Ranked by most recent related activity (donations, notes, tasks, and contact-linked operations).
+        </p>
+        {payload.latestModifiedContacts.length === 0 ? (
+          <p className="text-sm text-slate-500">No recent contact-related activity.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-600">
+                  <th className="py-2">Contact Name</th>
+                  <th className="py-2">Contact Type</th>
+                  <th className="py-2">Most Recent Activity Type</th>
+                  <th className="py-2">Most Recent Activity Date/Time</th>
+                  <th className="py-2">Modified By</th>
+                  <th className="py-2">Summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payload.latestModifiedContacts.map((row) => (
+                  <tr key={`${row.contactId}-${row.mostRecentActivityDateTime}`} className="border-b border-slate-100">
+                    <td className="py-2">
+                      <Link href={`/staff/contacts/${row.contactId}`} className="font-medium text-brand-700">
+                        {row.contactName}
+                      </Link>
+                    </td>
+                    <td className="py-2">{row.contactType}</td>
+                    <td className="py-2">{row.mostRecentActivityType}</td>
+                    <td className="py-2">{row.mostRecentActivityDateTimeLabel}</td>
+                    <td className="py-2">{row.modifiedBy}</td>
+                    <td className="py-2">{row.summary}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {expandedChart ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-[96vw] max-w-[1400px] rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="text-base font-semibold text-slate-900">
+                {expandedChart === "personal" ? "Personal Contacts Trend" : "Organizational Contacts Trend"} (Expanded)
+              </h4>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setExpandedChart(null)}
+              >
+                Close
+              </button>
+            </div>
+            <LineChart
+              title={expandedChart === "personal" ? "Personal Contacts Trend" : "Organizational Contacts Trend"}
+              yAxisLabel="Contacts"
+              xAxisLabel="Time"
+              size="expanded"
+              series={[
+                {
+                  name: expandedChart === "personal" ? "Personal Contacts" : "Organizational Contacts",
+                  color: expandedChart === "personal" ? "#2563EB" : "#7C3AED",
+                  points:
+                    expandedChart === "personal"
+                      ? payload.personal.map((point) => ({ label: point.label, y: point.y }))
+                      : payload.organizations.map((point) => ({ label: point.label, y: point.y }))
+                }
+              ]}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

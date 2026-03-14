@@ -1,32 +1,31 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { canCreateProjects, listProjects } from "@/lib/data/projects";
+import { listProjects } from "@/lib/data/projects";
 import { requireStaffPermission } from "@/lib/auth/guards";
 import {
-  ProjectsDashboard,
-  type ProjectRow,
-  type UserOption
-} from "@/components/projects/projects-dashboard";
-import { listOrganizationUsers } from "@/lib/data/users";
+  ProjectsPortfolioGantt,
+  type ProjectPortfolioRow
+} from "@/components/projects/projects-portfolio-gantt";
+import Link from "next/link";
 
 export default async function ProjectsPage() {
   await requireStaffPermission("can_view_dashboard");
-  const [projects, canCreate, users] = await Promise.all([
-    listProjects({ status: "all" }),
-    canCreateProjects(),
-    listOrganizationUsers()
-  ]);
+  const projects = await listProjects({ status: "all" });
 
   return (
     <Card>
       <CardHeader
-        title="Projects"
-        subtitle="Project-based task grouping and execution tracking"
+        title="Projects Portfolio"
+        subtitle="Active project timelines in a Gantt-style portfolio view"
       />
-      <ProjectsDashboard
-        projects={projects as ProjectRow[]}
-        canCreate={canCreate}
-        users={users as UserOption[]}
-      />
+      <div className="mb-3 flex justify-end">
+        <Link
+          href="/staff/projects/management"
+          className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Open Project Management
+        </Link>
+      </div>
+      <ProjectsPortfolioGantt projects={projects as ProjectPortfolioRow[]} />
     </Card>
   );
 }

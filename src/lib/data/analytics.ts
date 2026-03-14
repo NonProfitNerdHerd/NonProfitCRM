@@ -7,6 +7,28 @@ type TrendPoint = {
   total: number;
 };
 
+type LatestActivityRow = {
+  related_contact_id: string | null;
+  action_type: string;
+  action_summary: string;
+  created_at: string;
+  performed_by_user_id: string | null;
+  contacts:
+    | {
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        organization_name: string | null;
+      }
+    | Array<{
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        organization_name: string | null;
+      }>
+    | null;
+};
+
 function formatShortDate(input: string, mode: "day" | "week" | "month" | "year") {
   const date = new Date(`${input}T00:00:00Z`);
   const year = date.getUTCFullYear();
@@ -17,6 +39,17 @@ function formatShortDate(input: string, mode: "day" | "week" | "month" | "year")
   if (mode === "month") return `${month} ${year}`;
   if (mode === "week") return `Week of ${month} ${day}`;
   return `${month} ${day}`;
+}
+
+function formatDateTime(input: string) {
+  const date = new Date(input);
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
 
 function contactsGranularity(range: AnalyticsRangeKey): "day" | "week" | "month" | "year" {
@@ -37,7 +70,7 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
 
-  const [personal, organizations] = await Promise.all([
+  const [personal, organizations, activityRowsResult] = await Promise.all([
     supabase.rpc("contact_trend_series", {
       org_id: context.organizationId,
       range_key: range,
@@ -47,13 +80,90 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
       org_id: context.organizationId,
       range_key: range,
       contact_mode: "organization"
-    })
+    }),
+    supabase
+      .from("activity_log")
+      .select(
+        "related_contact_id, action_type, action_summary, created_at, performed_by_user_id, contacts(id, first_name, last_name, organization_name)"
+      )
+      .eq("organization_id", context.organizationId)
+      .not("related_contact_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(500)
   ]);
 
   if (personal.error) throw personal.error;
   if (organizations.error) throw organizations.error;
+  if (activityRowsResult.error) throw activityRowsResult.error;
 
   const mode = contactsGranularity(range);
+  const activityRows = (activityRowsResult.data as LatestActivityRow[] | null | undefined) ?? [];
+
+  const latestByContact = new Map<string, LatestActivityRow>();
+  for (const row of activityRows) {
+    const contactId = row.related_contact_id;
+    if (!contactId) continue;
+    if (!latestByContact.has(contactId)) {
+      latestByContact.set(contactId, row);
+    }
+  }
+
+  const performerIds = Array.from(
+    new Set(
+      Array.from(latestByContact.values())
+        .map((row) => row.performed_by_user_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+  const profilesResult = performerIds.length
+    ? await supabase
+        .from("profiles")
+        .select("id, display_name, first_name, last_name, email")
+        .in("id", performerIds)
+    : { data: [] as Array<Record<string, unknown>>, error: null };
+  if (profilesResult.error) throw profilesResult.error;
+
+  const performerMap = new Map<string, string>();
+  for (const profile of profilesResult.data ?? []) {
+    const id = profile.id as string;
+    const displayName =
+      (profile.display_name as string) ||
+      [profile.first_name as string, profile.last_name as string].filter(Boolean).join(" ") ||
+      (profile.email as string) ||
+      id;
+    performerMap.set(id, displayName);
+  }
+
+  const latestModifiedContacts = Array.from(latestByContact.values())
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 30)
+    .map((row) => {
+      const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
+      const contactType =
+        contact?.organization_name && String(contact.organization_name).trim().length > 0
+          ? "Organization"
+          : "Personal";
+      const contactName =
+        [
+          contact?.first_name ?? "",
+          contact?.last_name ?? ""
+        ]
+          .join(" ")
+          .trim() || "Unnamed Contact";
+
+      return {
+        contactId: row.related_contact_id,
+        contactName,
+        contactType,
+        mostRecentActivityType: row.action_type,
+        mostRecentActivityDateTime: row.created_at,
+        mostRecentActivityDateTimeLabel: formatDateTime(row.created_at),
+        modifiedBy: row.performed_by_user_id
+          ? performerMap.get(row.performed_by_user_id) ?? row.performed_by_user_id
+          : "Unknown",
+        summary: row.action_summary
+      };
+    });
 
   return {
     range,
@@ -68,7 +178,8 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
         x: row.bucket_start,
         label: formatShortDate(row.bucket_start, mode),
         y: Number(row.total)
-      })) ?? []
+      })) ?? [],
+    latestModifiedContacts
   };
 }
 

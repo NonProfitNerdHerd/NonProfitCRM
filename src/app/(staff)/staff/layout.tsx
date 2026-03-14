@@ -9,7 +9,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
   return (
     <div className="flex min-h-screen">
       <StaffSidebar />
-      <div className="flex-1 p-6">
+      <div className="flex-1 px-6 pb-6 pt-0">
         <StaffHeader organizationId={context.organizationId} />
         {children}
       </div>

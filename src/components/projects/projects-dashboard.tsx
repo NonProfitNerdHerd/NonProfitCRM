@@ -25,11 +25,13 @@ export type UserOption = {
 export function ProjectsDashboard({
   projects,
   canCreate,
-  users
+  users,
+  detailBasePath = "/staff/projects/management"
 }: {
   projects: ProjectRow[];
   canCreate: boolean;
   users: UserOption[];
+  detailBasePath?: string;
 }) {
   const [activeTab, setActiveTab] = useState<"active" | "completed" | "all">("active");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "on_hold" | "completed" | "cancelled">(
@@ -107,7 +109,7 @@ export function ProjectsDashboard({
           visibleProjects.map((project) => (
             <Link
               key={project.id}
-              href={`/staff/projects/${project.id}`}
+              href={`${detailBasePath}/${project.id}`}
               className="rounded-lg border border-slate-200 p-4 hover:bg-slate-50"
             >
               <div className="flex items-center justify-between">
@@ -126,17 +128,25 @@ export function ProjectsDashboard({
         )}
       </div>
 
-      {showModal ? <NewProjectModal onClose={() => setShowModal(false)} users={users} /> : null}
+      {showModal ? (
+        <NewProjectModal
+          onClose={() => setShowModal(false)}
+          users={users}
+          detailBasePath={detailBasePath}
+        />
+      ) : null}
     </div>
   );
 }
 
 function NewProjectModal({
   onClose,
-  users
+  users,
+  detailBasePath
 }: {
   onClose: () => void;
   users: UserOption[];
+  detailBasePath: string;
 }) {
   const [form, setForm] = useState({
     name: "",
@@ -211,7 +221,7 @@ function NewProjectModal({
       setLoading(false);
       return;
     }
-    window.location.href = `/staff/projects/${payload.id as string}`;
+    window.location.href = `${detailBasePath}/${payload.id as string}`;
   }
 
   return (
