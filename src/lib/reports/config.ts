@@ -177,6 +177,11 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
       { key: "largestGift", label: "Largest Gift", dataType: "currency", sortable: true },
       { key: "pendingAcknowledgements", label: "Pending Acknowledgements", dataType: "number", sortable: true },
       { key: "acknowledgementStatusSummary", label: "Acknowledgement Status Summary", sortable: false },
+      { key: "address", label: "Address", sortable: true },
+      { key: "mailingAddress", label: "Mailing Address", sortable: true },
+      { key: "mailingCity", label: "Mailing City", sortable: true },
+      { key: "mailingState", label: "Mailing State", sortable: true },
+      { key: "mailingZip", label: "Mailing Zip", sortable: true },
       { key: "city", label: "City", sortable: true },
       { key: "state", label: "State", sortable: true },
       { key: "zip", label: "Zip", sortable: true }
@@ -269,10 +274,15 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
       { key: "endDate", label: "End Date", dataType: "date", defaultSelected: true, sortable: true },
       { key: "renewalDate", label: "Renewal Date", dataType: "date", sortable: true },
       { key: "renewalStatus", label: "Renewal Status", defaultSelected: true, sortable: true },
+      { key: "address", label: "Address", sortable: true },
+      { key: "mailingAddress", label: "Mailing Address", sortable: true },
       { key: "location", label: "Location", sortable: true },
       { key: "city", label: "City", sortable: true },
       { key: "state", label: "State", sortable: true },
-      { key: "zip", label: "Zip", sortable: true }
+      { key: "mailingCity", label: "Mailing City", sortable: true },
+      { key: "mailingState", label: "Mailing State", sortable: true },
+      { key: "zip", label: "Zip", sortable: true },
+      { key: "mailingZip", label: "Mailing Zip", sortable: true }
     ],
     filters: [
       { key: "freeText", label: "Free Text Search", type: "text" },

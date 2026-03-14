@@ -14,6 +14,7 @@ export default async function ContactReportsPage() {
       />
       <ReportBuilder
         initialReportType="contacts"
+        hideReportTypeSelector
         title="Contact Reporting"
         subtitle="Analyze contact, donor, and membership profile data."
       />

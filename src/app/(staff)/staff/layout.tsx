@@ -24,10 +24,14 @@ export default async function StaffLayout({ children }: { children: ReactNode })
   }
 
   return (
-    <div className="flex min-h-screen">
-      <StaffSidebar />
-      <div className="flex-1 px-6 pb-6 pt-0">
-        <StaffHeader organizationId={context.organizationId} />
+    <div className="flex min-h-screen print:block">
+      <div className="print:hidden">
+        <StaffSidebar />
+      </div>
+      <div className="flex-1 px-6 pb-6 pt-0 print:p-0">
+        <div className="print:hidden">
+          <StaffHeader organizationId={context.organizationId} />
+        </div>
         {children}
       </div>
     </div>

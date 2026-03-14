@@ -340,7 +340,7 @@ async function buildDonorRows(orgId: string, filters: ReportFilters) {
     ? await supabase
         .from("contacts")
         .select(
-          "id, first_name, last_name, preferred_name, organization_name, email, phone, city, state, postal_code"
+          "id, first_name, last_name, preferred_name, organization_name, email, phone, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code"
         )
         .eq("organization_id", orgId)
         .in("id", contactIds)
@@ -415,6 +415,15 @@ async function buildDonorRows(orgId: string, filters: ReportFilters) {
     const contact = contactMap.get(contactId) ?? {};
     const donorName = contactDisplayName(contact);
     const donorSegment = stats.numberOfGifts <= 1 ? "First-Time" : "Returning";
+    const address = [text(contact.address_line_1), text(contact.address_line_2)]
+      .filter(Boolean)
+      .join(", ");
+    const mailingAddress = [
+      text(contact.mailing_address_line_1),
+      text(contact.mailing_address_line_2)
+    ]
+      .filter(Boolean)
+      .join(", ");
     return {
       id: contactId,
       donorName,
@@ -431,6 +440,11 @@ async function buildDonorRows(orgId: string, filters: ReportFilters) {
       donorSegment,
       email: text(contact.email),
       phone: text(contact.phone),
+      address,
+      mailingAddress,
+      mailingCity: text(contact.mailing_city),
+      mailingState: text(contact.mailing_state),
+      mailingZip: text(contact.mailing_postal_code),
       city: text(contact.city),
       state: text(contact.state),
       zip: text(contact.postal_code),
@@ -585,7 +599,7 @@ async function buildMembershipRows(orgId: string) {
   const membershipsResult = await supabase
     .from("memberships")
     .select(
-      "id, status, start_date, end_date, renewal_date, created_at, updated_at, membership_types(name), contacts(first_name,last_name,preferred_name,organization_name,city,state,postal_code)"
+      "id, status, start_date, end_date, renewal_date, created_at, updated_at, membership_types(name), contacts(first_name,last_name,preferred_name,organization_name,address_line_1,address_line_2,city,state,postal_code,mailing_address_line_1,mailing_address_line_2,mailing_city,mailing_state,mailing_postal_code)"
     )
     .eq("organization_id", orgId)
     .limit(20000);
@@ -599,6 +613,15 @@ async function buildMembershipRows(orgId: string) {
     const city = text(contact.city);
     const state = text(contact.state);
     const zip = text(contact.postal_code);
+    const address = [text(contact.address_line_1), text(contact.address_line_2)]
+      .filter(Boolean)
+      .join(", ");
+    const mailingAddress = [
+      text(contact.mailing_address_line_1),
+      text(contact.mailing_address_line_2)
+    ]
+      .filter(Boolean)
+      .join(", ");
     const location = [city, state, zip].filter(Boolean).join(", ");
     const endMs = toDateMs(membership.end_date);
     const expiringInDays =
@@ -613,11 +636,16 @@ async function buildMembershipRows(orgId: string) {
       endDate: isoDate(membership.end_date),
       renewalDate: isoDate(membership.renewal_date),
       renewalStatus,
+      address,
+      mailingAddress,
       expiringInDays,
       location,
       city,
       state,
+      mailingCity: text(contact.mailing_city),
+      mailingState: text(contact.mailing_state),
       zip,
+      mailingZip: text(contact.mailing_postal_code),
       createdDate: isoDate(membership.created_at),
       modifiedDate: isoDate(membership.updated_at)
     };
@@ -955,7 +983,9 @@ export async function listSavedReports(reportType?: ReportType) {
   const supabase = await createClient();
   let query = supabase
     .from("saved_reports")
-    .select("id, name, description, domain_key, selected_fields, filters, sort_config, created_at, updated_at")
+    .select(
+      "id, name, description, domain_key, selected_fields, filters, sort_config, created_by, created_at, updated_at"
+    )
     .eq("organization_id", context.organizationId)
     .eq("created_by", context.userId)
     .order("updated_at", { ascending: false });
@@ -964,6 +994,20 @@ export async function listSavedReports(reportType?: ReportType) {
   }
   const { data, error } = await query;
   if (error) throw error;
+  const userIds = Array.from(
+    new Set((data ?? []).map((row) => text(row.created_by)).filter(Boolean))
+  );
+  const profilesResult = userIds.length
+    ? await supabase
+        .from("profiles")
+        .select("id, display_name, first_name, last_name, email")
+        .in("id", userIds)
+    : { data: [], error: null };
+  if (profilesResult.error) throw profilesResult.error;
+  const profileMap = new Map<string, Record<string, unknown>>();
+  for (const profile of profilesResult.data ?? []) {
+    profileMap.set(text(profile.id), profile);
+  }
   return (data ?? []).map((row) => ({
     id: text(row.id),
     name: text(row.name),
@@ -972,6 +1016,9 @@ export async function listSavedReports(reportType?: ReportType) {
     selectedColumns: (row.selected_fields as string[]) ?? [],
     filters: (row.filters as ReportFilters) ?? {},
     sort: (row.sort_config as ReportSort) ?? null,
+    createdByUserId: text(row.created_by),
+    createdBy:
+      profileLabel(profileMap.get(text(row.created_by))) || text(row.created_by) || "Unknown",
     createdAt: text(row.created_at),
     updatedAt: text(row.updated_at)
   }));

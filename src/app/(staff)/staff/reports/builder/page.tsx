@@ -1,17 +1,5 @@
-import { Card, CardHeader } from "@/components/ui/card";
-import { ReportBuilder } from "@/components/reports/report-builder";
-import { requireStaffPermission } from "@/lib/auth/guards";
+import { redirect } from "next/navigation";
 
 export default async function ReportBuilderPage() {
-  await requireStaffPermission("can_run_reports");
-
-  return (
-    <Card>
-      <CardHeader
-        title="Report Builder"
-        subtitle="Build custom reports with dynamic columns, filters, sorting, and exports."
-      />
-      <ReportBuilder />
-    </Card>
-  );
+  redirect("/staff/reports");
 }

@@ -64,7 +64,7 @@ const menu: MenuItem[] = [
     label: "Reports",
     matches: (pathname) => pathname.startsWith("/staff/reports"),
     children: [
-      { href: "/staff/reports/builder", label: "Report Builder" },
+      { href: "/staff/reports", label: "Saved Reports" },
       { href: "/staff/reports/contacts", label: "Contact Reports" },
       { href: "/staff/reports/campaigns", label: "Campaign Reports" },
       { href: "/staff/reports/donors", label: "Donor Reports" },
