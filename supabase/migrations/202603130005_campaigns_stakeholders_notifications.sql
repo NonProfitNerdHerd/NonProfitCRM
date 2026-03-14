@@ -15,7 +15,7 @@ create table if not exists public.campaigns (
   organization_id uuid not null references public.organizations(id) on delete cascade,
   name text not null,
   description text,
-  status public.campaign_status not null default 'Active',
+  status public.campaign_status not null default 'Active'::public.campaign_status,
   start_date date,
   end_date date,
   owner_user_id uuid references auth.users(id) on delete set null,
@@ -44,7 +44,7 @@ with generated_campaigns as (
     d.organization_id,
     coalesce(nullif(trim(d.campaign), ''), 'General Campaign'),
     'Backfilled from donation campaign value',
-    'Active'
+    'Active'::public.campaign_status
   from public.donations d
   where d.organization_id is not null
   on conflict (organization_id, name) do update set updated_at = timezone('utc', now())
@@ -62,7 +62,11 @@ begin
   if exists (select 1 from public.donations where campaign_id is null) then
     with fallback as (
       insert into public.campaigns (organization_id, name, description, status)
-      select distinct organization_id, 'General Campaign', 'Auto-created fallback campaign', 'Active'
+      select distinct
+        organization_id,
+        'General Campaign',
+        'Auto-created fallback campaign',
+        'Active'::public.campaign_status
       from public.donations
       where campaign_id is null
       on conflict (organization_id, name) do update set updated_at = timezone('utc', now())
