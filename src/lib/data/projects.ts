@@ -269,7 +269,7 @@ export async function addProjectStaff(
     await createNotification({
       recipientUserId: member.userId,
       type: "project_assignment",
-      message: `You were added to project "${project.name}" as ${member.roleOnProject}.`,
+      message: `You were added to project "${project?.name ?? "project"}" as ${member.roleOnProject}.`,
       relatedEntityType: "project",
       relatedEntityId: projectId,
       actionUrl: `/staff/projects/${projectId}`

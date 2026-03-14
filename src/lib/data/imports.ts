@@ -161,6 +161,9 @@ export async function processCsvImport(params: {
             if (campaignInsertError) throw campaignInsertError;
             campaignId = createdCampaign.id;
           }
+          if (!campaignId) {
+            throw new Error("Unable to resolve campaign for imported donation row.");
+          }
           campaignCache.set(campaignName, campaignId);
         }
 

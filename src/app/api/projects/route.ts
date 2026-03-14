@@ -2,12 +2,6 @@ import { NextResponse } from "next/server";
 import { createProject, listProjects, canCreateProjects } from "@/lib/data/projects";
 import { projectSchema } from "@/lib/validation/crm";
 
-const projectSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  status: z.string().optional()
-});
-
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);

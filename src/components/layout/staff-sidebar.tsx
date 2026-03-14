@@ -4,7 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-const menu = [
+type MenuItem = {
+  href: string;
+  label: string;
+  children?: Array<{ href: string; label: string }>;
+};
+
+const menu: MenuItem[] = [
   { href: "/staff/dashboard", label: "Dashboard" },
   { href: "/staff/contacts", label: "Contacts" },
   { href: "/staff/donations", label: "Donations" },
@@ -29,7 +35,7 @@ const menu = [
   { href: "/staff/audit", label: "Audit Log" },
   { href: "/staff/reports", label: "Reporting" },
   { href: "/staff/imports", label: "Imports" }
-] as const;
+];
 
 export function StaffSidebar() {
   const pathname = usePathname();

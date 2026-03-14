@@ -138,9 +138,6 @@ export function GlobalSearch() {
             href={(row) => `/staff/memberships/${row.id as string}`}
             label={(row) => {
               const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
-              const type = Array.isArray(row.membership_types)
-                ? row.membership_types[0]
-                : row.membership_types;
               return `${contact?.first_name ?? ""} ${contact?.last_name ?? ""}`.trim() || "Membership";
             }}
             subtitle={(row) => {
