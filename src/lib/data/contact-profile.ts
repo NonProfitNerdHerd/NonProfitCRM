@@ -39,6 +39,8 @@ export async function getContactProfileData(contactId: string) {
     { data: donations, error: donationsError },
     { data: notes, error: notesError },
     { data: tasks, error: tasksError },
+    { data: memberships, error: membershipsError },
+    { data: campaigns, error: campaignsError },
     activity
   ] = await Promise.all([
     supabase
@@ -66,7 +68,9 @@ export async function getContactProfileData(contactId: string) {
       .eq("contact_id", contactId),
     supabase
       .from("donations")
-      .select("id, donation_date, amount, payment_type, check_number, transaction_id, memo")
+      .select(
+        "id, donation_date, amount, payment_type, check_number, transaction_id, memo, created_by, created_at, campaign_id, campaigns(name,status)"
+      )
       .eq("organization_id", context.organizationId)
       .eq("contact_id", contactId)
       .order("donation_date", { ascending: false }),
@@ -79,11 +83,25 @@ export async function getContactProfileData(contactId: string) {
     supabase
       .from("tasks")
       .select(
-        "id, title, description, due_date, status, priority, assigned_to, completed_at, project_id, projects(name)"
+        "id, title, description, due_date, status, priority, assigned_to, completed_at, created_by, created_at, project_id, projects(name)"
       )
       .eq("organization_id", context.organizationId)
       .eq("contact_id", contactId)
       .order("due_date", { ascending: true }),
+    supabase
+      .from("memberships")
+      .select(
+        "id, status, level, start_date, end_date, renewal_date, created_by, created_at, membership_types(name)"
+      )
+      .eq("organization_id", context.organizationId)
+      .eq("contact_id", contactId)
+      .order("start_date", { ascending: false }),
+    supabase
+      .from("campaigns")
+      .select("id, name, status")
+      .eq("organization_id", context.organizationId)
+      .eq("status", "Active")
+      .order("name", { ascending: true }),
     listContactActivity(contactId)
   ]);
 
@@ -94,6 +112,8 @@ export async function getContactProfileData(contactId: string) {
   if (donationsError) throw donationsError;
   if (notesError) throw notesError;
   if (tasksError) throw tasksError;
+  if (membershipsError) throw membershipsError;
+  if (campaignsError) throw campaignsError;
 
   return {
     contact,
@@ -103,6 +123,8 @@ export async function getContactProfileData(contactId: string) {
     donations: donations ?? [],
     notes: notes ?? [],
     tasks: tasks ?? [],
+    memberships: memberships ?? [],
+    campaigns: campaigns ?? [],
     activity,
     taskUrgency: taskUrgencyColor(tasks ?? [])
   };
@@ -110,6 +132,7 @@ export async function getContactProfileData(contactId: string) {
 
 export async function addDonationForContact(input: {
   contactId: string;
+  campaignId: string;
   date: string;
   amount: number;
   paymentType: "Cash" | "Check" | "Card";
@@ -120,11 +143,23 @@ export async function addDonationForContact(input: {
   const context = await requireStaffPermission("can_create_donations");
   const supabase = await createClient();
 
+  const { data: campaign, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id, name, status")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.campaignId)
+    .maybeSingle();
+  if (campaignError) throw campaignError;
+  if (!campaign || campaign.status !== "Active") {
+    throw new Error("Donation must be tied to an active campaign.");
+  }
+
   const { data, error } = await supabase
     .from("donations")
     .insert({
       organization_id: context.organizationId,
       contact_id: input.contactId,
+      campaign_id: input.campaignId,
       amount: input.amount,
       currency: "USD",
       donation_date: input.date,
@@ -133,7 +168,9 @@ export async function addDonationForContact(input: {
       check_number: input.checkNumber ?? null,
       transaction_id: input.transactionId ?? null,
       memo: input.memo ?? null,
-      source: "manual"
+      source: "manual",
+      campaign: campaign.name,
+      created_by: context.userId
     })
     .select("id")
     .single();

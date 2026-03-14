@@ -14,7 +14,19 @@ type ContactProfileTabsProps = {
   donations: Array<Record<string, unknown>>;
   notes: Array<Record<string, unknown>>;
   tasks: Array<Record<string, unknown>>;
-  staffUsers: Array<{ user_id: string }>;
+  memberships: Array<Record<string, unknown>>;
+  campaigns: Array<Record<string, unknown>>;
+  staffUsers: Array<{ user_id: string; display_name?: string | null }>;
+};
+
+type WorkbenchItem = {
+  id: string;
+  itemType: string;
+  title: string;
+  summary: string;
+  createdBy: string;
+  createdAt: string | null;
+  metadata: Array<{ label: string; value: string }>;
 };
 
 export function ContactProfileTabs({
@@ -24,13 +36,16 @@ export function ContactProfileTabs({
   donations,
   notes,
   tasks,
+  memberships,
+  campaigns,
   staffUsers
 }: ContactProfileTabsProps) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"activity" | "donations" | "notes" | "tasks">(
-    "activity"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "activity" | "donations" | "notes" | "tasks" | "memberships"
+  >("activity");
   const [donationForm, setDonationForm] = useState({
+    campaignId: "",
     date: new Date().toISOString().slice(0, 10),
     amount: "",
     paymentType: "Cash",
@@ -43,6 +58,9 @@ export function ContactProfileTabs({
   const [followUpAssignedToUserId, setFollowUpAssignedToUserId] = useState("");
   const [followUpSuspenseDate, setFollowUpSuspenseDate] = useState("");
   const [followUpTaskDescription, setFollowUpTaskDescription] = useState("");
+  const [selectedItem, setSelectedItem] = useState<WorkbenchItem | null>(null);
+  const [followUpType, setFollowUpType] = useState<"task" | "note">("task");
+  const [followUpBody, setFollowUpBody] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,6 +70,14 @@ export function ContactProfileTabs({
     if (taskUrgency === "yellow") return "bg-amber-100 text-amber-800 border-amber-200";
     return "bg-slate-100 text-slate-700 border-slate-200";
   }, [taskUrgency]);
+
+  function openItem(item: WorkbenchItem) {
+    setSelectedItem(item);
+    setFollowUpType("task");
+    setFollowUpBody("");
+    setFollowUpAssignedToUserId("");
+    setFollowUpSuspenseDate("");
+  }
 
   async function submitDonation(event: React.FormEvent) {
     event.preventDefault();
@@ -64,6 +90,7 @@ export function ContactProfileTabs({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         contactId,
+        campaignId: donationForm.campaignId,
         date: donationForm.date,
         amount: Number(donationForm.amount),
         paymentType: donationForm.paymentType,
@@ -82,6 +109,7 @@ export function ContactProfileTabs({
 
     setMessage("Donation added.");
     setDonationForm({
+      campaignId: "",
       date: new Date().toISOString().slice(0, 10),
       amount: "",
       paymentType: "Cash",
@@ -129,6 +157,48 @@ export function ContactProfileTabs({
     router.refresh();
   }
 
+  async function submitFollowUp(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedItem) return;
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    const endpoint = followUpType === "task" ? "/api/tasks" : "/api/notes";
+    const payload =
+      followUpType === "task"
+        ? {
+            title: followUpBody || `Follow up: ${selectedItem.title}`,
+            description: selectedItem.summary,
+            suspenseDate: followUpSuspenseDate || undefined,
+            assignedToUserId: followUpAssignedToUserId || undefined,
+            contactId
+          }
+        : {
+            contactId,
+            body: followUpBody || `Follow up from ${selectedItem.itemType}: ${selectedItem.title}`,
+            followUpRequired: false
+          };
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const responsePayload = await response.json().catch(() => null);
+    if (!response.ok) {
+      setError(responsePayload?.message ?? "Unable to create follow-up.");
+      setLoading(false);
+      return;
+    }
+
+    setMessage("Follow-up created.");
+    setSelectedItem(null);
+    setFollowUpBody("");
+    setLoading(false);
+    router.refresh();
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
@@ -140,6 +210,12 @@ export function ContactProfileTabs({
         </TabButton>
         <TabButton active={activeTab === "notes"} onClick={() => setActiveTab("notes")}>
           Notes
+        </TabButton>
+        <TabButton
+          active={activeTab === "memberships"}
+          onClick={() => setActiveTab("memberships")}
+        >
+          Memberships
         </TabButton>
         <button
           type="button"
@@ -159,14 +235,29 @@ export function ContactProfileTabs({
             <p className="text-sm text-slate-500">No activity yet.</p>
           ) : (
             activity.map((entry) => (
-              <article key={entry.id as string} className="rounded-md border border-slate-200 p-3">
+              <button
+                type="button"
+                key={entry.id as string}
+                className="w-full rounded-md border border-slate-200 p-3 text-left"
+                onClick={() =>
+                  openItem({
+                    id: String(entry.id ?? ""),
+                    itemType: "Activity",
+                    title: String(entry.action_type ?? "Activity"),
+                    summary: String(entry.action_summary ?? ""),
+                    createdBy: String(entry.performed_by_user_id ?? "Unknown"),
+                    createdAt: (entry.created_at as string) ?? null,
+                    metadata: [{ label: "Entity", value: String(entry.entity_type ?? "-") }]
+                  })
+                }
+              >
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>{entry.action_type as string}</span>
                   <span>{formatDate(entry.created_at as string)}</span>
                 </div>
                 <p className="mt-1 text-sm text-slate-800">{entry.action_summary as string}</p>
                 <p className="mt-1 text-xs text-slate-500">{entry.entity_type as string}</p>
-              </article>
+              </button>
             ))
           )}
         </div>
@@ -178,32 +269,71 @@ export function ContactProfileTabs({
             {donations.length === 0 ? (
               <p className="text-sm text-slate-500">No donations recorded.</p>
             ) : (
-              donations.map((donation) => (
-                <article
-                  key={donation.id as string}
-                  className="rounded-md border border-slate-200 p-3 text-sm"
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium text-slate-900">
-                      {formatCurrency(Number(donation.amount ?? 0))}
+              donations.map((donation) => {
+                const campaign = Array.isArray(donation.campaigns)
+                  ? donation.campaigns[0]
+                  : donation.campaigns;
+                return (
+                  <button
+                    type="button"
+                    key={donation.id as string}
+                    className="w-full rounded-md border border-slate-200 p-3 text-left text-sm"
+                    onClick={() =>
+                      openItem({
+                        id: String(donation.id ?? ""),
+                        itemType: "Donation",
+                        title: formatCurrency(Number(donation.amount ?? 0)),
+                        summary: String(donation.memo ?? "Donation record"),
+                        createdBy: String(donation.created_by ?? "Unknown"),
+                        createdAt: (donation.created_at as string) ?? null,
+                        metadata: [
+                          { label: "Payment", value: String(donation.payment_type ?? "-") },
+                          {
+                            label: "Reference",
+                            value: String(
+                              donation.check_number ?? donation.transaction_id ?? "None"
+                            )
+                          },
+                          { label: "Campaign", value: String(campaign?.name ?? "-") }
+                        ]
+                      })
+                    }
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="font-medium text-slate-900">
+                        {formatCurrency(Number(donation.amount ?? 0))}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {formatDate(donation.donation_date as string)}
+                      </p>
+                    </div>
+                    <p className="text-xs text-slate-600">
+                      {(donation.payment_type as string) ?? "-"} • Campaign:{" "}
+                      {(campaign?.name as string) ?? "-"}
                     </p>
-                    <p className="text-xs text-slate-500">
-                      {formatDate(donation.donation_date as string)}
-                    </p>
-                  </div>
-                  <p className="text-xs text-slate-600">
-                    {(donation.payment_type as string) ?? "-"} • Check:{" "}
-                    {(donation.check_number as string) ?? "-"} • Txn:{" "}
-                    {(donation.transaction_id as string) ?? "-"}
-                  </p>
-                </article>
-              ))
+                  </button>
+                );
+              })
             )}
           </div>
 
           <form onSubmit={submitDonation} className="rounded-md border border-slate-200 p-4">
             <p className="mb-2 text-sm font-semibold">Add Donation</p>
             <div className="grid gap-3 md:grid-cols-3">
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={donationForm.campaignId}
+                onChange={(event) =>
+                  setDonationForm((prev) => ({ ...prev, campaignId: event.target.value }))
+                }
+              >
+                <option value="">Select Campaign</option>
+                {campaigns.map((campaign) => (
+                  <option key={campaign.id as string} value={campaign.id as string}>
+                    {campaign.name as string}
+                  </option>
+                ))}
+              </select>
               <Input
                 type="date"
                 value={donationForm.date}
@@ -271,12 +401,27 @@ export function ContactProfileTabs({
               <p className="text-sm text-slate-500">No notes available.</p>
             ) : (
               notes.map((note) => (
-                <article key={note.id as string} className="rounded-md border border-slate-200 p-3">
+                <button
+                  key={note.id as string}
+                  type="button"
+                  className="w-full rounded-md border border-slate-200 p-3 text-left"
+                  onClick={() =>
+                    openItem({
+                      id: String(note.id ?? ""),
+                      itemType: "Note",
+                      title: String(note.note_type ?? "Note"),
+                      summary: String(note.body ?? ""),
+                      createdBy: String(note.created_by ?? "Unknown"),
+                      createdAt: (note.created_at as string) ?? null,
+                      metadata: []
+                    })
+                  }
+                >
                   <p className="text-xs text-slate-500">
                     {formatDate(note.created_at as string)} • {(note.created_by as string) ?? "Unknown"}
                   </p>
                   <p className="mt-1 text-sm text-slate-800">{note.body as string}</p>
-                </article>
+                </button>
               ))
             )}
           </div>
@@ -308,7 +453,7 @@ export function ContactProfileTabs({
                   <option value="">Assign staff member</option>
                   {staffUsers.map((user) => (
                     <option key={user.user_id} value={user.user_id}>
-                      {user.user_id}
+                      {user.display_name || user.user_id}
                     </option>
                   ))}
                 </select>
@@ -332,6 +477,50 @@ export function ContactProfileTabs({
         </div>
       ) : null}
 
+      {activeTab === "memberships" ? (
+        <div className="space-y-2">
+          {memberships.length === 0 ? (
+            <p className="text-sm text-slate-500">No membership activity for this contact.</p>
+          ) : (
+            memberships.map((membership) => {
+              const membershipType = Array.isArray(membership.membership_types)
+                ? membership.membership_types[0]
+                : membership.membership_types;
+              return (
+                <button
+                  key={membership.id as string}
+                  type="button"
+                  className="w-full rounded-md border border-slate-200 p-3 text-left"
+                  onClick={() =>
+                    openItem({
+                      id: String(membership.id ?? ""),
+                      itemType: "Membership",
+                      title: String(membershipType?.name ?? "Membership"),
+                      summary: `Status: ${String(membership.status ?? "-")} • Level: ${String(
+                        membership.level ?? "-"
+                      )}`,
+                      createdBy: String(membership.created_by ?? "Unknown"),
+                      createdAt: (membership.created_at as string) ?? null,
+                      metadata: [
+                        { label: "Status", value: String(membership.status ?? "-") },
+                        { label: "Renewal", value: formatDate(membership.renewal_date as string) }
+                      ]
+                    })
+                  }
+                >
+                  <p className="text-sm font-semibold text-slate-900">
+                    {(membershipType?.name as string) ?? "Membership"}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    {membership.status as string} • Renewal {formatDate(membership.renewal_date as string)}
+                  </p>
+                </button>
+              );
+            })
+          )}
+        </div>
+      ) : null}
+
       {activeTab === "tasks" ? (
         <div className="space-y-2">
           {tasks.length === 0 ? (
@@ -342,7 +531,26 @@ export function ContactProfileTabs({
                 ? task.projects[0]
                 : (task.projects as Record<string, unknown> | null);
               return (
-                <article key={task.id as string} className="rounded-md border border-slate-200 p-3">
+                <button
+                  type="button"
+                  key={task.id as string}
+                  className="w-full rounded-md border border-slate-200 p-3 text-left"
+                  onClick={() =>
+                    openItem({
+                      id: String(task.id ?? ""),
+                      itemType: "Task",
+                      title: String(task.title ?? "Task"),
+                      summary: String(task.description ?? "-"),
+                      createdBy: String(task.created_by ?? "Unknown"),
+                      createdAt: (task.created_at as string) ?? null,
+                      metadata: [
+                        { label: "Status", value: String(task.status ?? "-") },
+                        { label: "Priority", value: String(task.priority ?? "-") },
+                        { label: "Due", value: formatDate(task.due_date as string) }
+                      ]
+                    })
+                  }
+                >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900">{task.title as string}</p>
                     <span className="text-xs text-slate-500">{formatDate(task.due_date as string)}</span>
@@ -352,10 +560,84 @@ export function ContactProfileTabs({
                     {(task.status as string) ?? "-"} • {(task.priority as string) ?? "-"}{" "}
                     {project?.name ? `• Project: ${project.name as string}` : ""}
                   </p>
-                </article>
+                </button>
               );
             })
           )}
+        </div>
+      ) : null}
+
+      {selectedItem ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  {selectedItem.itemType}
+                </p>
+                <h3 className="text-lg font-semibold text-slate-900">{selectedItem.title}</h3>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setSelectedItem(null)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="mt-3 text-sm text-slate-700">{selectedItem.summary}</p>
+            <div className="mt-3 grid gap-2 text-xs text-slate-500 md:grid-cols-2">
+              <p>Created by: {selectedItem.createdBy}</p>
+              <p>Created at: {formatDate(selectedItem.createdAt)}</p>
+              {selectedItem.metadata.map((entry) => (
+                <p key={entry.label}>
+                  {entry.label}: {entry.value}
+                </p>
+              ))}
+            </div>
+            <form className="mt-4 rounded-md border border-slate-200 p-3" onSubmit={submitFollowUp}>
+              <p className="mb-2 text-sm font-semibold">Add Follow-Up</p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={followUpType}
+                  onChange={(event) => setFollowUpType(event.target.value as "task" | "note")}
+                >
+                  <option value="task">Create Task</option>
+                  <option value="note">Create Note</option>
+                </select>
+                <Input
+                  placeholder="Follow-up summary"
+                  value={followUpBody}
+                  onChange={(event) => setFollowUpBody(event.target.value)}
+                />
+                {followUpType === "task" ? (
+                  <>
+                    <select
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={followUpAssignedToUserId}
+                      onChange={(event) => setFollowUpAssignedToUserId(event.target.value)}
+                    >
+                      <option value="">Assign staff member</option>
+                      {staffUsers.map((user) => (
+                        <option key={user.user_id} value={user.user_id}>
+                          {user.display_name || user.user_id}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      type="date"
+                      value={followUpSuspenseDate}
+                      onChange={(event) => setFollowUpSuspenseDate(event.target.value)}
+                    />
+                  </>
+                ) : null}
+              </div>
+              <Button className="mt-3" type="submit" disabled={loading}>
+                Save Follow-Up
+              </Button>
+            </form>
+          </div>
         </div>
       ) : null}
     </div>

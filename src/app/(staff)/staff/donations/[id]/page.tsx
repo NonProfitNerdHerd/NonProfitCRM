@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { Card, CardHeader } from "@/components/ui/card";
 import { getDonationById } from "@/lib/data/donations";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -14,6 +15,9 @@ export default async function DonationDetailPage({ params }: PageProps) {
   const donor = Array.isArray(donation.contacts)
     ? donation.contacts[0]
     : donation.contacts;
+  const campaign = Array.isArray(donation.campaigns)
+    ? donation.campaigns[0]
+    : donation.campaigns;
 
   return (
     <Card>
@@ -38,12 +42,45 @@ export default async function DonationDetailPage({ params }: PageProps) {
           <p>{donation.status}</p>
         </div>
         <div>
+          <p className="text-slate-500">Campaign</p>
+          <p>
+            {campaign ? (
+              <Link href={`/staff/campaigns/${donation.campaign_id as string}`}>
+                {campaign.name as string}
+              </Link>
+            ) : (
+              "-"
+            )}
+          </p>
+        </div>
+        <div>
+          <p className="text-slate-500">Payment Type</p>
+          <p>{(donation.payment_type as string) ?? "-"}</p>
+        </div>
+        <div>
+          <p className="text-slate-500">Reference</p>
+          <p>
+            {(donation.check_number as string) ||
+              (donation.transaction_id as string) ||
+              (donation.external_transaction_id as string) ||
+              "-"}
+          </p>
+        </div>
+        <div>
           <p className="text-slate-500">Source Platform</p>
           <p>{donation.source_platform ?? "-"}</p>
         </div>
         <div>
           <p className="text-slate-500">External Transaction ID</p>
           <p>{donation.external_transaction_id ?? "-"}</p>
+        </div>
+        <div>
+          <p className="text-slate-500">Created By</p>
+          <p>{(donation.created_by as string) ?? "-"}</p>
+        </div>
+        <div>
+          <p className="text-slate-500">Entered At</p>
+          <p>{formatDate(donation.created_at as string)}</p>
         </div>
       </div>
     </Card>

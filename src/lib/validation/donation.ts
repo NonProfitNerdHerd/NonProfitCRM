@@ -3,6 +3,7 @@ import { z } from "zod";
 export const donationSchema = z
   .object({
     contactId: z.string().uuid(),
+    campaignId: z.string().uuid(),
     date: z.string().min(1),
     amount: z.coerce.number().positive(),
     paymentType: z.enum(["Cash", "Check", "Card"]),

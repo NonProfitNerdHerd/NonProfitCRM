@@ -16,6 +16,7 @@ values
   ('can_view_donations', 'View Donations', 'Read donation transactions', 'donations'),
   ('can_create_donations', 'Create Donations', 'Create donations', 'donations'),
   ('can_edit_donations', 'Edit Donations', 'Edit donations', 'donations'),
+  ('can_create_campaigns', 'Create Campaigns', 'Create and manage campaigns', 'campaigns'),
   ('can_manage_memberships', 'Manage Memberships', 'Manage membership types and records', 'memberships'),
   ('can_view_communications', 'View Communications', 'Read communication and notifications', 'communications'),
   ('can_manage_communications', 'Manage Communications', 'Create and manage communication entries', 'communications'),
@@ -71,6 +72,7 @@ with template_permission_map as (
     'can_edit_tasks',
     'can_view_donations',
     'can_create_donations',
+    'can_create_campaigns',
     'can_manage_imports'
   ])
   union all
@@ -82,6 +84,7 @@ with template_permission_map as (
     'can_view_donations',
     'can_create_donations',
     'can_edit_donations',
+    'can_create_campaigns',
     'can_manage_memberships',
     'can_view_member_records',
     'can_view_communications',
@@ -108,6 +111,7 @@ with template_permission_map as (
     'can_view_donations',
     'can_create_donations',
     'can_edit_donations',
+    'can_create_campaigns',
     'can_manage_memberships',
     'can_view_member_records',
     'can_view_communications',
@@ -137,6 +141,7 @@ with template_permission_map as (
     'can_view_donations',
     'can_create_donations',
     'can_edit_donations',
+    'can_create_campaigns',
     'can_manage_memberships',
     'can_view_member_records',
     'can_view_communications',
@@ -160,6 +165,7 @@ with template_permission_map as (
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
     'can_view_donations',
+    'can_create_campaigns',
     'can_manage_memberships',
     'can_view_member_records',
     'can_view_communications',
@@ -167,6 +173,18 @@ with template_permission_map as (
     'can_export_csv',
     'can_export_excel',
     'can_view_audit_log',
+    'can_view_financial_summaries'
+  ])
+  union all
+  select 'executive_leader', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_view_donations',
+    'can_create_campaigns',
+    'can_manage_memberships',
+    'can_view_member_records',
+    'can_run_reports',
+    'can_export_csv',
     'can_view_financial_summaries'
   ])
 ),
@@ -233,49 +251,96 @@ contact_seed as (
   returning id, organization_id
 ),
 type_seed as (
-  insert into public.membership_types (organization_id, key, name, description, default_duration_months, benefits)
+  insert into public.membership_types (
+    organization_id,
+    key,
+    name,
+    description,
+    default_duration_months,
+    membership_length,
+    length_unit,
+    status,
+    benefits
+  )
   select
     org.organization_id,
     t.key,
     t.name,
     t.description,
     t.default_duration_months,
+    t.membership_length,
+    t.length_unit,
+    t.status,
     t.benefits::jsonb
   from org
   cross join (
     values
-      ('individual', 'Individual Membership', 'Standard annual membership', 12, '["newsletter","event discounts"]'),
-      ('household', 'Household Membership', 'Family-level annual membership', 12, '["newsletter","family events"]')
-  ) as t(key, name, description, default_duration_months, benefits)
+      ('individual', 'Individual Membership', 'Standard annual membership', 12, 12, 'months', 'active', '["newsletter","event discounts"]'),
+      ('household', 'Household Membership', 'Family-level annual membership', 12, 12, 'months', 'active', '["newsletter","family events"]')
+  ) as t(key, name, description, default_duration_months, membership_length, length_unit, status, benefits)
   on conflict (organization_id, key) do nothing
   returning id, organization_id
+),
+campaign_seed as (
+  insert into public.campaigns (organization_id, name, description, status, start_date)
+  select
+    org.organization_id,
+    c.name,
+    c.description,
+    c.status::public.campaign_status,
+    c.start_date::date
+  from org
+  cross join (
+    values
+      ('Annual Fund', 'Primary annual giving campaign', 'Active', current_date - interval '30 days'),
+      ('Community Grants', 'Restricted grants and sponsorship campaign', 'Active', current_date - interval '15 days')
+  ) as c(name, description, status, start_date)
+  on conflict (organization_id, name) do update
+  set
+    description = excluded.description,
+    status = excluded.status,
+    start_date = excluded.start_date
+  returning id, organization_id, name
 )
 insert into public.donations (
   organization_id,
   contact_id,
+  campaign_id,
   amount,
   currency,
   donation_date,
   status,
+  payment_type,
+  check_number,
+  transaction_id,
   source,
   source_platform,
   external_transaction_id,
   campaign,
-  is_recurring
+  is_recurring,
+  memo
 )
 select
   cs.organization_id,
   cs.id,
+  camp.id,
   150.00,
   'USD',
   current_date - interval '10 day',
   'posted',
+  'Card',
+  null,
+  concat('TXN-', left(cs.id::text, 8)),
   'import',
   'kindful',
-  concat('TXN-', left(cs.id::text, 8)),
+  concat('KIND-', left(cs.id::text, 8)),
   'Annual Fund',
-  false
+  false,
+  'Seeded donation'
 from contact_seed cs
+join campaign_seed camp
+  on camp.organization_id = cs.organization_id
+ and camp.name = 'Annual Fund'
 on conflict (organization_id, source_platform, external_transaction_id) do nothing;
 
 insert into public.report_fields (
@@ -352,6 +417,21 @@ from public.role_templates rt
 join public.permissions p on p.key = 'can_create_projects'
 where rt.organization_id is null
   and rt.key in ('administrator', 'executive_staff', 'executive_leader')
+on conflict (role_template_id, permission_id) do nothing;
+
+insert into public.role_template_permissions (role_template_id, permission_id)
+select rt.id, p.id
+from public.role_templates rt
+join public.permissions p on p.key = 'can_create_campaigns'
+where rt.organization_id is null
+  and rt.key in (
+    'administrator',
+    'executive_staff',
+    'executive_leader',
+    'staff_non_pii',
+    'staff_pii',
+    'data_entry'
+  )
 on conflict (role_template_id, permission_id) do nothing;
 
 with org as (
@@ -487,12 +567,14 @@ donation_seed as (
   insert into public.donations (
     organization_id,
     contact_id,
+    campaign_id,
     amount,
     currency,
     donation_date,
     status,
     payment_type,
     check_number,
+    transaction_id,
     source,
     source_platform,
     memo
@@ -500,16 +582,21 @@ donation_seed as (
   select
     c.organization_id,
     c.id,
+    camp.id,
     275.00,
     'USD',
     current_date - interval '3 days',
     'posted',
     'Check',
     'CHK-2026-9001',
+    null,
     'manual',
     'staff_entry',
     'Spring campaign support'
   from contacts c
+  join public.campaigns camp
+    on camp.organization_id = c.organization_id
+   and camp.name = 'Annual Fund'
   limit 1
   on conflict do nothing
   returning id, organization_id, contact_id
@@ -530,3 +617,160 @@ union all
 select organization_id, 'note', id, contact_id, 'created', 'Created note from seed data', null from note_seed
 union all
 select organization_id, 'donation', id, contact_id, 'created', 'Created donation from seed data', null from donation_seed;
+
+with org as (
+  select id as organization_id
+  from public.organizations
+  where slug = 'demo-community-foundation'
+),
+project_ref as (
+  select p.id, p.organization_id
+  from public.projects p
+  join org on org.organization_id = p.organization_id
+  where p.name = 'Spring Donor Renewal'
+  limit 1
+),
+members as (
+  select om.organization_id, om.user_id
+  from public.organization_memberships om
+  join org on org.organization_id = om.organization_id
+  where om.is_active = true
+),
+project_staff_seed as (
+  insert into public.project_staff (organization_id, project_id, user_id, role_on_project)
+  select
+    m.organization_id,
+    pr.id,
+    m.user_id,
+    case when row_number() over (order by m.user_id) = 1 then 'Project Manager' else 'Team Member' end
+  from members m
+  join project_ref pr on pr.organization_id = m.organization_id
+  on conflict (project_id, user_id) do update
+  set role_on_project = excluded.role_on_project
+  returning id, organization_id, project_id, user_id
+),
+stakeholder_seed as (
+  insert into public.project_stakeholders (
+    organization_id,
+    project_id,
+    stakeholder_name,
+    stakeholder_role_title,
+    stakeholder_organization,
+    stakeholder_type,
+    influence_level,
+    interest_level,
+    support_level,
+    engagement_strategy,
+    communication_needs,
+    owner_user_id,
+    contact_info
+  )
+  select
+    pr.organization_id,
+    pr.id,
+    s.stakeholder_name,
+    s.stakeholder_role_title,
+    s.stakeholder_organization,
+    s.stakeholder_type,
+    s.influence_level,
+    s.interest_level,
+    s.support_level,
+    s.engagement_strategy,
+    s.communication_needs,
+    (select user_id from members limit 1),
+    s.contact_info
+  from project_ref pr
+  cross join (
+    values
+      ('Patricia Gomez', 'Board Liaison', 'Hope Partners', 'External', 'High', 'High', 'Supportive', 'Weekly alignment call', 'Monthly board packet', 'patricia@hopepartners.org'),
+      ('Jordan Lee', 'Finance Director', 'Demo Community Foundation', 'Internal', 'Medium', 'High', 'Neutral', 'Bi-weekly finance review', 'Provide dashboard snapshots', 'jordan.lee@example.org')
+  ) as s(stakeholder_name, stakeholder_role_title, stakeholder_organization, stakeholder_type, influence_level, interest_level, support_level, engagement_strategy, communication_needs, contact_info)
+  returning id, organization_id, project_id
+),
+task_ref as (
+  select t.id, t.organization_id
+  from public.tasks t
+  join project_ref pr on pr.id = t.project_id
+  where t.parent_task_id is null
+  order by t.created_at asc
+  limit 1
+),
+task_comment_seed as (
+  insert into public.task_comments (organization_id, task_id, author_user_id, comment_body)
+  select
+    tr.organization_id,
+    tr.id,
+    ps.user_id,
+    'Initial project kickoff comment. @IJRebout please review donor outreach sequence.'
+  from task_ref tr
+  join project_staff_seed ps on ps.project_id in (select id from project_ref)
+  limit 1
+  returning id, organization_id, task_id
+)
+insert into public.notifications (
+  organization_id,
+  recipient_user_id,
+  title,
+  body,
+  status,
+  visibility_classification,
+  created_by,
+  notification_type,
+  related_entity_type,
+  related_entity_id,
+  action_url
+)
+select
+  ps.organization_id,
+  ps.user_id,
+  'project_assignment',
+  'You were added to project Spring Donor Renewal.',
+  'unread',
+  'staff_public',
+  null,
+  'project_assignment',
+  'project',
+  ps.project_id,
+  concat('/staff/projects/', ps.project_id::text)
+from project_staff_seed ps
+on conflict do nothing;
+
+with org as (
+  select id as organization_id
+  from public.organizations
+  where slug = 'demo-community-foundation'
+),
+contacts as (
+  select c.id, c.organization_id
+  from public.contacts c
+  join org on org.organization_id = c.organization_id
+),
+membership_type as (
+  select mt.id, mt.organization_id
+  from public.membership_types mt
+  join org on org.organization_id = mt.organization_id
+  where mt.key = 'individual'
+  limit 1
+)
+insert into public.memberships (
+  organization_id,
+  contact_id,
+  membership_type_id,
+  status,
+  level,
+  start_date,
+  end_date,
+  renewal_date
+)
+select
+  c.organization_id,
+  c.id,
+  mt.id,
+  'active',
+  'Standard',
+  current_date - interval '30 days',
+  current_date + interval '335 days',
+  current_date + interval '335 days'
+from contacts c
+join membership_type mt on mt.organization_id = c.organization_id
+on conflict do nothing;

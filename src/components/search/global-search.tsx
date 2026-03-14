@@ -8,10 +8,12 @@ type SearchPayload = {
   results: {
     contacts: Array<Record<string, unknown>>;
     donations: Array<Record<string, unknown>>;
+    campaigns: Array<Record<string, unknown>>;
     tasks: Array<Record<string, unknown>>;
     notes: Array<Record<string, unknown>>;
     organizations: Array<Record<string, unknown>>;
     projects: Array<Record<string, unknown>>;
+    memberships: Array<Record<string, unknown>>;
   };
 };
 
@@ -19,10 +21,12 @@ function entityCount(results: SearchPayload["results"]) {
   return (
     results.contacts.length +
     results.donations.length +
+    results.campaigns.length +
     results.tasks.length +
     results.notes.length +
     results.organizations.length +
-    results.projects.length
+    results.projects.length +
+    results.memberships.length
   );
 }
 
@@ -63,7 +67,7 @@ export function GlobalSearch() {
           if (payload) setOpen(true);
         }}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search contacts, donations, tasks, notes, organizations, projects..."
+        placeholder="Search contacts, donations, campaigns, tasks, notes, organizations, projects, memberships..."
       />
       {loading ? (
         <p className="absolute right-3 top-2.5 text-xs text-slate-500">Searching...</p>
@@ -95,6 +99,13 @@ export function GlobalSearch() {
             }
           />
           <SearchSection
+            title="Campaigns"
+            rows={payload.results.campaigns}
+            href={(row) => `/staff/campaigns/${row.id as string}`}
+            label={(row) => (row.name as string) ?? "Campaign"}
+            subtitle={(row) => `${(row.status as string) ?? ""} ${(row.description as string) ?? ""}`.trim()}
+          />
+          <SearchSection
             title="Tasks"
             rows={payload.results.tasks}
             href={(row) => `/staff/tasks/${row.id as string}`}
@@ -120,6 +131,24 @@ export function GlobalSearch() {
             href={(row) => `/staff/projects/${row.id as string}`}
             label={(row) => (row.name as string) ?? "Project"}
             subtitle={(row) => (row.description as string) ?? ""}
+          />
+          <SearchSection
+            title="Memberships"
+            rows={payload.results.memberships}
+            href={(row) => `/staff/memberships/${row.id as string}`}
+            label={(row) => {
+              const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
+              const type = Array.isArray(row.membership_types)
+                ? row.membership_types[0]
+                : row.membership_types;
+              return `${contact?.first_name ?? ""} ${contact?.last_name ?? ""}`.trim() || "Membership";
+            }}
+            subtitle={(row) => {
+              const type = Array.isArray(row.membership_types)
+                ? row.membership_types[0]
+                : row.membership_types;
+              return `${type?.name ?? ""} • ${(row.status as string) ?? ""}`.trim();
+            }}
           />
         </div>
       ) : null}

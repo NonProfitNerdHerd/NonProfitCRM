@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createProject, listProjects, canCreateProjects } from "@/lib/data/projects";
+import { projectSchema } from "@/lib/validation/crm";
 
 const projectSchema = z.object({
   name: z.string().min(1),
@@ -8,10 +8,21 @@ const projectSchema = z.object({
   status: z.string().optional()
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const status =
+      (url.searchParams.get("status") as
+        | "active"
+        | "on_hold"
+        | "completed"
+        | "cancelled"
+        | "all"
+        | null) ?? "all";
+    const q = url.searchParams.get("q") ?? undefined;
+
     const [projects, canCreate] = await Promise.all([
-      listProjects(),
+      listProjects({ status, q }),
       canCreateProjects()
     ]);
     return NextResponse.json({ projects, canCreate });

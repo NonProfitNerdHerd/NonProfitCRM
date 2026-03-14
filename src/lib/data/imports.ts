@@ -89,6 +89,7 @@ export async function processCsvImport(params: {
   let successCount = 0;
   let failureCount = 0;
   const failures: string[] = [];
+  const campaignCache = new Map<string, string>();
 
   for (const row of parsed.data) {
     try {
@@ -132,15 +133,57 @@ export async function processCsvImport(params: {
           .eq("external_source_id", contactExternalId)
           .maybeSingle();
 
+        const campaignName =
+          row[params.mapping.campaign ?? "campaign"]?.trim() || "Imported Donations";
+        let campaignId = campaignCache.get(campaignName);
+        if (!campaignId) {
+          const { data: existingCampaign } = await supabase
+            .from("campaigns")
+            .select("id")
+            .eq("organization_id", organizationId)
+            .eq("name", campaignName)
+            .maybeSingle();
+
+          if (existingCampaign?.id) {
+            campaignId = existingCampaign.id;
+          } else {
+            const { data: createdCampaign, error: campaignInsertError } = await supabase
+              .from("campaigns")
+              .insert({
+                organization_id: organizationId,
+                name: campaignName,
+                status: "Active",
+                description: "Auto-created from import pipeline",
+                created_by: userId
+              })
+              .select("id")
+              .single();
+            if (campaignInsertError) throw campaignInsertError;
+            campaignId = createdCampaign.id;
+          }
+          campaignCache.set(campaignName, campaignId);
+        }
+
+        const paymentType =
+          row[params.mapping.payment_type ?? "payment_type"]?.trim() || "Cash";
+        const checkNumber = row[params.mapping.check_number ?? "check_number"]?.trim() || null;
+        const transactionId =
+          row[params.mapping.transaction_id ?? "transaction_id"]?.trim() || null;
+
         const payload = {
           organization_id: organizationId,
           contact_id: contact?.id ?? null,
+          campaign_id: campaignId,
           amount: Number(row[params.mapping.amount ?? "amount"] ?? 0),
           currency: row[params.mapping.currency ?? "currency"] ?? "USD",
           donation_date:
             row[params.mapping.donation_date ?? "donation_date"] ??
             new Date().toISOString().slice(0, 10),
           status: row[params.mapping.status ?? "status"] ?? "posted",
+          payment_type: paymentType,
+          check_number: checkNumber,
+          transaction_id: transactionId,
+          campaign: campaignName,
           source: "import",
           source_platform: params.sourcePlatform,
           external_transaction_id:

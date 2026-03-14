@@ -1,20 +1,29 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
-import { updateTaskStatus } from "@/lib/data/tasks";
-
-const updateTaskSchema = z.object({
-  status: z.enum(["todo", "in_progress", "completed", "blocked", "cancelled"])
-});
+import { getTask, updateTask } from "@/lib/data/tasks";
+import { taskUpdateSchema } from "@/lib/validation/crm";
 
 type RouteProps = {
   params: Promise<{ id: string }>;
 };
 
+export async function GET(_request: Request, { params }: RouteProps) {
+  try {
+    const { id } = await params;
+    const data = await getTask(id);
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "Failed to load task" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PATCH(request: Request, { params }: RouteProps) {
   try {
     const { id } = await params;
     const payload = await request.json();
-    const parsed = updateTaskSchema.safeParse(payload);
+    const parsed = taskUpdateSchema.safeParse(payload);
     if (!parsed.success) {
       return NextResponse.json(
         { message: "Validation error", issues: parsed.error.flatten() },
@@ -22,7 +31,15 @@ export async function PATCH(request: Request, { params }: RouteProps) {
       );
     }
 
-    await updateTaskStatus({ taskId: id, status: parsed.data.status });
+    await updateTask({
+      taskId: id,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      status: parsed.data.status,
+      priority: parsed.data.priority,
+      suspenseDate: parsed.data.suspenseDate,
+      assignedToUserId: parsed.data.assignedToUserId
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

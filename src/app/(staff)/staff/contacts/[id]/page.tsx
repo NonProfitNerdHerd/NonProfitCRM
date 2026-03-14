@@ -18,11 +18,20 @@ export default async function ContactDetailPage({ params }: PageProps) {
   if (!contact) notFound();
 
   const supabase = await createClient();
-  const { data: staffUsers } = await supabase
+  const { data: memberships } = await supabase
     .from("organization_memberships")
     .select("user_id")
     .eq("organization_id", context.organizationId)
     .eq("is_active", true);
+
+  const staffUserIds = (memberships ?? []).map((membership) => membership.user_id);
+  const { data: profiles } = staffUserIds.length
+    ? await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", staffUserIds)
+    : { data: [] as Array<{ id: string; display_name: string | null }> };
+  const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile.display_name]));
 
   return (
     <div className="space-y-4">
@@ -92,7 +101,12 @@ export default async function ContactDetailPage({ params }: PageProps) {
           donations={profile.donations}
           notes={profile.notes}
           tasks={profile.tasks}
-          staffUsers={(staffUsers ?? []) as Array<{ user_id: string }>}
+          memberships={profile.memberships}
+          campaigns={profile.campaigns}
+          staffUsers={(memberships ?? []).map((membership) => ({
+            user_id: membership.user_id as string,
+            display_name: profileMap.get(membership.user_id as string) ?? null
+          }))}
         />
       </Card>
     </div>

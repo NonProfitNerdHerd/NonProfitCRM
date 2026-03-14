@@ -4,10 +4,12 @@ import { requireStaffPermission } from "@/lib/auth/guards";
 export type SearchResultGroup = {
   contacts: Array<Record<string, unknown>>;
   donations: Array<Record<string, unknown>>;
+  campaigns: Array<Record<string, unknown>>;
   tasks: Array<Record<string, unknown>>;
   notes: Array<Record<string, unknown>>;
   organizations: Array<Record<string, unknown>>;
   projects: Array<Record<string, unknown>>;
+  memberships: Array<Record<string, unknown>>;
 };
 
 export async function globalSearch(query: string): Promise<SearchResultGroup> {
@@ -19,10 +21,12 @@ export async function globalSearch(query: string): Promise<SearchResultGroup> {
     return {
       contacts: [],
       donations: [],
+      campaigns: [],
       tasks: [],
       notes: [],
       organizations: [],
-      projects: []
+      projects: [],
+      memberships: []
     };
   }
 
@@ -32,10 +36,12 @@ export async function globalSearch(query: string): Promise<SearchResultGroup> {
     { data: contacts },
     { data: donationTextMatches },
     { data: donationAmountMatches },
+    { data: campaigns },
     { data: tasks },
     { data: notes },
     { data: organizations },
-    { data: projects }
+    { data: projects },
+    { data: memberships }
   ] = await Promise.all([
     supabase
       .from("contacts")
@@ -57,6 +63,12 @@ export async function globalSearch(query: string): Promise<SearchResultGroup> {
           .eq("amount", numericAmount)
           .limit(8)
       : Promise.resolve({ data: [] }),
+    supabase
+      .from("campaigns")
+      .select("id, name, description, status")
+      .eq("organization_id", context.organizationId)
+      .or(`name.ilike.${pattern},description.ilike.${pattern}`)
+      .limit(8),
     supabase
       .from("tasks")
       .select("id, title, description, due_date, status, contacts(first_name,last_name)")
@@ -80,6 +92,12 @@ export async function globalSearch(query: string): Promise<SearchResultGroup> {
       .select("id, name, description, status")
       .eq("organization_id", context.organizationId)
       .or(`name.ilike.${pattern},description.ilike.${pattern}`)
+      .limit(8),
+    supabase
+      .from("memberships")
+      .select("id, status, level, renewal_date, contacts(first_name,last_name), membership_types(name)")
+      .eq("organization_id", context.organizationId)
+      .or(`status.ilike.${pattern},level.ilike.${pattern}`)
       .limit(8)
   ]);
 
@@ -91,9 +109,11 @@ export async function globalSearch(query: string): Promise<SearchResultGroup> {
   return {
     contacts: contacts ?? [],
     donations: Array.from(donationsMap.values()),
+    campaigns: campaigns ?? [],
     tasks: tasks ?? [],
     notes: notes ?? [],
     organizations: organizations ?? [],
-    projects: projects ?? []
+    projects: projects ?? [],
+    memberships: memberships ?? []
   };
 }

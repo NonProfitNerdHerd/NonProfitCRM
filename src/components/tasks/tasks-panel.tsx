@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/utils";
 
 type TaskRow = Record<string, unknown> & { id: string };
 type FilterOptions = {
-  users: Array<{ user_id: string }>;
+  users: Array<{ user_id: string; display_name: string | null }>;
   projects: Array<{ id: string; name: string }>;
   contacts: Array<{ id: string; first_name: string; last_name: string }>;
 };
@@ -134,7 +134,7 @@ export function TasksPanel() {
             <option value="">Assigned user</option>
             {filters.users.map((user) => (
               <option key={user.user_id} value={user.user_id}>
-                {user.user_id}
+                {user.display_name || user.user_id}
               </option>
             ))}
           </select>
@@ -226,7 +226,7 @@ export function TasksPanel() {
             <option value="">Assign user</option>
             {filters.users.map((user) => (
               <option key={user.user_id} value={user.user_id}>
-                {user.user_id}
+                {user.display_name || user.user_id}
               </option>
             ))}
           </select>

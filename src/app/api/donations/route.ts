@@ -15,6 +15,7 @@ export async function POST(request: Request) {
 
     const id = await addDonationForContact({
       contactId: parsed.data.contactId,
+      campaignId: parsed.data.campaignId,
       date: parsed.data.date,
       amount: parsed.data.amount,
       paymentType: parsed.data.paymentType,

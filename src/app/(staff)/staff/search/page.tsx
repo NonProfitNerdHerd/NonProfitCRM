@@ -34,6 +34,13 @@ export default async function StaffSearchPage({ searchParams }: PageProps) {
           subtitle={(row) => (row.donation_date as string) ?? ""}
         />
         <Section
+          title="Campaigns"
+          rows={results.campaigns}
+          href={(row) => `/staff/campaigns/${row.id as string}`}
+          label={(row) => (row.name as string) ?? "Campaign"}
+          subtitle={(row) => `${(row.status as string) ?? ""} ${(row.description as string) ?? ""}`.trim()}
+        />
+        <Section
           title="Tasks"
           rows={results.tasks}
           href={(row) => `/staff/tasks/${row.id as string}`}
@@ -59,6 +66,24 @@ export default async function StaffSearchPage({ searchParams }: PageProps) {
           href={(row) => `/staff/projects/${row.id as string}`}
           label={(row) => (row.name as string) ?? "Project"}
           subtitle={(row) => (row.description as string) ?? ""}
+        />
+        <Section
+          title="Memberships"
+          rows={results.memberships}
+          href={(row) => `/staff/memberships/${row.id as string}`}
+          label={(row) => {
+            const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
+            const type = Array.isArray(row.membership_types)
+              ? row.membership_types[0]
+              : row.membership_types;
+            return `${contact?.first_name ?? ""} ${contact?.last_name ?? ""}`.trim() || "Membership";
+          }}
+          subtitle={(row) => {
+            const type = Array.isArray(row.membership_types)
+              ? row.membership_types[0]
+              : row.membership_types;
+            return `${type?.name ?? ""} • ${(row.status as string) ?? ""}`.trim();
+          }}
         />
       </div>
     </Card>

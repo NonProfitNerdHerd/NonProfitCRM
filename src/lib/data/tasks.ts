@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireStaffPermission } from "@/lib/auth/guards";
 import { recordActivity } from "@/lib/data/activity-log";
+import { createNotification } from "@/lib/data/notifications";
+import { resolveMentions } from "@/lib/data/users";
 
 function effectiveTaskStatus(task: {
   status: string;
@@ -11,6 +13,17 @@ function effectiveTaskStatus(task: {
   if (task.due_date && new Date(task.due_date) < new Date()) return "Overdue";
   if (task.status === "in_progress") return "In Progress";
   return "Open";
+}
+
+function parseMentionTokens(commentBody: string) {
+  const regex = /@([a-zA-Z0-9._-]+)/g;
+  const tokens = new Set<string>();
+  let match: RegExpExecArray | null = regex.exec(commentBody);
+  while (match) {
+    tokens.add(match[1]);
+    match = regex.exec(commentBody);
+  }
+  return Array.from(tokens);
 }
 
 export async function listTasks(filters?: {
@@ -53,7 +66,7 @@ export async function taskFilterOptions() {
   const context = await requireStaffPermission("can_view_dashboard");
   const supabase = await createClient();
 
-  const [{ data: profiles }, { data: projects }, { data: contacts }] = await Promise.all([
+  const [{ data: memberships }, { data: projects }, { data: contacts }] = await Promise.all([
     supabase
       .from("organization_memberships")
       .select("user_id")
@@ -71,8 +84,19 @@ export async function taskFilterOptions() {
       .order("last_name", { ascending: true })
   ]);
 
+  const userIds = (memberships ?? []).map((entry) => entry.user_id);
+  const { data: profiles } = userIds.length
+    ? await supabase.from("profiles").select("id, display_name").in("id", userIds)
+    : { data: [] as Array<{ id: string; display_name: string | null }> };
+  const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile.display_name]));
+
+  const users = (memberships ?? []).map((entry) => ({
+    user_id: entry.user_id as string,
+    display_name: profileMap.get(entry.user_id as string) ?? null
+  }));
+
   return {
-    users: profiles ?? [],
+    users,
     projects: projects ?? [],
     contacts: contacts ?? []
   };
@@ -116,7 +140,7 @@ export async function createTask(input: {
       parent_task_id: input.parentTaskId ?? null,
       created_by: context.userId
     })
-    .select("id, contact_id")
+    .select("id, contact_id, assigned_to")
     .single();
 
   if (error) throw error;
@@ -129,38 +153,89 @@ export async function createTask(input: {
     relatedContactId: data.contact_id
   });
 
+  if (data.assigned_to && data.assigned_to !== context.userId) {
+    await createNotification({
+      recipientUserId: data.assigned_to as string,
+      type: "task_assignment",
+      message: `A new task "${input.title}" was assigned to you.`,
+      relatedEntityType: "task",
+      relatedEntityId: data.id,
+      actionUrl: `/staff/tasks/${data.id}`
+    });
+  }
+
   return data.id;
 }
 
-export async function updateTaskStatus(input: {
+export async function updateTask(input: {
   taskId: string;
-  status: "todo" | "in_progress" | "completed" | "blocked" | "cancelled";
+  title?: string;
+  description?: string;
+  status?: "todo" | "in_progress" | "completed" | "blocked" | "cancelled";
+  priority?: "low" | "medium" | "high" | "urgent";
+  suspenseDate?: string;
+  assignedToUserId?: string | null;
 }) {
   const context = await requireStaffPermission("can_edit_tasks");
   const supabase = await createClient();
 
-  const updates = {
-    status: input.status,
-    completed_at: input.status === "completed" ? new Date().toISOString() : null
-  };
+  const { data: previous, error: previousError } = await supabase
+    .from("tasks")
+    .select("id, title, assigned_to, contact_id")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.taskId)
+    .single();
+  if (previousError) throw previousError;
+
+  const updates: Record<string, unknown> = {};
+  if (input.title !== undefined) updates.title = input.title;
+  if (input.description !== undefined) updates.description = input.description || null;
+  if (input.status !== undefined) {
+    updates.status = input.status;
+    updates.completed_at = input.status === "completed" ? new Date().toISOString() : null;
+  }
+  if (input.priority !== undefined) updates.priority = input.priority;
+  if (input.suspenseDate !== undefined) updates.due_date = input.suspenseDate || null;
+  if (input.assignedToUserId !== undefined) updates.assigned_to = input.assignedToUserId;
 
   const { data, error } = await supabase
     .from("tasks")
     .update(updates)
     .eq("organization_id", context.organizationId)
     .eq("id", input.taskId)
-    .select("id, title, contact_id")
+    .select("id, title, assigned_to, contact_id")
     .single();
-
   if (error) throw error;
 
   await recordActivity({
     entityType: "task",
     entityId: data.id,
-    actionType: "status_changed",
-    actionSummary: `Updated task "${data.title}" to ${input.status}`,
+    actionType: "updated",
+    actionSummary: `Updated task "${data.title}"`,
     relatedContactId: data.contact_id
   });
+
+  if (
+    data.assigned_to &&
+    data.assigned_to !== context.userId &&
+    data.assigned_to !== previous.assigned_to
+  ) {
+    await createNotification({
+      recipientUserId: data.assigned_to as string,
+      type: "task_assignment",
+      message: `Task "${data.title}" was assigned to you.`,
+      relatedEntityType: "task",
+      relatedEntityId: data.id,
+      actionUrl: `/staff/tasks/${data.id}`
+    });
+  }
+}
+
+export async function updateTaskStatus(input: {
+  taskId: string;
+  status: "todo" | "in_progress" | "completed" | "blocked" | "cancelled";
+}) {
+  return updateTask({ taskId: input.taskId, status: input.status });
 }
 
 export async function dashboardTaskBuckets(projectId?: string) {
@@ -227,17 +302,86 @@ export async function getTask(taskId: string) {
 
   if (error) throw error;
 
-  const { data: subtasks, error: subtasksError } = await supabase
-    .from("tasks")
-    .select("id,title,status,priority,due_date,assigned_to,completed_at")
-    .eq("organization_id", context.organizationId)
-    .eq("parent_task_id", taskId)
-    .order("due_date", { ascending: true });
+  const [{ data: subtasks, error: subtasksError }, { data: comments, error: commentsError }] =
+    await Promise.all([
+      supabase
+        .from("tasks")
+        .select("id,title,status,priority,due_date,assigned_to,completed_at")
+        .eq("organization_id", context.organizationId)
+        .eq("parent_task_id", taskId)
+        .order("due_date", { ascending: true }),
+      supabase
+        .from("task_comments")
+        .select("id, author_user_id, comment_body, created_at, updated_at")
+        .eq("organization_id", context.organizationId)
+        .eq("task_id", taskId)
+        .order("created_at", { ascending: true })
+    ]);
 
   if (subtasksError) throw subtasksError;
+  if (commentsError) throw commentsError;
 
   return {
     task: data,
-    subtasks: subtasks ?? []
+    subtasks: subtasks ?? [],
+    comments: comments ?? []
   };
+}
+
+export async function addTaskComment(input: { taskId: string; commentBody: string }) {
+  const context = await requireStaffPermission("can_view_dashboard");
+  const supabase = await createClient();
+
+  const { data: task, error: taskError } = await supabase
+    .from("tasks")
+    .select("id, title, contact_id, assigned_to")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.taskId)
+    .single();
+  if (taskError) throw taskError;
+
+  const { data, error } = await supabase
+    .from("task_comments")
+    .insert({
+      organization_id: context.organizationId,
+      task_id: input.taskId,
+      author_user_id: context.userId,
+      comment_body: input.commentBody
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  await recordActivity({
+    entityType: "task_comment",
+    entityId: data.id,
+    actionType: "created",
+    actionSummary: `Comment added to task "${task.title}"`,
+    relatedContactId: task.contact_id
+  });
+
+  if (task.assigned_to && task.assigned_to !== context.userId) {
+    await createNotification({
+      recipientUserId: task.assigned_to as string,
+      type: "task_comment",
+      message: `A comment was added on task "${task.title}".`,
+      relatedEntityType: "task",
+      relatedEntityId: task.id,
+      actionUrl: `/staff/tasks/${task.id}`
+    });
+  }
+
+  const mentions = parseMentionTokens(input.commentBody);
+  const mentionedUserIds = await resolveMentions(mentions);
+  for (const userId of mentionedUserIds) {
+    if (userId === context.userId) continue;
+    await createNotification({
+      recipientUserId: userId,
+      type: "task_mention",
+      message: `You were mentioned in a comment on "${task.title}".`,
+      relatedEntityType: "task",
+      relatedEntityId: task.id,
+      actionUrl: `/staff/tasks/${task.id}`
+    });
+  }
 }
