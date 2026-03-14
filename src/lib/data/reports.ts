@@ -109,7 +109,7 @@ function contactDisplayName(contact: Record<string, unknown>) {
   return name || "Unnamed Contact";
 }
 
-function profileLabel(profile: Record<string, unknown> | null) {
+function profileLabel(profile: Record<string, unknown> | null | undefined) {
   if (!profile) return "";
   if (text(profile.display_name)) return text(profile.display_name);
   const combined = `${text(profile.first_name)} ${text(profile.last_name)}`.trim();
