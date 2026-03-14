@@ -8,6 +8,20 @@ type RoleTemplateRow = {
   name: string;
 };
 
+export type AdminRoleTemplate = RoleTemplateRow;
+
+export type AdminManagedUser = {
+  membership_id: string;
+  user_id: string;
+  is_active: boolean;
+  first_name: string;
+  last_name: string;
+  display_name: string;
+  email: string;
+  username: string;
+  roles: Array<{ id: string; key: string; name: string }>;
+};
+
 function randomPassword() {
   return `Tmp!${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
@@ -71,22 +85,42 @@ export async function listAdminUsersData() {
     extraMap.set(role.user_id as string, list);
   }
 
-  const users = memberships.map((membership) => {
+  const users: AdminManagedUser[] = memberships.map((membership) => {
     const primaryRole = Array.isArray(membership.role_templates)
       ? membership.role_templates[0]
       : membership.role_templates;
     const extraRoles = extraMap.get(membership.user_id as string) ?? [];
     const profile = profileMap.get(membership.user_id as string);
     const mergedRoles = [
-      primaryRole ? (primaryRole as Record<string, unknown>) : null,
+      primaryRole
+        ? {
+            id: String((primaryRole as Record<string, unknown>).id ?? ""),
+            key: String((primaryRole as Record<string, unknown>).key ?? ""),
+            name: String((primaryRole as Record<string, unknown>).name ?? "")
+          }
+        : null,
       ...extraRoles.map((extraRole) =>
         Array.isArray(extraRole.role_templates)
-          ? (extraRole.role_templates[0] as Record<string, unknown>)
-          : (extraRole.role_templates as Record<string, unknown>)
+          ? {
+              id: String(
+                ((extraRole.role_templates[0] as Record<string, unknown>).id as string) ?? ""
+              ),
+              key: String(
+                ((extraRole.role_templates[0] as Record<string, unknown>).key as string) ?? ""
+              ),
+              name: String(
+                ((extraRole.role_templates[0] as Record<string, unknown>).name as string) ?? ""
+              )
+            }
+          : {
+              id: String(((extraRole.role_templates as Record<string, unknown>).id as string) ?? ""),
+              key: String(((extraRole.role_templates as Record<string, unknown>).key as string) ?? ""),
+              name: String(((extraRole.role_templates as Record<string, unknown>).name as string) ?? "")
+            }
       )
     ]
       .filter(Boolean)
-      .map((role) => role as Record<string, unknown>);
+      .filter((role): role is { id: string; key: string; name: string } => Boolean(role?.id));
 
     return {
       membership_id: membership.id as string,

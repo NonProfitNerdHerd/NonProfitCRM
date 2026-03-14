@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  getContactAnalytics,
-  type AnalyticsRangeKey
-} from "@/lib/data/analytics";
+import { getContactAnalytics } from "@/lib/data/analytics";
+import { type AnalyticsRangeKey } from "@/lib/analytics/config";
 
 function resolveRange(raw: string | null): AnalyticsRangeKey {
   if (raw === "30d" || raw === "60d" || raw === "90d" || raw === "120d" || raw === "1y" || raw === "3y" || raw === "5y") {

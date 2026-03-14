@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ANALYTICS_RANGES, type AnalyticsRangeKey } from "@/lib/data/analytics";
+import { ANALYTICS_RANGES, type AnalyticsRangeKey } from "@/lib/analytics/config";
 import { LineChart } from "@/components/analytics/line-chart";
 import { formatCurrency, formatDate } from "@/lib/utils";
 

@@ -14,16 +14,7 @@ export default async function UserManagementPage() {
         subtitle="Create users, assign role templates, and manage active status"
       />
       <UsersManagement
-        initialUsers={users as Array<{
-          user_id: string;
-          is_active: boolean;
-          first_name: string;
-          last_name: string;
-          display_name: string;
-          email: string;
-          username: string;
-          roles: Array<{ id: string; key: string; name: string }>;
-        }>}
+        initialUsers={users}
         roles={roles}
       />
     </Card>
