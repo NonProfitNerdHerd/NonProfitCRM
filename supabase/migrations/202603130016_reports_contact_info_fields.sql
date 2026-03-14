@@ -37,11 +37,6 @@ select
   end as email,
   case
     when app.has_permission(c.organization_id, 'can_view_pii') or c.portal_user_id = auth.uid()
-      then c.alternate_email
-    else null
-  end as alternate_email,
-  case
-    when app.has_permission(c.organization_id, 'can_view_pii') or c.portal_user_id = auth.uid()
       then c.phone
     else null
   end as phone,
@@ -77,6 +72,33 @@ select
   end as postal_code,
   case
     when app.has_permission(c.organization_id, 'can_view_pii')
+      then c.country
+    else null
+  end as country,
+  case
+    when app.has_permission(c.organization_id, 'can_view_pii')
+      then c.birthdate
+    else null
+  end as birthdate,
+  c.organization_name,
+  c.donor_status,
+  c.member_status,
+  c.communication_preferences,
+  c.tags,
+  c.external_source,
+  c.external_source_id,
+  c.import_job_id,
+  c.created_by,
+  c.updated_by,
+  c.created_at,
+  c.updated_at,
+  case
+    when app.has_permission(c.organization_id, 'can_view_pii') or c.portal_user_id = auth.uid()
+      then c.alternate_email
+    else null
+  end as alternate_email,
+  case
+    when app.has_permission(c.organization_id, 'can_view_pii')
       then c.mailing_address_line_1
     else null
   end as mailing_address_line_1,
@@ -99,27 +121,5 @@ select
     when app.has_permission(c.organization_id, 'can_view_pii')
       then c.mailing_postal_code
     else null
-  end as mailing_postal_code,
-  case
-    when app.has_permission(c.organization_id, 'can_view_pii')
-      then c.country
-    else null
-  end as country,
-  case
-    when app.has_permission(c.organization_id, 'can_view_pii')
-      then c.birthdate
-    else null
-  end as birthdate,
-  c.organization_name,
-  c.donor_status,
-  c.member_status,
-  c.communication_preferences,
-  c.tags,
-  c.external_source,
-  c.external_source_id,
-  c.import_job_id,
-  c.created_by,
-  c.updated_by,
-  c.created_at,
-  c.updated_at
+  end as mailing_postal_code
 from public.contacts c;
