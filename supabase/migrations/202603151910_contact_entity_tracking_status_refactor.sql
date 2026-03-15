@@ -161,7 +161,9 @@ create trigger trg_contacts_classification_defaults
 before insert or update on public.contacts
 for each row execute function app.apply_contact_classification_defaults();
 
-create or replace view public.contacts_safe_view
+drop view if exists public.contacts_safe_view;
+
+create view public.contacts_safe_view
 with (security_invoker = true)
 as
 select
