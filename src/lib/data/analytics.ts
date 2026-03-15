@@ -36,12 +36,14 @@ type LatestActivityRow = {
         first_name: string | null;
         last_name: string | null;
         organization_name: string | null;
+        entity_type?: string | null;
       }
     | Array<{
         id: string;
         first_name: string | null;
         last_name: string | null;
         organization_name: string | null;
+        entity_type?: string | null;
       }>
     | null;
 };
