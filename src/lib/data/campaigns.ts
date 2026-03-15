@@ -231,8 +231,7 @@ export async function updateCampaign(campaignId: string, input: CampaignInput) {
       description: input.description ?? null,
       status: input.status ?? "Active",
       start_date: input.startDate ?? null,
-      end_date: input.endDate ?? null,
-      updated_by: context.userId
+      end_date: input.endDate ?? null
     })
     .eq("organization_id", context.organizationId)
     .eq("id", campaignId);
