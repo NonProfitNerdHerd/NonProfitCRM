@@ -2,6 +2,7 @@ import { createIntegrationClient } from "@/lib/integrations/db";
 import { IntegrationConnection } from "@/lib/integrations/types";
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
 import { IntegrationLogService } from "@/lib/integrations/integration-log-service";
+import { isGivingFuelIntegrationKey } from "@/lib/integrations/givingfuel-contacts-config";
 
 export class IntegrationRetryService {
   private syncService = new WebconnexSyncService();
@@ -13,8 +14,8 @@ export class IntegrationRetryService {
     integrationKey: string;
     connection: IntegrationConnection;
   }) {
-    if (input.integrationKey !== "webconnex") {
-      throw new Error("Retry is currently supported for Webconnex only.");
+    if (!isGivingFuelIntegrationKey(input.integrationKey)) {
+      throw new Error("Retry is currently supported for GivingFuel integrations only.");
     }
 
     const supabase = await createIntegrationClient();
@@ -33,7 +34,7 @@ export class IntegrationRetryService {
       definition: {
         id: input.connection.integration_definition_id,
         name: "Webconnex",
-        provider_key: "webconnex",
+        provider_key: input.integrationKey,
         description: "Webconnex API synchronization",
         category: "donations",
         is_active: true,

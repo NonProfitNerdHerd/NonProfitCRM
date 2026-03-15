@@ -4,9 +4,13 @@ import {
   GIVINGFUEL_API_HEADER_NAME,
   GIVINGFUEL_BASE_URL,
   GIVINGFUEL_CUSTOMERS_PATH,
+  GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+  GIVINGFUEL_DONATIONS_INTEGRATION_NAME,
   GIVINGFUEL_INTEGRATION_KEY,
   GIVINGFUEL_INTEGRATION_NAME,
-  GIVINGFUEL_PRODUCT_VALUE
+  GIVINGFUEL_PRODUCT_VALUE,
+  GIVINGFUEL_TRANSACTIONS_PATH,
+  isGivingFuelIntegrationKey
 } from "@/lib/integrations/givingfuel-contacts-config";
 import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 
@@ -25,16 +29,19 @@ const DEFAULT_WEBCONNEX_FIELD_MAPPING = {
   donations: {
     externalTransactionId: "id",
     externalContactId: "contact_id",
+    pageValue: "page",
     amount: "amount",
     donationDate: "donation_date",
     paymentMethod: "payment_method",
     status: "status",
+    campaignName: "campaign",
+    subCampaignName: "sub_campaign",
     campaign: "campaign",
     notes: "notes"
   }
 };
 
-const DEFAULT_WEBCONNEX_SYNC_SETTINGS = {
+const DEFAULT_CONTACTS_SYNC_SETTINGS = {
   syncMode: "manual_and_scheduled",
   scheduleFrequency: "daily",
   contactSyncEnabled: true,
@@ -48,8 +55,25 @@ const DEFAULT_WEBCONNEX_SYNC_SETTINGS = {
   donationsCursor: null
 };
 
+const DEFAULT_DONATIONS_SYNC_SETTINGS = {
+  syncMode: "manual_and_scheduled",
+  scheduleFrequency: "daily",
+  contactSyncEnabled: false,
+  donationSyncEnabled: true,
+  fullSyncEnabled: false,
+  incrementalSyncEnabled: true,
+  fallbackContactMatch: "external_id_only",
+  initialImportStartDate: null,
+  lastSuccessfulSyncDate: null,
+  contactsCursor: null,
+  donationsCursor: null
+};
+
 function defaultConnectionName(definition: IntegrationDefinition) {
   if (definition.provider_key === GIVINGFUEL_INTEGRATION_KEY) return GIVINGFUEL_INTEGRATION_NAME;
+  if (definition.provider_key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) {
+    return GIVINGFUEL_DONATIONS_INTEGRATION_NAME;
+  }
   return definition.name;
 }
 
@@ -84,7 +108,7 @@ export class IntegrationConfigurationService {
         organization_id: organizationId,
         integration_definition_id: definition.id,
         name: defaultConnectionName(definition),
-        base_url: definition.provider_key === GIVINGFUEL_INTEGRATION_KEY ? GIVINGFUEL_BASE_URL : null,
+        base_url: isGivingFuelIntegrationKey(definition.provider_key) ? GIVINGFUEL_BASE_URL : null,
         auth_type: "api_key_header",
         api_key_reference: null,
         is_enabled: false,
@@ -93,9 +117,10 @@ export class IntegrationConfigurationService {
         retry_settings: { maxRetries: 3, backoffMs: 1000 },
         debug_logging_enabled: false,
         configuration_json:
-          definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
+          isGivingFuelIntegrationKey(definition.provider_key)
             ? {
                 contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+                transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
                 testPath: GIVINGFUEL_CUSTOMERS_PATH,
                 authHeaderName: GIVINGFUEL_API_HEADER_NAME,
                 staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
@@ -104,10 +129,12 @@ export class IntegrationConfigurationService {
             : {},
         sync_settings_json:
           definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
-            ? DEFAULT_WEBCONNEX_SYNC_SETTINGS
+            ? DEFAULT_CONTACTS_SYNC_SETTINGS
+            : definition.provider_key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+              ? DEFAULT_DONATIONS_SYNC_SETTINGS
             : {},
         field_mapping_json:
-          definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
+          isGivingFuelIntegrationKey(definition.provider_key)
             ? DEFAULT_WEBCONNEX_FIELD_MAPPING
             : {},
         created_by: userId,

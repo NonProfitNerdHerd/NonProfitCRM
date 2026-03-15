@@ -21,9 +21,13 @@ import {
   GIVINGFUEL_API_HEADER_NAME,
   GIVINGFUEL_BASE_URL,
   GIVINGFUEL_CUSTOMERS_PATH,
+  GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+  GIVINGFUEL_DONATIONS_INTEGRATION_NAME,
   GIVINGFUEL_INTEGRATION_KEY,
   GIVINGFUEL_INTEGRATION_NAME,
-  GIVINGFUEL_PRODUCT_VALUE
+  GIVINGFUEL_PRODUCT_VALUE,
+  GIVINGFUEL_TRANSACTIONS_PATH,
+  isGivingFuelIntegrationKey
 } from "@/lib/integrations/givingfuel-contacts-config";
 
 const registryService = new IntegrationRegistryService();
@@ -55,6 +59,28 @@ export type RecentSyncedContactRow = {
   };
 };
 
+export type DonationPageMappingRow = {
+  id: string;
+  externalPageValue: string;
+  status: "mapped" | "unmapped";
+  mappedCampaignId: string | null;
+  mappedSubCampaignId: string | null;
+  firstDetectedAt: string | null;
+  lastDetectedAt: string | null;
+};
+
+function integrationDisplayName(key: string) {
+  if (key === GIVINGFUEL_INTEGRATION_KEY) return GIVINGFUEL_INTEGRATION_NAME;
+  if (key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) return GIVINGFUEL_DONATIONS_INTEGRATION_NAME;
+  return key;
+}
+
+function integrationTileType(key: string) {
+  if (key === GIVINGFUEL_INTEGRATION_KEY) return "Contacts";
+  if (key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) return "Donations";
+  return "General";
+}
+
 function isMissingIntegrationsSchemaError(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { code?: string; message?: string; details?: string };
@@ -79,8 +105,9 @@ function isMissingIntegrationsSchemaError(error: unknown) {
 
 function createFallbackDetail(integrationKey: string, organizationId: string) {
   const now = new Date().toISOString();
-  const name =
-    integrationKey === GIVINGFUEL_INTEGRATION_KEY ? GIVINGFUEL_INTEGRATION_NAME : integrationKey;
+  const name = integrationDisplayName(integrationKey);
+  const isGivingFuel = isGivingFuelIntegrationKey(integrationKey);
+  const isDonations = integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY;
   const fallbackWebconnexBaseUrl = GIVINGFUEL_BASE_URL;
   return {
     definition: {
@@ -88,10 +115,12 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       name,
       provider_key: integrationKey,
       description:
-        integrationKey === GIVINGFUEL_INTEGRATION_KEY
-          ? "GivingFuel Contacts API sync from Webconnex v2 public customers endpoint."
+        isGivingFuel
+          ? isDonations
+            ? "GivingFuel Donations API sync from Webconnex v2 public transactions endpoint."
+            : "GivingFuel Contacts API sync from Webconnex v2 public customers endpoint."
           : "Integration metadata unavailable until migrations are applied.",
-      category: "contacts",
+      category: isDonations ? "donations" : "contacts",
       is_active: true,
       supports_manual_sync: true,
       supports_scheduled_sync: true,
@@ -116,6 +145,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       debug_logging_enabled: false,
       configuration_json: {
         contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+        transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
         testPath: GIVINGFUEL_CUSTOMERS_PATH,
         authHeaderName: GIVINGFUEL_API_HEADER_NAME,
         staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
@@ -124,8 +154,8 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       sync_settings_json: {
         syncMode: "manual_and_scheduled",
         scheduleFrequency: "daily",
-        contactSyncEnabled: true,
-        donationSyncEnabled: false,
+        contactSyncEnabled: !isDonations,
+        donationSyncEnabled: isDonations,
         fullSyncEnabled: false,
         incrementalSyncEnabled: true,
         fallbackContactMatch: "external_id_only",
@@ -133,7 +163,8 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
         lastSuccessfulSyncDate: null
       },
       field_mapping_json: {
-        contacts: {}
+        contacts: {},
+        donations: {}
       },
       created_by: null,
       updated_by: null,
@@ -163,14 +194,18 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
   };
 }
 
-function buildSchemaFreeWebconnexConnection(organizationId: string): IntegrationConnection {
+function buildSchemaFreeWebconnexConnection(
+  organizationId: string,
+  integrationKey: string
+): IntegrationConnection {
   const now = new Date().toISOString();
   const fallbackWebconnexBaseUrl = GIVINGFUEL_BASE_URL;
+  const isDonations = integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY;
   return {
     id: "schema-free-webconnex-connection",
     organization_id: organizationId,
     integration_definition_id: "schema-free-webconnex-definition",
-    name: GIVINGFUEL_INTEGRATION_NAME,
+    name: integrationDisplayName(integrationKey),
     base_url: fallbackWebconnexBaseUrl,
     auth_type: "api_key_header",
     api_key_reference: null,
@@ -183,6 +218,7 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
     debug_logging_enabled: false,
     configuration_json: {
       contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+      transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
       testPath: GIVINGFUEL_CUSTOMERS_PATH,
       authHeaderName: GIVINGFUEL_API_HEADER_NAME,
       staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
@@ -191,13 +227,13 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
     sync_settings_json: {
       syncMode: "manual_and_scheduled",
       scheduleFrequency: "daily",
-      contactSyncEnabled: true,
-      donationSyncEnabled: false,
+      contactSyncEnabled: !isDonations,
+      donationSyncEnabled: isDonations,
       fullSyncEnabled: false,
       incrementalSyncEnabled: true,
       fallbackContactMatch: "external_id_only"
     },
-    field_mapping_json: { contacts: {} },
+    field_mapping_json: { contacts: {}, donations: {} },
     created_by: null,
     updated_by: null,
     created_at: now,
@@ -278,8 +314,9 @@ async function countUniqueLinkedContacts(input: {
   integrationKey: string;
 }) {
   const supabase = await createIntegrationClient();
-  const sourceSystems =
-    input.integrationKey === GIVINGFUEL_INTEGRATION_KEY ? ["givingfuel", "webconnex"] : [input.integrationKey];
+  const sourceSystems = isGivingFuelIntegrationKey(input.integrationKey)
+    ? ["givingfuel", "webconnex"]
+    : [input.integrationKey];
   const uniqueContactIds = new Set<string>();
   const pageSize = 1000;
   let offset = 0;
@@ -325,6 +362,46 @@ export async function listIntegrationsForAdmin() {
         lastJob: jobs[0] ?? null
       });
     }
+    const existingKeys = new Set(rows.map((row) => row.definition.provider_key));
+    const now = new Date().toISOString();
+    if (!existingKeys.has(GIVINGFUEL_INTEGRATION_KEY)) {
+      rows.push({
+        definition: {
+          id: `fallback-${GIVINGFUEL_INTEGRATION_KEY}`,
+          name: GIVINGFUEL_INTEGRATION_NAME,
+          provider_key: GIVINGFUEL_INTEGRATION_KEY,
+          description: "GivingFuel contacts synchronization.",
+          category: "contacts",
+          is_active: true,
+          supports_manual_sync: true,
+          supports_scheduled_sync: true,
+          supports_test_connection: true,
+          created_at: now,
+          updated_at: now
+        },
+        connection: null,
+        lastJob: null
+      });
+    }
+    if (!existingKeys.has(GIVINGFUEL_DONATIONS_INTEGRATION_KEY)) {
+      rows.push({
+        definition: {
+          id: `fallback-${GIVINGFUEL_DONATIONS_INTEGRATION_KEY}`,
+          name: GIVINGFUEL_DONATIONS_INTEGRATION_NAME,
+          provider_key: GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+          description: "GivingFuel donations synchronization.",
+          category: "donations",
+          is_active: true,
+          supports_manual_sync: true,
+          supports_scheduled_sync: true,
+          supports_test_connection: true,
+          created_at: now,
+          updated_at: now
+        },
+        connection: null,
+        lastJob: null
+      });
+    }
 
     const failedJobs = rows.filter((row) => row.lastJob?.status === "failed").length;
     const enabled = rows.filter((row) => row.connection?.is_enabled).length;
@@ -338,10 +415,7 @@ export async function listIntegrationsForAdmin() {
       integrations: rows.map((row) => ({
         integrationKey: row.definition.provider_key,
         name: row.connection?.name || row.definition.name,
-        providerType:
-          row.definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
-            ? "Contacts"
-            : row.definition.category,
+        providerType: integrationTileType(row.definition.provider_key),
         description: row.definition.description,
         status: row.connection?.is_enabled ? "Enabled" : "Disabled",
         connectionStatus: row.connection?.connection_status ?? "Not Tested",
@@ -362,7 +436,7 @@ export async function listIntegrationsForAdmin() {
     return {
       integrations: [
         {
-          integrationKey: "webconnex",
+          integrationKey: GIVINGFUEL_INTEGRATION_KEY,
           name: GIVINGFUEL_INTEGRATION_NAME,
           providerType: "Contacts",
           description:
@@ -372,10 +446,22 @@ export async function listIntegrationsForAdmin() {
           lastSyncDate: null,
           lastSyncResult: "Migration required",
           isEnabled: false
+        },
+        {
+          integrationKey: GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+          name: GIVINGFUEL_DONATIONS_INTEGRATION_NAME,
+          providerType: "Donations",
+          description:
+            "GivingFuel Donations API synchronization is available after migration 202603130021 is applied.",
+          status: "Disabled",
+          connectionStatus: "Not Tested",
+          lastSyncDate: null,
+          lastSyncResult: "Migration required",
+          isEnabled: false
         }
       ],
       summary: {
-        totalIntegrations: 1,
+        totalIntegrations: 2,
         enabledIntegrations: 0,
         failedJobs: 0,
         last24hSyncActivity: 0
@@ -504,7 +590,7 @@ export async function updateIntegrationConfiguration(
   try {
     const definition = await registryService.getDefinition(integrationKey);
     if (!definition) throw new Error("Integration not found.");
-    if (integrationKey === GIVINGFUEL_INTEGRATION_KEY) {
+    if (isGivingFuelIntegrationKey(integrationKey)) {
       const existing = await configurationService.getConnection(context.organizationId, definition);
       const existingConfig = (existing?.configuration_json ?? {}) as Record<string, unknown>;
       const existingHasApiKey =
@@ -512,34 +598,36 @@ export async function updateIntegrationConfiguration(
         Boolean(existingConfig.apiKeyConfigured);
       const providedApiKey = payload.apiKey?.trim();
       if (!providedApiKey && !existingHasApiKey && payload.isEnabled !== false) {
-        throw new Error("API key is required before connecting GivingFuel Contacts.");
+        throw new Error(
+          `API key is required before connecting ${integrationDisplayName(integrationKey)}.`
+        );
       }
     }
-    const normalizedPayload =
-      integrationKey === GIVINGFUEL_INTEGRATION_KEY
-        ? {
-            ...payload,
-            name: payload.name ?? GIVINGFUEL_INTEGRATION_NAME,
-            baseUrl: GIVINGFUEL_BASE_URL,
-            authType: "api_key_header",
-            apiKeyReference: null,
-            configuration: {
-              ...(payload.configuration ?? {}),
-              contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
-              testPath: GIVINGFUEL_CUSTOMERS_PATH,
-              authHeaderName: GIVINGFUEL_API_HEADER_NAME,
-              staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
-              defaultLimit: 100
-            },
-            syncSettings: {
-              ...(payload.syncSettings ?? {}),
-              contactSyncEnabled: true,
-              donationSyncEnabled: false,
-              fullSyncEnabled: false,
-              fallbackContactMatch: "external_id_only"
-            }
+    const normalizedPayload = isGivingFuelIntegrationKey(integrationKey)
+      ? {
+          ...payload,
+          name: payload.name ?? integrationDisplayName(integrationKey),
+          baseUrl: GIVINGFUEL_BASE_URL,
+          authType: "api_key_header",
+          apiKeyReference: null,
+          configuration: {
+            ...(payload.configuration ?? {}),
+            contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+            transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
+            testPath: GIVINGFUEL_CUSTOMERS_PATH,
+            authHeaderName: GIVINGFUEL_API_HEADER_NAME,
+            staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
+            defaultLimit: 100
+          },
+          syncSettings: {
+            ...(payload.syncSettings ?? {}),
+            contactSyncEnabled: integrationKey === GIVINGFUEL_INTEGRATION_KEY,
+            donationSyncEnabled: integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+            fullSyncEnabled: false,
+            fallbackContactMatch: "external_id_only"
           }
-        : payload;
+        }
+      : payload;
     const connection = await configurationService.upsertConfiguration({
       organizationId: context.organizationId,
       userId: context.userId,
@@ -577,11 +665,12 @@ export async function testIntegrationConnection(
       context.userId,
       integrationKey
     );
-    if (integrationKey !== GIVINGFUEL_INTEGRATION_KEY) {
+    if (!isGivingFuelIntegrationKey(integrationKey)) {
       return { ok: false, message: `No test connector implemented for ${integrationKey}.` };
     }
     const result = await webconnexSyncService.testConnection(connection, {
-      apiKeyOverride: apiKeyOverride?.trim() || undefined
+      apiKeyOverride: apiKeyOverride?.trim() || undefined,
+      probeTransactions: integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
     });
     const supabase = await createIntegrationClient();
     await supabase
@@ -597,12 +686,16 @@ export async function testIntegrationConnection(
     return result;
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
-      if (integrationKey !== GIVINGFUEL_INTEGRATION_KEY) {
+      if (!isGivingFuelIntegrationKey(integrationKey)) {
         throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
       }
-      const schemaFreeConnection = buildSchemaFreeWebconnexConnection(context.organizationId);
+      const schemaFreeConnection = buildSchemaFreeWebconnexConnection(
+        context.organizationId,
+        integrationKey
+      );
       const result = await webconnexSyncService.testConnection(schemaFreeConnection, {
-        apiKeyOverride: apiKeyOverride?.trim() || undefined
+        apiKeyOverride: apiKeyOverride?.trim() || undefined,
+        probeTransactions: integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
       });
       return {
         ...result,
@@ -622,6 +715,9 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
   }
   if (integrationKey === GIVINGFUEL_INTEGRATION_KEY && scope !== "contacts") {
     throw new Error("GivingFuel Contacts integration currently supports contacts sync only.");
+  }
+  if (integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY && scope !== "donations") {
+    throw new Error("GivingFuel Donations integration currently supports donations sync only.");
   }
   try {
     const { definition, connection } = await getDefinitionAndConnection(
@@ -919,18 +1015,13 @@ export async function listRecentSyncedContactsForIntegration(
       .eq("organization_id", context.organizationId)
       .in(
         "source_system",
-        integrationKey === GIVINGFUEL_INTEGRATION_KEY
-          ? ["givingfuel", "webconnex"]
-          : [integrationKey]
+        isGivingFuelIntegrationKey(integrationKey) ? ["givingfuel", "webconnex"] : [integrationKey]
       )
       .order("last_synced_date", { ascending: false })
       .limit(boundedLimit);
     if (error) {
       // Backward compatibility: older rows may have webconnex source_system.
-      if (
-        integrationKey === GIVINGFUEL_INTEGRATION_KEY &&
-        (error.code === "PGRST116" || error.code === "PGRST205")
-      ) {
+      if (isGivingFuelIntegrationKey(integrationKey) && (error.code === "PGRST116" || error.code === "PGRST205")) {
         return [];
       }
       throw error;
@@ -964,4 +1055,295 @@ export async function listRecentSyncedContactsForIntegration(
     if (isMissingIntegrationsSchemaError(error)) return [];
     throw error;
   }
+}
+
+async function getDonationIntegrationContext(integrationKey: string) {
+  if (integrationKey !== GIVINGFUEL_DONATIONS_INTEGRATION_KEY) {
+    throw new Error("Donation page mappings are available for GivingFuel Donations only.");
+  }
+  const context = await requireIntegrationsAdmin();
+  const { connection } = await getDefinitionAndConnection(
+    context.organizationId,
+    context.userId,
+    integrationKey
+  );
+  return { ...context, connection };
+}
+
+export async function listDonationPageMappingsForIntegration(integrationKey: string) {
+  const context = await getDonationIntegrationContext(integrationKey);
+  const supabase = await createIntegrationClient();
+
+  const [mappingsResult, campaignsResult, subCampaignsResult] = await Promise.all([
+    supabase
+      .from("integration_donation_page_mappings")
+      .select(
+        "id, external_page_value, mapped_campaign_id, mapped_sub_campaign_id, status, first_detected_at, last_detected_at"
+      )
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", context.connection.id)
+      .order("status", { ascending: false })
+      .order("external_page_value", { ascending: true }),
+    supabase
+      .from("campaigns")
+      .select("id, name, status")
+      .eq("organization_id", context.organizationId)
+      .order("name", { ascending: true }),
+    supabase
+      .from("sub_campaigns")
+      .select("id, campaign_id, name, status, external_page_key")
+      .eq("organization_id", context.organizationId)
+      .order("name", { ascending: true })
+  ]);
+
+  if (mappingsResult.error) throw mappingsResult.error;
+  if (campaignsResult.error) throw campaignsResult.error;
+  if (subCampaignsResult.error) throw subCampaignsResult.error;
+
+  const mappings = (mappingsResult.data ?? []).map((row) => {
+    const mappedCampaignId =
+      typeof row.mapped_campaign_id === "string" ? row.mapped_campaign_id : null;
+    const mappedSubCampaignId =
+      typeof row.mapped_sub_campaign_id === "string" ? row.mapped_sub_campaign_id : null;
+    return {
+      id: String(row.id),
+      externalPageValue: String(row.external_page_value ?? ""),
+      status: mappedCampaignId ? "mapped" : "unmapped",
+      mappedCampaignId,
+      mappedSubCampaignId,
+      firstDetectedAt:
+        typeof row.first_detected_at === "string" ? String(row.first_detected_at) : null,
+      lastDetectedAt: typeof row.last_detected_at === "string" ? String(row.last_detected_at) : null
+    } satisfies DonationPageMappingRow;
+  });
+
+  return {
+    mappings,
+    campaigns: (campaignsResult.data ?? []).map((row) => ({
+      id: String(row.id),
+      name: String(row.name ?? ""),
+      status: String(row.status ?? "")
+    })),
+    subCampaigns: (subCampaignsResult.data ?? []).map((row) => ({
+      id: String(row.id),
+      campaignId: String(row.campaign_id ?? ""),
+      name: String(row.name ?? ""),
+      status: String(row.status ?? ""),
+      externalPageKey: String(row.external_page_key ?? "")
+    })),
+    summary: {
+      total: mappings.length,
+      mapped: mappings.filter((row) => row.status === "mapped").length,
+      unmapped: mappings.filter((row) => row.status === "unmapped").length
+    }
+  };
+}
+
+export async function upsertDonationPageMappingForIntegration(
+  integrationKey: string,
+  payload: {
+    externalPageValue: string;
+    campaignId: string | null;
+    subCampaignId?: string | null;
+  }
+) {
+  const context = await getDonationIntegrationContext(integrationKey);
+  const supabase = await createIntegrationClient();
+  const externalPageValue = payload.externalPageValue.trim();
+  if (!externalPageValue) throw new Error("External page value is required.");
+  if (!payload.campaignId) throw new Error("Campaign is required for mapping.");
+
+  const { data: campaign, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id")
+    .eq("organization_id", context.organizationId)
+    .eq("id", payload.campaignId)
+    .maybeSingle();
+  if (campaignError) throw campaignError;
+  if (!campaign) throw new Error("Selected campaign was not found.");
+
+  if (payload.subCampaignId) {
+    const { data: subCampaign, error: subCampaignError } = await supabase
+      .from("sub_campaigns")
+      .select("id, campaign_id")
+      .eq("organization_id", context.organizationId)
+      .eq("id", payload.subCampaignId)
+      .maybeSingle();
+    if (subCampaignError) throw subCampaignError;
+    if (!subCampaign) throw new Error("Selected sub-campaign was not found.");
+    if (String(subCampaign.campaign_id) !== payload.campaignId) {
+      throw new Error("Selected sub-campaign does not belong to the selected campaign.");
+    }
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("integration_donation_page_mappings")
+    .upsert(
+      {
+        organization_id: context.organizationId,
+        integration_connection_id: context.connection.id,
+        external_page_value: externalPageValue,
+        mapped_campaign_id: payload.campaignId,
+        mapped_sub_campaign_id: payload.subCampaignId ?? null,
+        status: "mapped",
+        last_detected_at: now,
+        updated_by: context.userId
+      },
+      { onConflict: "organization_id,integration_connection_id,external_page_value" }
+    )
+    .select(
+      "id, external_page_value, mapped_campaign_id, mapped_sub_campaign_id, status, first_detected_at, last_detected_at"
+    )
+    .single();
+  if (error) throw error;
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "integration_page_mapping_updated",
+    targetEntityType: "integration_donation_page_mappings",
+    targetEntityId: String(data.id),
+    metadata: {
+      integrationKey,
+      externalPageValue,
+      campaignId: payload.campaignId,
+      subCampaignId: payload.subCampaignId ?? null
+    }
+  });
+
+  return {
+    id: String(data.id),
+    externalPageValue: String(data.external_page_value ?? ""),
+    status: "mapped" as const,
+    mappedCampaignId: String(data.mapped_campaign_id ?? ""),
+    mappedSubCampaignId:
+      typeof data.mapped_sub_campaign_id === "string" ? String(data.mapped_sub_campaign_id) : null,
+    firstDetectedAt:
+      typeof data.first_detected_at === "string" ? String(data.first_detected_at) : null,
+    lastDetectedAt: typeof data.last_detected_at === "string" ? String(data.last_detected_at) : null
+  } satisfies DonationPageMappingRow;
+}
+
+export async function detectDonationPagesForIntegration(
+  integrationKey: string,
+  input?: { maxPages?: number }
+) {
+  const context = await getDonationIntegrationContext(integrationKey);
+  const supabase = await createIntegrationClient();
+  const existing = await supabase
+    .from("integration_donation_page_mappings")
+    .select("external_page_value")
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", context.connection.id);
+  if (existing.error) throw existing.error;
+  const existingValues = new Set(
+    (existing.data ?? []).map((row) => String(row.external_page_value ?? "").trim()).filter(Boolean)
+  );
+
+  const detected = await webconnexSyncService.detectDonationPages({
+    connection: context.connection,
+    maxPages: input?.maxPages
+  });
+
+  const now = new Date().toISOString();
+  for (const pageValue of detected.detectedPages) {
+    if (!pageValue.trim()) continue;
+    const { error } = await supabase.from("integration_donation_page_mappings").upsert(
+      {
+        organization_id: context.organizationId,
+        integration_connection_id: context.connection.id,
+        external_page_value: pageValue.trim(),
+        last_detected_at: now,
+        updated_by: context.userId
+      },
+      { onConflict: "organization_id,integration_connection_id,external_page_value" }
+    );
+    if (error) throw error;
+  }
+
+  const newlyDetected = detected.detectedPages.filter((pageValue) => !existingValues.has(pageValue)).length;
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "integration_page_values_detected",
+    targetEntityType: "integration_connections",
+    targetEntityId: context.connection.id,
+    metadata: {
+      integrationKey,
+      detectedCount: detected.detectedPages.length,
+      newlyDetected,
+      pagesScanned: detected.pagesScanned,
+      transactionsScanned: detected.transactionsScanned
+    }
+  });
+
+  return {
+    ...detected,
+    newlyDetected
+  };
+}
+
+export async function createSubCampaignForIntegration(
+  integrationKey: string,
+  input: {
+    campaignId: string;
+    name: string;
+    description?: string;
+    status?: "Active" | "Inactive";
+    externalPageKey?: string;
+  }
+) {
+  const context = await getDonationIntegrationContext(integrationKey);
+  const supabase = await createIntegrationClient();
+
+  const { data: campaign, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.campaignId)
+    .maybeSingle();
+  if (campaignError) throw campaignError;
+  if (!campaign) throw new Error("Campaign not found.");
+
+  const trimmedName = input.name.trim();
+  if (!trimmedName) throw new Error("Sub-campaign name is required.");
+
+  const { data, error } = await supabase
+    .from("sub_campaigns")
+    .insert({
+      organization_id: context.organizationId,
+      campaign_id: input.campaignId,
+      name: trimmedName,
+      description: input.description?.trim() || null,
+      status: input.status ?? "Active",
+      external_page_key: input.externalPageKey?.trim() || null,
+      created_by: context.userId,
+      updated_by: context.userId
+    })
+    .select("id, campaign_id, name, description, status, external_page_key")
+    .single();
+  if (error) throw error;
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "sub_campaign_created",
+    targetEntityType: "sub_campaigns",
+    targetEntityId: String(data.id),
+    metadata: {
+      integrationKey,
+      campaignId: input.campaignId
+    }
+  });
+
+  return {
+    id: String(data.id),
+    campaignId: String(data.campaign_id ?? ""),
+    name: String(data.name ?? ""),
+    description: String(data.description ?? ""),
+    status: String(data.status ?? ""),
+    externalPageKey: String(data.external_page_key ?? "")
+  };
 }

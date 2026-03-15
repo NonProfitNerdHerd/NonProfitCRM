@@ -8,7 +8,8 @@ import {
   GIVINGFUEL_API_HEADER_NAME,
   GIVINGFUEL_CUSTOMERS_PATH,
   GIVINGFUEL_DEFAULT_PAGE_LIMIT,
-  GIVINGFUEL_PRODUCT_VALUE
+  GIVINGFUEL_PRODUCT_VALUE,
+  GIVINGFUEL_TRANSACTIONS_PATH
 } from "@/lib/integrations/givingfuel-contacts-config";
 import { decryptIntegrationSecret } from "@/lib/integrations/secrets";
 
@@ -62,15 +63,105 @@ export class WebconnexSyncService {
       maxRetries: Number(retry.maxRetries ?? 3),
       backoffMs: Number(retry.backoffMs ?? 1000),
       contactsPath: String(config.contactsPath ?? GIVINGFUEL_CUSTOMERS_PATH),
-      transactionsPath: String(config.transactionsPath ?? "/transactions"),
+      transactionsPath: String(config.transactionsPath ?? GIVINGFUEL_TRANSACTIONS_PATH),
       testPath: String(config.testPath ?? GIVINGFUEL_CUSTOMERS_PATH),
       defaultLimit: Number(config.defaultLimit ?? GIVINGFUEL_DEFAULT_PAGE_LIMIT)
     });
   }
 
-  async testConnection(connection: IntegrationConnection, options?: { apiKeyOverride?: string }) {
+  async testConnection(
+    connection: IntegrationConnection,
+    options?: { apiKeyOverride?: string; probeTransactions?: boolean }
+  ) {
     const client = this.buildClient(connection, options?.apiKeyOverride);
-    return client.testConnection();
+    const result = await client.testConnection();
+    if (!result.ok || !options?.probeTransactions) return result;
+    try {
+      await client.getTransactions({ limit: 1 });
+      return {
+        ok: true,
+        message: "Connection test succeeded (contacts and donations endpoints reachable)."
+      };
+    } catch (transactionError) {
+      return {
+        ok: false,
+        message:
+          transactionError instanceof Error
+            ? `Connection OK but donations read failed: ${transactionError.message}`
+            : "Connection OK but donations read failed."
+      };
+    }
+  }
+
+  async detectDonationPages(input: {
+    connection: IntegrationConnection;
+    maxPages?: number;
+    apiKeyOverride?: string;
+  }) {
+    const client = this.buildClient(input.connection, input.apiKeyOverride);
+    const config = (input.connection.field_mapping_json ?? {}) as {
+      donations?: { pageValue?: unknown };
+    };
+    const mappedPageField = config.donations?.pageValue;
+    const maxPages =
+      typeof input.maxPages === "number" && input.maxPages > 0
+        ? Math.min(Math.floor(input.maxPages), 25)
+        : 5;
+    const detectedPages = new Set<string>();
+    let cursor: string | null = null;
+    let hasMore = true;
+    let pages = 0;
+    let transactions = 0;
+
+    const pageKeys = Array.isArray(mappedPageField)
+      ? mappedPageField.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      : typeof mappedPageField === "string" && mappedPageField.trim()
+        ? [mappedPageField.trim()]
+        : ["page", "page_name", "pageName", "form_name", "fund", "campaign"];
+
+    while (hasMore && pages < maxPages) {
+      pages += 1;
+      const response = await client.getTransactions({
+        limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT,
+        startingAfter: cursor
+      });
+      transactions += response.records.length;
+
+      for (const record of response.records) {
+        const value = this.readRecordValue(record, pageKeys);
+        if (value) detectedPages.add(value);
+      }
+
+      const nextCursor = response.nextCursor;
+      hasMore = response.hasMore && Boolean(nextCursor) && nextCursor !== cursor;
+      cursor = nextCursor;
+    }
+
+    return {
+      detectedPages: Array.from(detectedPages).sort((a, b) => a.localeCompare(b)),
+      pagesScanned: pages,
+      transactionsScanned: transactions
+    };
+  }
+
+  private readRecordValue(record: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = this.readPath(record, key);
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+    return "";
+  }
+
+  private readPath(record: Record<string, unknown>, path: string) {
+    if (!path.includes(".")) return record[path];
+    const segments = path.split(".").map((segment) => segment.trim()).filter(Boolean);
+    let current: unknown = record;
+    for (const segment of segments) {
+      if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+      current = (current as Record<string, unknown>)[segment];
+    }
+    return current;
   }
 
   async runSync(input: {
@@ -99,6 +190,7 @@ export class WebconnexSyncService {
     let recordsFailed = 0;
     let status: "completed" | "failed" | "completed_with_errors" = "completed";
     let errorSummary: string | null = null;
+    let finalCursor: string | null = null;
 
     try {
       if (!input.connection.is_enabled && input.jobType === "scheduled") {
@@ -127,6 +219,7 @@ export class WebconnexSyncService {
         recordsUpdated += contactsResult.updated;
         recordsFailed += contactsResult.failed;
         syncSettings.contactsCursor = contactsResult.cursor;
+        finalCursor = contactsResult.cursor;
         syncSettings.lastContactsSyncSummary = {
           pagesProcessed: contactsResult.pagesProcessed,
           processed: contactsResult.processed,
@@ -151,6 +244,18 @@ export class WebconnexSyncService {
         recordsUpdated += donationsResult.updated;
         recordsFailed += donationsResult.failed;
         syncSettings.donationsCursor = donationsResult.cursor;
+        finalCursor = donationsResult.cursor;
+        syncSettings.lastDonationsSyncSummary = {
+          processed: donationsResult.processed,
+          created: donationsResult.created,
+          updated: donationsResult.updated,
+          failed: donationsResult.failed,
+          skippedDuplicates: donationsResult.skippedDuplicates,
+          skippedUnmappedPages: donationsResult.skippedUnmappedPages,
+          missingContactMatches: donationsResult.missingContactMatches,
+          unmappedPageValues: donationsResult.unmappedPageValues,
+          finishedAt: new Date().toISOString()
+        };
       }
 
       const now = new Date().toISOString();
@@ -203,7 +308,7 @@ export class WebconnexSyncService {
       recordsCreated,
       recordsUpdated,
       recordsFailed,
-      cursor: null,
+      cursor: finalCursor,
       lastSuccessfulSyncDate:
         status === "completed" || status === "completed_with_errors"
           ? new Date().toISOString()

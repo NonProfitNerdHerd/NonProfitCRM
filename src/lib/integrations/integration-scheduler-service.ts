@@ -1,6 +1,10 @@
 import { createIntegrationClient } from "@/lib/integrations/db";
 import { IntegrationJobRunner } from "@/lib/integrations/integration-job-runner";
 import { IntegrationConnection, IntegrationDefinition } from "@/lib/integrations/types";
+import {
+  GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+  GIVINGFUEL_INTEGRATION_KEY
+} from "@/lib/integrations/givingfuel-contacts-config";
 
 function shouldRun(syncSettings: Record<string, unknown>) {
   const mode = String(syncSettings.syncMode ?? "manual_and_scheduled");
@@ -55,12 +59,18 @@ export class IntegrationSchedulerService {
       }
 
       try {
+        const scheduledScope =
+          definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
+            ? "contacts"
+            : definition.provider_key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+              ? "donations"
+              : "all";
         const result = await this.runner.run({
           organizationId: String(connection.organization_id),
           userId: fallbackUser,
           definition,
           connection: connection as IntegrationConnection,
-          scope: definition.provider_key === "webconnex" ? "contacts" : "all",
+          scope: scheduledScope,
           jobType: "scheduled"
         });
         results.push({

@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { getIntegrationDetailForAdmin } from "@/lib/data/integrations";
 import { GivingFuelContactsSetup } from "@/components/admin/integrations/givingfuel-contacts-setup";
+import { GivingFuelDonationsSetup } from "@/components/admin/integrations/givingfuel-donations-setup";
+import { GIVINGFUEL_DONATIONS_INTEGRATION_KEY } from "@/lib/integrations/givingfuel-contacts-config";
 
 type RouteProps = {
   params: Promise<{ integrationKey: string }>;
@@ -47,7 +49,12 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
     detail = {
       definition: {
         id: `fallback-${integrationKey}`,
-        name: integrationKey === "webconnex" ? "Giving Fuel" : integrationKey,
+        name:
+          integrationKey === "webconnex"
+            ? "GivingFuel Contacts"
+            : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+              ? "GivingFuel Donations"
+              : integrationKey,
         provider_key: integrationKey,
         description: "Fallback integration detail due environment configuration mismatch.",
         category: "donations",
@@ -62,7 +69,12 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         id: `fallback-${integrationKey}-connection`,
         organization_id: "",
         integration_definition_id: `fallback-${integrationKey}`,
-        name: integrationKey === "webconnex" ? "Giving Fuel" : integrationKey,
+        name:
+          integrationKey === "webconnex"
+            ? "GivingFuel Contacts"
+            : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+              ? "GivingFuel Donations"
+              : integrationKey,
         base_url: "",
         auth_type: "api_key_header",
         api_key_reference: null,
@@ -84,7 +96,12 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
       jobs: [],
       errors: [],
       overview: {
-        integrationName: integrationKey === "webconnex" ? "Giving Fuel" : integrationKey,
+        integrationName:
+          integrationKey === "webconnex"
+            ? "GivingFuel Contacts"
+            : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+              ? "GivingFuel Donations"
+              : integrationKey,
         description: "Integration framework fallback detail",
         currentStatus: "Disabled",
         connectionStatus: "Not Tested",
@@ -110,24 +127,42 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
       </div>
       <CardHeader
         title={`${String(detail?.connection?.name ?? detail?.definition?.name ?? integrationKey)} Integration`}
-        subtitle="GivingFuel contacts API key setup and contacts synchronization"
+        subtitle={
+          integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+            ? "GivingFuel donations API key setup, page mapping, and transaction synchronization"
+            : "GivingFuel contacts API key setup and contacts synchronization"
+        }
       />
       {loadError ? (
         <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           {loadError}
         </p>
       ) : null}
-      <GivingFuelContactsSetup
-        integrationKey={integrationKey}
-        initialData={detail as {
-          definition: Record<string, unknown>;
-          connection: Record<string, unknown>;
-          jobs: Array<Record<string, unknown>>;
-          errors: Array<Record<string, unknown>>;
-          overview: Record<string, unknown>;
-          apiPaused?: boolean;
-        }}
-      />
+      {integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY ? (
+        <GivingFuelDonationsSetup
+          integrationKey={integrationKey}
+          initialData={detail as {
+            definition: Record<string, unknown>;
+            connection: Record<string, unknown>;
+            jobs: Array<Record<string, unknown>>;
+            errors: Array<Record<string, unknown>>;
+            overview: Record<string, unknown>;
+            apiPaused?: boolean;
+          }}
+        />
+      ) : (
+        <GivingFuelContactsSetup
+          integrationKey={integrationKey}
+          initialData={detail as {
+            definition: Record<string, unknown>;
+            connection: Record<string, unknown>;
+            jobs: Array<Record<string, unknown>>;
+            errors: Array<Record<string, unknown>>;
+            overview: Record<string, unknown>;
+            apiPaused?: boolean;
+          }}
+        />
+      )}
     </Card>
   );
 }

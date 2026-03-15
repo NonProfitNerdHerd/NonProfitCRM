@@ -6,6 +6,10 @@ export default async function IntegrationsPage() {
   let integrations: Array<{
     integrationKey: string;
     name: string;
+    description?: string | null;
+    connectionStatus?: string;
+    lastSyncDate?: string | null;
+    status?: string;
   }> = [];
   let apiPaused = false;
   let loadError: string | null = null;
@@ -14,7 +18,11 @@ export default async function IntegrationsPage() {
     const result = await listIntegrationsForAdmin();
     integrations = result.integrations.map((item) => ({
       integrationKey: item.integrationKey,
-      name: item.name
+      name: item.name,
+      description: item.description,
+      connectionStatus: item.connectionStatus,
+      lastSyncDate: item.lastSyncDate,
+      status: item.status
     }));
     apiPaused = Boolean((result as { apiPaused?: boolean }).apiPaused);
     loadError = (result as { schemaWarning?: string }).schemaWarning ?? null;
@@ -26,7 +34,19 @@ export default async function IntegrationsPage() {
     integrations = [
       {
         integrationKey: "webconnex",
-        name: "GivingFuel Contacts"
+        name: "GivingFuel Contacts",
+        description: "Sync GivingFuel contacts via Webconnex API.",
+        connectionStatus: "Not Tested",
+        lastSyncDate: null,
+        status: "Disabled"
+      },
+      {
+        integrationKey: "givingfuel_donations",
+        name: "GivingFuel Donations",
+        description: "Sync GivingFuel donations via Webconnex API.",
+        connectionStatus: "Not Tested",
+        lastSyncDate: null,
+        status: "Disabled"
       }
     ];
     apiPaused = true;

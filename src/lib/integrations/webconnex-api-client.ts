@@ -126,7 +126,14 @@ function extractHasMore(payload: unknown, nextCursor: string | null, recordCount
 }
 
 function recordStableId(record: Record<string, unknown>) {
-  const candidate = record.id ?? record.displayId ?? record.customerId ?? record.customer_id;
+  const candidate =
+    record.id ??
+    record.displayId ??
+    record.customerId ??
+    record.customer_id ??
+    record.transaction_id ??
+    record.transactionId ??
+    record.external_transaction_id;
   if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
   if (typeof candidate === "number" && Number.isFinite(candidate)) return String(candidate);
   return "";
