@@ -32,13 +32,21 @@ export function encryptIntegrationSecret(value: string) {
 
 export function decryptIntegrationSecret(value: string) {
   if (value.startsWith(`${PLAIN_SECRET_PREFIX}:`)) {
-    const [, raw] = value.split(":");
+    const parts = value.split(":");
+    const raw = parts.slice(2).join(":");
+    if (!raw) return "";
     return Buffer.from(raw, "base64").toString("utf8");
   }
   if (!value.startsWith(`${ENCRYPTED_SECRET_PREFIX}:`)) {
     return value;
   }
-  const [, ivB64, tagB64, encryptedB64] = value.split(":");
+  const parts = value.split(":");
+  const ivB64 = parts[2] ?? "";
+  const tagB64 = parts[3] ?? "";
+  const encryptedB64 = parts.slice(4).join(":");
+  if (!ivB64 || !tagB64 || !encryptedB64) {
+    throw new Error("Stored integration secret format is invalid.");
+  }
   const keyMaterial = getSecretKeyMaterial();
   if (!keyMaterial) {
     throw new Error("Missing encryption key material for integration secrets.");

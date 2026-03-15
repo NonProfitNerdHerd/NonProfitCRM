@@ -31,6 +31,17 @@ function wait(ms: number) {
   });
 }
 
+function ensureHeaderSafeValue(value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) > 255) {
+      throw new Error(
+        "Stored API key contains invalid characters. Please re-enter and save the API key."
+      );
+    }
+  }
+  return value;
+}
+
 function normalizeRecords(payload: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(payload)) {
     return payload as Array<Record<string, unknown>>;
@@ -140,8 +151,7 @@ export class WebconnexApiClient {
         !this.apiKey.toLowerCase().startsWith("bearer ")
           ? `Bearer ${this.apiKey}`
           : this.apiKey;
-      headers[this.authHeaderName] =
-        rawValue;
+      headers[this.authHeaderName] = ensureHeaderSafeValue(rawValue);
     }
     return headers;
   }
