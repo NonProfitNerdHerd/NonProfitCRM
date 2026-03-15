@@ -417,58 +417,115 @@ export function ContactProfileTabs({
               Edit
             </Button>
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <LabeledValue
-              label="Record Type"
-              value={contactInfo.recordType === "organization" ? "Organization" : "Person"}
-            />
-            <LabeledValue
-              label="Tracking Status"
-              value={contactInfo.trackingStatus.replaceAll("_", "-")}
-            />
+          <section className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">Contact Type</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <LabeledValue
+                label="Record Type"
+                value={contactInfo.recordType === "organization" ? "Organization" : "Person"}
+              />
+              <LabeledValue
+                label="Tracking Status"
+                value={contactInfo.trackingStatus.replaceAll("_", "-")}
+              />
+            </div>
+          </section>
+
+          <section className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">Name</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              {contactInfo.recordType === "organization" ? (
+                <LabeledValue label="Organization Name" value={contactInfo.organizationName} />
+              ) : null}
+              <LabeledValue
+                label={
+                  contactInfo.recordType === "organization"
+                    ? "Primary Contact First Name"
+                    : "First Name"
+                }
+                value={contactInfo.firstName}
+              />
+              <LabeledValue
+                label={
+                  contactInfo.recordType === "organization"
+                    ? "Primary Contact Last Name"
+                    : "Last Name"
+                }
+                value={contactInfo.lastName}
+              />
+              <LabeledValue label="Display / Preferred Name" value={contactInfo.preferredName} />
+              <LabeledValue label="Formal Letter Name" value={contactInfo.formalLetterName} />
+            </div>
+          </section>
+
+          <section className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">Contact Methods</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <LabeledValue label="Phone Number" value={contactInfo.phone} />
+              <LabeledValue label="Alternate Phone Number" value={contactInfo.alternatePhone} />
+              {contactInfo.recordType === "person" ? (
+                <LabeledValue label="Mobile Number" value={contactInfo.mobileNumber} />
+              ) : null}
+              <LabeledValue label="Email" value={contactInfo.email} />
+              <LabeledValue label="Alternate Email" value={contactInfo.alternateEmail} />
+              {contactInfo.recordType === "person" ? (
+                <>
+                  <LabeledValue label="Emergency Contact" value={contactInfo.emergencyContact} />
+                  <LabeledValue
+                    label="Emergency Contact Phone Number"
+                    value={contactInfo.emergencyContactPhone}
+                  />
+                </>
+              ) : null}
+            </div>
+          </section>
+
+          {contactInfo.recordType === "person" ? (
+            <section className="rounded-md border border-slate-200 p-3">
+              <p className="mb-2 text-sm font-semibold text-slate-900">Preferences - Communication</p>
+              <LabeledValue
+                label="Selected Preferences"
+                value={
+                  contactInfo.communicationPreferences.length > 0
+                    ? contactInfo.communicationPreferences.join(", ")
+                    : ""
+                }
+              />
+            </section>
+          ) : null}
+
+          <section className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">Physical Address</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <LabeledValue label="Physical Address Line 1" value={contactInfo.addressLine1} />
+              <LabeledValue label="Physical Address Line 2" value={contactInfo.addressLine2} />
+              <LabeledValue label="City" value={contactInfo.city} />
+              <LabeledValue label="State" value={contactInfo.state} />
+              <LabeledValue label="Zip" value={contactInfo.postalCode} />
+            </div>
+          </section>
+
+          <section className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">Mailing Address</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <LabeledValue
+                label="Mailing Address Line 1"
+                value={contactInfo.mailingAddressLine1}
+              />
+              <LabeledValue
+                label="Mailing Address Line 2"
+                value={contactInfo.mailingAddressLine2}
+              />
+              <LabeledValue label="Mailing City" value={contactInfo.mailingCity} />
+              <LabeledValue label="Mailing State" value={contactInfo.mailingState} />
+              <LabeledValue label="Mailing Zip" value={contactInfo.mailingPostalCode} />
+            </div>
+          </section>
+
+          <section className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
             <LabeledValue label="WebConnex ID" value={contactInfo.webconnexId} />
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Physical Address</p>
-              <p className="text-sm text-slate-800">
-                {contactInfo.addressLine1 || "-"}
-                {contactInfo.addressLine2 ? `, ${contactInfo.addressLine2}` : ""}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Mailing Address</p>
-              <p className="text-sm text-slate-800">
-                {contactInfo.mailingAddressLine1 || "-"}
-                {contactInfo.mailingAddressLine2
-                  ? `, ${contactInfo.mailingAddressLine2}`
-                  : ""}
-              </p>
-            </div>
-            <LabeledValue label="City" value={contactInfo.city} />
-            <LabeledValue label="State" value={contactInfo.state} />
-            <LabeledValue label="Zip" value={contactInfo.postalCode} />
-            <LabeledValue label="Mailing City" value={contactInfo.mailingCity} />
-            <LabeledValue label="Mailing State" value={contactInfo.mailingState} />
-            <LabeledValue label="Mailing Zip" value={contactInfo.mailingPostalCode} />
-            <LabeledValue label="Phone Number" value={contactInfo.phone} />
-            <LabeledValue label="Mobile Number" value={contactInfo.mobileNumber} />
-            <LabeledValue label="Alternate Phone Number" value={contactInfo.alternatePhone} />
-            <LabeledValue label="Emergency Contact" value={contactInfo.emergencyContact} />
-            <LabeledValue
-              label="Emergency Contact Phone Number"
-              value={contactInfo.emergencyContactPhone}
-            />
-            <LabeledValue label="Email" value={contactInfo.email} />
-            <LabeledValue label="Alternate Email" value={contactInfo.alternateEmail} />
-            <LabeledValue label="Formal Letter Name" value={contactInfo.formalLetterName} />
-            <LabeledValue
-              label="Preferences - Communication"
-              value={
-                contactInfo.communicationPreferences.length > 0
-                  ? contactInfo.communicationPreferences.join(", ")
-                  : ""
-              }
-            />
-          </div>
+          </section>
         </div>
       ) : null}
 
