@@ -46,6 +46,7 @@ export function GivingFuelContactsSetup({
   const [syncedContacts, setSyncedContacts] = useState<SyncedContact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"contacts" | "errors" | "history">("contacts");
   const [resolvingErrorId, setResolvingErrorId] = useState<string | null>(null);
   const [payloadViewer, setPayloadViewer] = useState<Record<string, unknown> | null>(null);
   const [jobViewer, setJobViewer] = useState<{
@@ -284,186 +285,233 @@ export function GivingFuelContactsSetup({
       </section>
 
       <section className="rounded-md border border-slate-200 p-4">
-        <h4 className="mb-2 text-sm font-semibold text-slate-900">Sync History</h4>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-600">
-                <th className="py-2">Job ID</th>
-                <th className="py-2">Scope</th>
-                <th className="py-2">Started</th>
-                <th className="py-2">Completed</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Processed</th>
-                <th className="py-2">Failed</th>
-                <th className="py-2">Error Summary</th>
-                <th className="py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.jobs.map((job) => (
-                <tr key={String(job.id)} className="border-b border-slate-100">
-                  <td className="py-2">{String(job.id ?? "-")}</td>
-                  <td className="py-2">{String(job.sync_scope ?? "-")}</td>
-                  <td className="py-2">{formatDate(job.started_date as string | null)}</td>
-                  <td className="py-2">{formatDate(job.completed_date as string | null)}</td>
-                  <td className="py-2">{String(job.status ?? "-")}</td>
-                  <td className="py-2">{String(job.records_processed ?? 0)}</td>
-                  <td className="py-2">{String(job.records_failed ?? 0)}</td>
-                  <td className="py-2">{String(job.error_summary ?? "-")}</td>
-                  <td className="py-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void openJob(String(job.id))}
+        <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+          <button
+            type="button"
+            onClick={() => setActiveTab("contacts")}
+            className={`rounded-md px-3 py-1 text-sm font-medium ${
+              activeTab === "contacts"
+                ? "bg-slate-900 text-white"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            Recently Synced Contacts
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("errors")}
+            className={`rounded-md px-3 py-1 text-sm font-medium ${
+              activeTab === "errors"
+                ? "bg-slate-900 text-white"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            Error Queue
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("history")}
+            className={`rounded-md px-3 py-1 text-sm font-medium ${
+              activeTab === "history"
+                ? "bg-slate-900 text-white"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            Sync History
+          </button>
+        </div>
+
+        {activeTab === "contacts" ? (
+          <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold text-slate-900">Recently Synced Contacts</h4>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Show
+                </label>
+                <select
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  value={contactsLimit}
+                  onChange={(event) =>
+                    setContactsLimit(Number(event.target.value) as 20 | 50 | 100)
+                  }
+                  disabled={contactsLoading}
+                >
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void loadSyncedContacts()}
+                  disabled={contactsLoading}
+                >
+                  {contactsLoading ? "Loading..." : "Refresh"}
+                </Button>
+              </div>
+            </div>
+
+            {contactsError ? <p className="mb-2 text-sm text-red-700">{contactsError}</p> : null}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Name</th>
+                    <th className="py-2">Email</th>
+                    <th className="py-2">Phone</th>
+                    <th className="py-2">City</th>
+                    <th className="py-2">State</th>
+                    <th className="py-2">GivingFuel ID</th>
+                    <th className="py-2">Source</th>
+                    <th className="py-2">Last Synced</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {syncedContacts.map((row) => (
+                    <tr
+                      key={`${row.externalRecordId}-${row.contact.id}`}
+                      className="border-b border-slate-100"
                     >
-                      Open
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {data.jobs.length === 0 ? (
-                <tr>
-                  <td className="py-3 text-slate-500" colSpan={9}>
-                    No sync jobs found yet.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="rounded-md border border-slate-200 p-4">
-        <h4 className="mb-2 text-sm font-semibold text-slate-900">Error Queue</h4>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-600">
-                <th className="py-2">Error ID</th>
-                <th className="py-2">Job ID</th>
-                <th className="py-2">Source Record</th>
-                <th className="py-2">Error</th>
-                <th className="py-2">Retry Count</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.errors.map((row) => (
-                <tr key={String(row.id)} className="border-b border-slate-100">
-                  <td className="py-2">{String(row.id ?? "-")}</td>
-                  <td className="py-2">{String(row.sync_job_id ?? "-")}</td>
-                  <td className="py-2">{String(row.source_record_id ?? "-")}</td>
-                  <td className="py-2">{String(row.error_message ?? "-")}</td>
-                  <td className="py-2">{String(row.retry_count ?? 0)}</td>
-                  <td className="py-2">{String(row.status ?? "-")}</td>
-                  <td className="py-2">
-                    <div className="flex flex-wrap gap-1">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() =>
-                          setPayloadViewer((row.payload_json as Record<string, unknown>) ?? {})
-                        }
-                      >
-                        Open Payload
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => void resolveError(String(row.id))}
-                        disabled={resolvingErrorId === String(row.id)}
-                      >
-                        {resolvingErrorId === String(row.id) ? "Saving..." : "Mark Resolved"}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {data.errors.length === 0 ? (
-                <tr>
-                  <td className="py-3 text-slate-500" colSpan={7}>
-                    No unresolved errors in queue.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="rounded-md border border-slate-200 p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h4 className="text-sm font-semibold text-slate-900">Recently Synced Contacts</h4>
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Show
-            </label>
-            <select
-              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-              value={contactsLimit}
-              onChange={(event) =>
-                setContactsLimit(Number(event.target.value) as 20 | 50 | 100)
-              }
-              disabled={contactsLoading}
-            >
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void loadSyncedContacts()}
-              disabled={contactsLoading}
-            >
-              {contactsLoading ? "Loading..." : "Refresh"}
-            </Button>
+                      <td className="py-2">
+                        {`${row.contact.firstName} ${row.contact.lastName}`.trim() || "-"}
+                      </td>
+                      <td className="py-2">{row.contact.email || "-"}</td>
+                      <td className="py-2">{row.contact.phone || "-"}</td>
+                      <td className="py-2">{row.contact.city || "-"}</td>
+                      <td className="py-2">{row.contact.state || "-"}</td>
+                      <td className="py-2">{row.externalRecordId || "-"}</td>
+                      <td className="py-2">{row.sourceSystem || "-"}</td>
+                      <td className="py-2">{formatDate(row.lastSyncedDate)}</td>
+                    </tr>
+                  ))}
+                  {!contactsLoading && syncedContacts.length === 0 ? (
+                    <tr>
+                      <td className="py-3 text-slate-500" colSpan={8}>
+                        No synced contacts available yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        {contactsError ? <p className="mb-2 text-sm text-red-700">{contactsError}</p> : null}
+        {activeTab === "errors" ? (
+          <div>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Error Queue</h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Error ID</th>
+                    <th className="py-2">Job ID</th>
+                    <th className="py-2">Source Record</th>
+                    <th className="py-2">Error</th>
+                    <th className="py-2">Retry Count</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.errors.map((row) => (
+                    <tr key={String(row.id)} className="border-b border-slate-100">
+                      <td className="py-2">{String(row.id ?? "-")}</td>
+                      <td className="py-2">{String(row.sync_job_id ?? "-")}</td>
+                      <td className="py-2">{String(row.source_record_id ?? "-")}</td>
+                      <td className="py-2">{String(row.error_message ?? "-")}</td>
+                      <td className="py-2">{String(row.retry_count ?? 0)}</td>
+                      <td className="py-2">{String(row.status ?? "-")}</td>
+                      <td className="py-2">
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() =>
+                              setPayloadViewer((row.payload_json as Record<string, unknown>) ?? {})
+                            }
+                          >
+                            Open Payload
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => void resolveError(String(row.id))}
+                            disabled={resolvingErrorId === String(row.id)}
+                          >
+                            {resolvingErrorId === String(row.id) ? "Saving..." : "Mark Resolved"}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {data.errors.length === 0 ? (
+                    <tr>
+                      <td className="py-3 text-slate-500" colSpan={7}>
+                        No unresolved errors in queue.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-600">
-                <th className="py-2">Name</th>
-                <th className="py-2">Email</th>
-                <th className="py-2">Phone</th>
-                <th className="py-2">City</th>
-                <th className="py-2">State</th>
-                <th className="py-2">GivingFuel ID</th>
-                <th className="py-2">Source</th>
-                <th className="py-2">Last Synced</th>
-              </tr>
-            </thead>
-            <tbody>
-              {syncedContacts.map((row) => (
-                <tr key={`${row.externalRecordId}-${row.contact.id}`} className="border-b border-slate-100">
-                  <td className="py-2">
-                    {`${row.contact.firstName} ${row.contact.lastName}`.trim() || "-"}
-                  </td>
-                  <td className="py-2">{row.contact.email || "-"}</td>
-                  <td className="py-2">{row.contact.phone || "-"}</td>
-                  <td className="py-2">{row.contact.city || "-"}</td>
-                  <td className="py-2">{row.contact.state || "-"}</td>
-                  <td className="py-2">{row.externalRecordId || "-"}</td>
-                  <td className="py-2">{row.sourceSystem || "-"}</td>
-                  <td className="py-2">{formatDate(row.lastSyncedDate)}</td>
-                </tr>
-              ))}
-              {!contactsLoading && syncedContacts.length === 0 ? (
-                <tr>
-                  <td className="py-3 text-slate-500" colSpan={8}>
-                    No synced contacts available yet.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        {activeTab === "history" ? (
+          <div>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Sync History</h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Job ID</th>
+                    <th className="py-2">Scope</th>
+                    <th className="py-2">Started (Date/Time)</th>
+                    <th className="py-2">Completed (Date/Time)</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2">Processed</th>
+                    <th className="py-2">Failed</th>
+                    <th className="py-2">Error Summary</th>
+                    <th className="py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.jobs.map((job) => (
+                    <tr key={String(job.id)} className="border-b border-slate-100">
+                      <td className="py-2">{String(job.id ?? "-")}</td>
+                      <td className="py-2">{String(job.sync_scope ?? "-")}</td>
+                      <td className="py-2">{formatDateTime(job.started_date as string | null)}</td>
+                      <td className="py-2">{formatDateTime(job.completed_date as string | null)}</td>
+                      <td className="py-2">{String(job.status ?? "-")}</td>
+                      <td className="py-2">{String(job.records_processed ?? 0)}</td>
+                      <td className="py-2">{String(job.records_failed ?? 0)}</td>
+                      <td className="py-2">{String(job.error_summary ?? "-")}</td>
+                      <td className="py-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => void openJob(String(job.id))}
+                        >
+                          Open
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {data.jobs.length === 0 ? (
+                    <tr>
+                      <td className="py-3 text-slate-500" colSpan={9}>
+                        No sync jobs found yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {jobViewer ? (
@@ -516,6 +564,20 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       {children}
     </div>
   );
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }
 
 function Info({ label, value }: { label: string; value: string }) {
