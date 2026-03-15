@@ -13,6 +13,9 @@ export type Campaign = {
   status: "Active" | "Inactive";
   start_date: string | null;
   end_date: string | null;
+  is_child?: boolean;
+  parent_campaign_id?: string | null;
+  parent_campaign_name?: string | null;
 };
 
 export function CampaignsDashboard({
@@ -111,11 +114,13 @@ export function CampaignsDashboard({
           rows.map((campaign) => (
             <Link
               key={campaign.id}
-              href={`/staff/financial/campaigns/${campaign.id}`}
+              href={`/staff/financial/campaigns/${campaign.is_child ? campaign.parent_campaign_id : campaign.id}`}
               className="block rounded-md border border-slate-200 px-4 py-3 hover:bg-slate-50"
             >
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-900">{campaign.name}</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {campaign.is_child ? `--${campaign.name}` : campaign.name}
+                </p>
                 <span
                   className={`rounded-full px-2 py-1 text-xs ${
                     campaign.status === "Active"
@@ -126,6 +131,9 @@ export function CampaignsDashboard({
                   {campaign.status}
                 </span>
               </div>
+              {campaign.is_child && campaign.parent_campaign_name ? (
+                <p className="text-xs text-slate-500">Parent: {campaign.parent_campaign_name}</p>
+              ) : null}
               <p className="text-xs text-slate-600">{campaign.description ?? "-"}</p>
             </Link>
           ))
@@ -147,10 +155,22 @@ export function CampaignsDashboard({
             </div>
             <CampaignForm
               onCancel={() => setShowCreateModal(false)}
+              onSubmitCampaign={async (values) => {
+                const response = await fetch("/api/campaigns", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify(values)
+                });
+                const payload = await response.json().catch(() => null);
+                if (!response.ok) {
+                  throw new Error(payload?.message ?? "Unable to create campaign.");
+                }
+              }}
               onSuccess={async () => {
                 setShowCreateModal(false);
                 await refreshCampaigns();
               }}
+              submitLabel="Create Campaign"
             />
           </div>
         </div>

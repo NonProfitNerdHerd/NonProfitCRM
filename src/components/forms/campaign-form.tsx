@@ -4,19 +4,48 @@ import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+export type CampaignFormPayload = {
+  name: string;
+  description?: string;
+  status: "Active" | "Inactive";
+  startDate?: string;
+  endDate?: string;
+};
+
+type CampaignFormValues = {
+  name: string;
+  description: string;
+  status: "Active" | "Inactive";
+  startDate: string;
+  endDate: string;
+};
+
 export function CampaignForm({
+  onSubmitCampaign,
   onSuccess,
-  onCancel
+  onCancel,
+  initialValues,
+  submitLabel = "Save",
+  requireDateRange = false,
+  parentDateBounds
 }: {
+  onSubmitCampaign: (payload: CampaignFormPayload) => Promise<void>;
   onSuccess: () => Promise<void> | void;
   onCancel: () => void;
+  initialValues?: Partial<CampaignFormValues>;
+  submitLabel?: string;
+  requireDateRange?: boolean;
+  parentDateBounds?: {
+    startDate: string | null;
+    endDate: string | null;
+  };
 }) {
   const [form, setForm] = useState({
-    name: "",
-    description: "",
-    status: "Active",
-    startDate: "",
-    endDate: ""
+    name: initialValues?.name ?? "",
+    description: initialValues?.description ?? "",
+    status: initialValues?.status ?? "Active",
+    startDate: initialValues?.startDate ?? "",
+    endDate: initialValues?.endDate ?? ""
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,21 +65,36 @@ export function CampaignForm({
       setLoading(false);
       return;
     }
+    if (requireDateRange && (!form.startDate || !form.endDate)) {
+      setError("Start Date and End Date are required.");
+      setLoading(false);
+      return;
+    }
+    if (
+      parentDateBounds?.startDate &&
+      form.startDate &&
+      form.startDate < parentDateBounds.startDate
+    ) {
+      setError("Child Campaign Start Date cannot be before Parent Campaign Start Date.");
+      setLoading(false);
+      return;
+    }
+    if (parentDateBounds?.endDate && form.endDate && form.endDate > parentDateBounds.endDate) {
+      setError("Child Campaign End Date cannot be after Parent Campaign End Date.");
+      setLoading(false);
+      return;
+    }
 
-    const response = await fetch("/api/campaigns", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await onSubmitCampaign({
         name: form.name.trim(),
         description: form.description.trim() || undefined,
-        status: form.status,
+        status: form.status as "Active" | "Inactive",
         startDate: form.startDate || undefined,
         endDate: form.endDate || undefined
-      })
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      setError(payload?.message ?? "Unable to create campaign.");
+      });
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Unable to save campaign.");
       setLoading(false);
       return;
     }
@@ -98,7 +142,12 @@ export function CampaignForm({
           <select
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             value={form.status}
-            onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...prev,
+                status: event.target.value as "Active" | "Inactive"
+              }))
+            }
           >
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
@@ -106,7 +155,9 @@ export function CampaignForm({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Start Date (optional)</label>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Start Date {requireDateRange ? "*" : "(optional)"}
+          </label>
           <Input
             type="date"
             value={form.startDate}
@@ -115,7 +166,9 @@ export function CampaignForm({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">End Date (optional)</label>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            End Date {requireDateRange ? "*" : "(optional)"}
+          </label>
           <Input
             type="date"
             value={form.endDate}
@@ -128,7 +181,7 @@ export function CampaignForm({
 
       <div className="flex gap-2">
         <Button type="submit" disabled={loading}>
-          {loading ? "Saving..." : "Save"}
+          {loading ? "Saving..." : submitLabel}
         </Button>
         <Button type="button" variant="secondary" onClick={onCancel} disabled={loading}>
           Cancel

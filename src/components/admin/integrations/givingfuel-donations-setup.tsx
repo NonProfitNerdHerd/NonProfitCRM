@@ -54,7 +54,7 @@ export function GivingFuelDonationsSetup({
   const [mappingLoading, setMappingLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mappingEdits, setMappingEdits] = useState<Record<string, { campaignId: string }>>({});
+  const [mappingEdits, setMappingEdits] = useState<Record<string, { targetId: string }>>({});
   const [savingMappingId, setSavingMappingId] = useState<string | null>(null);
   const [payloadViewer, setPayloadViewer] = useState<Record<string, unknown> | null>(null);
 
@@ -81,10 +81,14 @@ export function GivingFuelDonationsSetup({
       }
       const typed = payload as MappingPayload;
       setMappingData(typed);
-      const seeded: Record<string, { campaignId: string }> = {};
+      const seeded: Record<string, { targetId: string }> = {};
       for (const row of typed.mappings) {
         seeded[row.id] = {
-          campaignId: row.mappedCampaignId ?? ""
+          targetId: row.mappedSubCampaignId
+            ? `sub:${row.mappedSubCampaignId}`
+            : row.mappedCampaignId
+              ? `campaign:${row.mappedCampaignId}`
+              : ""
         };
       }
       setMappingEdits(seeded);
@@ -118,8 +122,13 @@ export function GivingFuelDonationsSetup({
 
   async function saveMapping(mappingId: string, externalPageValue: string) {
     const draft = mappingEdits[mappingId];
-    if (!draft?.campaignId) {
-      setError("Campaign selection is required before saving this mapping.");
+    if (!draft?.targetId) {
+      setError("Campaign or Child Campaign selection is required before saving this mapping.");
+      return;
+    }
+    const selectedTarget = mappingTargetsByValue.get(draft.targetId);
+    if (!selectedTarget) {
+      setError("Selected mapping target is invalid. Please choose again.");
       return;
     }
     setSavingMappingId(mappingId);
@@ -133,8 +142,8 @@ export function GivingFuelDonationsSetup({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             externalPageValue,
-            campaignId: draft.campaignId,
-          subCampaignId: null
+            campaignId: selectedTarget.campaignId,
+            subCampaignId: selectedTarget.subCampaignId
           })
         }
       );
@@ -201,6 +210,56 @@ export function GivingFuelDonationsSetup({
     }
     return map;
   }, [mappingData]);
+  const mappingTargets = useMemo(() => {
+    const targets: Array<{
+      value: string;
+      label: string;
+      campaignId: string;
+      subCampaignId: string | null;
+    }> = [];
+    const childrenByParent = new Map<
+      string,
+      Array<{ id: string; campaignId: string; name: string; status: string; externalPageKey: string }>
+    >();
+    for (const child of mappingData?.subCampaigns ?? []) {
+      const list = childrenByParent.get(child.campaignId) ?? [];
+      list.push(child);
+      childrenByParent.set(child.campaignId, list);
+    }
+    for (const campaign of mappingData?.campaigns ?? []) {
+      targets.push({
+        value: `campaign:${campaign.id}`,
+        label: campaign.name,
+        campaignId: campaign.id,
+        subCampaignId: null
+      });
+      const children = childrenByParent.get(campaign.id) ?? [];
+      for (const child of children) {
+        targets.push({
+          value: `sub:${child.id}`,
+          label: `--${child.name}`,
+          campaignId: campaign.id,
+          subCampaignId: child.id
+        });
+      }
+    }
+    return targets;
+  }, [mappingData]);
+  const mappingTargetsByValue = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        value: string;
+        label: string;
+        campaignId: string;
+        subCampaignId: string | null;
+      }
+    >();
+    for (const target of mappingTargets) {
+      map.set(target.value, target);
+    }
+    return map;
+  }, [mappingTargets]);
 
   function exportFormNamesCsv() {
     const rows = mappingData?.mappings ?? [];
@@ -410,7 +469,7 @@ export function GivingFuelDonationsSetup({
                   <tr className="border-b border-slate-200 text-slate-600">
                     <th className="py-2">Form Name</th>
                     <th className="py-2">Status</th>
-                    <th className="py-2">Campaign</th>
+                    <th className="py-2">Campaign / Child Campaign</th>
                     <th className="py-2">Last Detected</th>
                     <th className="py-2">Action</th>
                   </tr>
@@ -418,7 +477,11 @@ export function GivingFuelDonationsSetup({
                 <tbody>
                   {(mappingData?.mappings ?? []).map((row) => {
                     const draft = mappingEdits[row.id] ?? {
-                      campaignId: row.mappedCampaignId ?? ""
+                      targetId: row.mappedSubCampaignId
+                        ? `sub:${row.mappedSubCampaignId}`
+                        : row.mappedCampaignId
+                          ? `campaign:${row.mappedCampaignId}`
+                          : ""
                     };
                     return (
                       <tr key={row.id} className="border-b border-slate-100">
@@ -437,18 +500,18 @@ export function GivingFuelDonationsSetup({
                         <td className="py-2">
                           <select
                             className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-                            value={draft.campaignId}
+                            value={draft.targetId}
                             onChange={(event) =>
                               setMappingEdits((prev) => ({
                                 ...prev,
-                                [row.id]: { campaignId: event.target.value }
+                                [row.id]: { targetId: event.target.value }
                               }))
                             }
                           >
-                            <option value="">Select campaign</option>
-                            {(mappingData?.campaigns ?? []).map((campaign) => (
-                              <option key={campaign.id} value={campaign.id}>
-                                {campaign.name}
+                            <option value="">Select parent or child campaign</option>
+                            {mappingTargets.map((target) => (
+                              <option key={target.value} value={target.value}>
+                                {target.label}
                               </option>
                             ))}
                           </select>
