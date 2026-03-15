@@ -267,16 +267,41 @@ export async function createContact(input: ContactInput) {
 export async function updateContact(contactId: string, input: ContactInput) {
   const context = await requireStaffPermission("can_edit_contacts");
   const supabase = await createClient();
-  const { data: existingContact, error: existingError } = await supabase
+  let { data: existingContact, error: existingError } = await supabase
     .from("contacts")
-    .select("tracking_status, webconnex_id")
+    .select("tracking_status, webconnex_id, donor_status, external_source, external_source_id")
     .eq("organization_id", context.organizationId)
     .eq("id", contactId)
     .maybeSingle();
+  if (existingError && isClassificationSchemaMissingError(existingError)) {
+    const fallbackResult = await supabase
+      .from("contacts")
+      .select("donor_status, external_source, external_source_id")
+      .eq("organization_id", context.organizationId)
+      .eq("id", contactId)
+      .maybeSingle();
+    existingContact = fallbackResult.data;
+    existingError = fallbackResult.error;
+  }
   if (existingError) throw existingError;
 
-  const existingTrackingStatus = String(existingContact?.tracking_status ?? "").toLowerCase();
-  const existingWebconnexId = String(existingContact?.webconnex_id ?? "").trim();
+  const existingTrackingStatusRaw = String(existingContact?.tracking_status ?? "").toLowerCase();
+  const existingDonorStatus = String(existingContact?.donor_status ?? "").toLowerCase();
+  const existingTrackingStatus =
+    existingTrackingStatusRaw ||
+    (existingDonorStatus === "active" || existingDonorStatus === "lapsed"
+      ? "donor"
+      : existingDonorStatus === "inactive"
+        ? "non_lead"
+        : "lead");
+  const legacyExternalSource = String(existingContact?.external_source ?? "").toLowerCase();
+  const legacyExternalSourceId = String(existingContact?.external_source_id ?? "").trim();
+  const existingWebconnexId =
+    String(existingContact?.webconnex_id ?? "").trim() ||
+    ((legacyExternalSource === "webconnex" || legacyExternalSource === "givingfuel") &&
+    legacyExternalSourceId
+      ? legacyExternalSourceId
+      : "");
   const incomingWebconnexId = input.webconnex_id?.trim() ?? "";
   const webconnexId = incomingWebconnexId || existingWebconnexId || null;
   const entityType = normalizeEntityType(input);
