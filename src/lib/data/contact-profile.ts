@@ -56,6 +56,34 @@ function isDonationOrgSchemaError(error: unknown) {
   return message.includes("crm_organization_id") || message.includes("crm_organizations");
 }
 
+function normalizeLegacyContactClassification(record: Record<string, unknown>): Record<string, unknown> {
+  const donorStatus = String(record.donor_status ?? "").toLowerCase();
+  const organizationName = String(record.organization_name ?? "").trim();
+  const externalSource = String(record.external_source ?? "").toLowerCase();
+  const externalSourceId = String(record.external_source_id ?? "").trim();
+  const hasGivingFuelExternalId =
+    externalSourceId.length > 0 &&
+    (externalSource === "givingfuel" || externalSource === "webconnex");
+  const derivedEntityType = organizationName ? "organization" : "person";
+  const derivedTrackingStatus = hasGivingFuelExternalId
+    ? "donor"
+    : donorStatus === "active" || donorStatus === "lapsed"
+      ? "donor"
+      : donorStatus === "inactive"
+        ? "non_lead"
+        : "lead";
+  const derivedGivingFuelId = hasGivingFuelExternalId ? externalSourceId : null;
+
+  return {
+    ...record,
+    entity_type: String(record.entity_type ?? "") || derivedEntityType,
+    tracking_status: String(record.tracking_status ?? "") || derivedTrackingStatus,
+    webconnex_id: String(record.webconnex_id ?? "") || derivedGivingFuelId,
+    external_source: record.external_source ?? null,
+    external_source_id: record.external_source_id ?? null
+  };
+}
+
 async function fetchContactDonations(
   supabase: Awaited<ReturnType<typeof createClient>>,
   organizationId: string,
@@ -119,20 +147,22 @@ async function fetchContactRecord(
     if (legacyResult.error) return legacyResult;
     return {
       data: legacyResult.data
-        ? {
+        ? normalizeLegacyContactClassification({
             ...legacyResult.data,
             formal_letter_name: null,
             mobile_number: null,
             emergency_contact: null,
-            emergency_contact_phone: null,
-            entity_type: "person",
-            tracking_status: "lead",
-            webconnex_id: null,
-            external_source: null,
-            external_source_id: null
-          }
+            emergency_contact_phone: null
+          } as Record<string, unknown>)
         : null,
       error: null
+    };
+  }
+
+  if (fullResult.data) {
+    return {
+      data: normalizeLegacyContactClassification(fullResult.data),
+      error: fullResult.error
     };
   }
 

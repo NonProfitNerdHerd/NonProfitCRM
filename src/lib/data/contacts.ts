@@ -88,6 +88,13 @@ function normalizeLegacyClassification(row: Record<string, unknown>) {
   };
 }
 
+function ensureClassificationForUi(row: Record<string, unknown>) {
+  const entityType = String(row.entity_type ?? "").trim();
+  const trackingStatus = String(row.tracking_status ?? "").trim();
+  if (entityType && trackingStatus) return row;
+  return normalizeLegacyClassification(row);
+}
+
 export async function listContacts(
   mode:
     | "all"
@@ -121,7 +128,9 @@ export async function listContacts(
 
   const modernResult = await modernQuery;
   if (!modernResult.error) {
-    return modernResult.data ?? [];
+    return (modernResult.data ?? []).map((row) =>
+      ensureClassificationForUi(row as Record<string, unknown>)
+    );
   }
   if (!isClassificationSchemaMissingError(modernResult.error)) {
     throw modernResult.error;
@@ -178,7 +187,8 @@ export async function getContact(contactId: string) {
     .maybeSingle();
 
   if (error) throw error;
-  return data;
+  if (!data) return data;
+  return ensureClassificationForUi(data as Record<string, unknown>);
 }
 
 export async function createContact(input: ContactInput) {
