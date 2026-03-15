@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,9 +40,22 @@ export function CampaignDetailPanel({
   const [data, setData] = useState(initialData);
   const [showCreateChild, setShowCreateChild] = useState(false);
   const [editingChild, setEditingChild] = useState<ChildCampaignDraft | null>(null);
+  const [activeTab, setActiveTab] = useState<"children" | "donations">("children");
+  const [expandedChildDonationId, setExpandedChildDonationId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const campaign = data.campaign;
+  const childDonationMap = useMemo(() => {
+    const map = new Map<string, Array<Record<string, unknown>>>();
+    for (const donation of data.donations) {
+      const childId = String(donation.sub_campaign_id ?? "");
+      if (!childId) continue;
+      const rows = map.get(childId) ?? [];
+      rows.push(donation);
+      map.set(childId, rows);
+    }
+    return map;
+  }, [data.donations]);
 
   async function refreshCampaign() {
     const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`);
@@ -84,11 +97,6 @@ export function CampaignDetailPanel({
 
       <Card>
         <CardHeader title={campaign.name} subtitle={campaign.description ?? "No description"} />
-        <div className="mb-3 flex justify-end">
-          <Button type="button" onClick={() => setShowCreateChild(true)}>
-            Add Child Campaign
-          </Button>
-        </div>
         <div className="grid gap-3 text-sm md:grid-cols-4">
           <div>
             <p className="text-slate-500">Status</p>
@@ -110,108 +118,209 @@ export function CampaignDetailPanel({
       </Card>
 
       <Card>
-        <CardHeader
-          title="Child Campaigns"
-          subtitle="Child campaigns tied to this parent campaign."
-        />
-        <div className="space-y-2">
-          {(data.childCampaigns ?? []).length === 0 ? (
-            <p className="text-sm text-slate-500">No child campaigns yet.</p>
-          ) : (
-            (data.childCampaigns ?? []).map((child) => (
-              <div
-                key={String(child.id)}
-                className="cursor-pointer rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
-                onClick={() =>
-                  setEditingChild({
-                    id: String(child.id ?? ""),
-                    name: String(child.name ?? ""),
-                    description: String(child.description ?? ""),
-                    status: String(child.status ?? "Active") as "Active" | "Inactive",
-                    startDate:
-                      typeof child.start_date === "string" ? String(child.start_date) : "",
-                    endDate: typeof child.end_date === "string" ? String(child.end_date) : ""
-                  })
-                }
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{String(child.name ?? "-")}</p>
-                    <p className="text-xs text-slate-600">{String(child.description ?? "-")}</p>
-                    <p className="text-xs text-slate-500">
-                      {formatDate(
-                        typeof child.start_date === "string" ? String(child.start_date) : null
-                      )}{" "}
-                      -{" "}
-                      {formatDate(typeof child.end_date === "string" ? String(child.end_date) : null)}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Raised: {formatCurrency(Number(child.total_amount ?? 0))}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setEditingChild({
-                        id: String(child.id ?? ""),
-                        name: String(child.name ?? ""),
-                        description: String(child.description ?? ""),
-                        status: String(child.status ?? "Active") as "Active" | "Inactive",
-                        startDate:
-                          typeof child.start_date === "string" ? String(child.start_date) : "",
-                        endDate: typeof child.end_date === "string" ? String(child.end_date) : ""
-                      });
-                    }}
-                  >
-                    Edit
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant={activeTab === "children" ? "primary" : "secondary"}
+              onClick={() => setActiveTab("children")}
+            >
+              Child Campaigns
+            </Button>
+            <Button
+              type="button"
+              variant={activeTab === "donations" ? "primary" : "secondary"}
+              onClick={() => setActiveTab("donations")}
+            >
+              Campaign Donations
+            </Button>
+          </div>
+          {activeTab === "children" ? (
+            <Button type="button" onClick={() => setShowCreateChild(true)}>
+              Add Child Campaign
+            </Button>
+          ) : null}
         </div>
-      </Card>
 
-      <Card>
-        <CardHeader title="Campaign Donations" subtitle="Donations tied to this parent campaign." />
-        <div className="space-y-2">
-          {data.donations.length === 0 ? (
-            <p className="text-sm text-slate-500">No donations tied to this campaign yet.</p>
-          ) : (
-            data.donations.map((donation) => {
-              const donor = Array.isArray(donation.contacts) ? donation.contacts[0] : donation.contacts;
-              const child = Array.isArray(donation.sub_campaigns)
-                ? donation.sub_campaigns[0]
-                : donation.sub_campaigns;
-              return (
-                <Link
-                  key={String(donation.id)}
-                  href={`/staff/financial/donations/${encodeURIComponent(String(donation.id))}`}
-                  className="block rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-900">
-                      {formatCurrency(Number(donation.amount ?? 0))}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {formatDate((donation.donation_date as string | null) ?? null)}
-                    </p>
-                  </div>
-                  <p className="text-xs text-slate-600">
-                    {String((donor as { first_name?: string })?.first_name ?? "")}{" "}
-                    {String((donor as { last_name?: string })?.last_name ?? "")} •{" "}
-                    {String(donation.payment_type ?? "-")}
-                  </p>
-                  {child && (child as { name?: string }).name ? (
-                    <p className="text-xs text-slate-500">Child: {String((child as { name?: string }).name)}</p>
-                  ) : null}
-                </Link>
-              );
-            })
-          )}
-        </div>
+        {activeTab === "children" ? (
+          <>
+            <CardHeader
+              title="Child Campaigns"
+              subtitle="Child campaigns tied to this parent campaign."
+            />
+            <div className="space-y-2">
+              {(data.childCampaigns ?? []).length === 0 ? (
+                <p className="text-sm text-slate-500">No child campaigns yet.</p>
+              ) : (
+                (data.childCampaigns ?? []).map((child) => {
+                  const childId = String(child.id ?? "");
+                  const childDonations = childDonationMap.get(childId) ?? [];
+                  const isExpanded = expandedChildDonationId === childId;
+                  return (
+                    <div
+                      key={childId}
+                      className="cursor-pointer rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                      onClick={() =>
+                        setEditingChild({
+                          id: childId,
+                          name: String(child.name ?? ""),
+                          description: String(child.description ?? ""),
+                          status: String(child.status ?? "Active") as "Active" | "Inactive",
+                          startDate:
+                            typeof child.start_date === "string" ? String(child.start_date) : "",
+                          endDate: typeof child.end_date === "string" ? String(child.end_date) : ""
+                        })
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{String(child.name ?? "-")}</p>
+                          <p className="text-xs text-slate-600">{String(child.description ?? "-")}</p>
+                          <p className="text-xs text-slate-500">
+                            {formatDate(
+                              typeof child.start_date === "string" ? String(child.start_date) : null
+                            )}{" "}
+                            -{" "}
+                            {formatDate(
+                              typeof child.end_date === "string" ? String(child.end_date) : null
+                            )}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Raised: {formatCurrency(Number(child.total_amount ?? 0))}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Donations: {childDonations.length}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setExpandedChildDonationId((previous) =>
+                                previous === childId ? null : childId
+                              );
+                            }}
+                          >
+                            {isExpanded ? "Hide Donations" : "View Donations"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditingChild({
+                                id: childId,
+                                name: String(child.name ?? ""),
+                                description: String(child.description ?? ""),
+                                status: String(child.status ?? "Active") as "Active" | "Inactive",
+                                startDate:
+                                  typeof child.start_date === "string"
+                                    ? String(child.start_date)
+                                    : "",
+                                endDate:
+                                  typeof child.end_date === "string" ? String(child.end_date) : ""
+                              });
+                            }}
+                          >
+                            Edit
+                          </Button>
+                        </div>
+                      </div>
+
+                      {isExpanded ? (
+                        <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+                          <p className="mb-1 text-xs font-semibold text-slate-700">
+                            Donations for {String(child.name ?? "Child Campaign")}
+                          </p>
+                          <div className="space-y-1">
+                            {childDonations.length === 0 ? (
+                              <p className="text-xs text-slate-500">
+                                No donations for this child campaign yet.
+                              </p>
+                            ) : (
+                              childDonations.map((donation) => {
+                                const donor = Array.isArray(donation.contacts)
+                                  ? donation.contacts[0]
+                                  : donation.contacts;
+                                return (
+                                  <Link
+                                    key={`child-${String(donation.id)}`}
+                                    href={`/staff/financial/donations/${encodeURIComponent(String(donation.id))}`}
+                                    className="block rounded border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-semibold text-slate-900">
+                                        {formatCurrency(Number(donation.amount ?? 0))}
+                                      </span>
+                                      <span className="text-slate-500">
+                                        {formatDate((donation.donation_date as string | null) ?? null)}
+                                      </span>
+                                    </div>
+                                    <p className="text-slate-600">
+                                      {String((donor as { first_name?: string })?.first_name ?? "")}{" "}
+                                      {String((donor as { last_name?: string })?.last_name ?? "")}
+                                    </p>
+                                  </Link>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <CardHeader
+              title="Campaign Donations"
+              subtitle="Donations tied to this parent campaign."
+            />
+            <div className="space-y-2">
+              {data.donations.length === 0 ? (
+                <p className="text-sm text-slate-500">No donations tied to this campaign yet.</p>
+              ) : (
+                data.donations.map((donation) => {
+                  const donor = Array.isArray(donation.contacts) ? donation.contacts[0] : donation.contacts;
+                  const child = Array.isArray(donation.sub_campaigns)
+                    ? donation.sub_campaigns[0]
+                    : donation.sub_campaigns;
+                  return (
+                    <Link
+                      key={String(donation.id)}
+                      href={`/staff/financial/donations/${encodeURIComponent(String(donation.id))}`}
+                      className="block rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {formatCurrency(Number(donation.amount ?? 0))}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {formatDate((donation.donation_date as string | null) ?? null)}
+                        </p>
+                      </div>
+                      <p className="text-xs text-slate-600">
+                        {String((donor as { first_name?: string })?.first_name ?? "")}{" "}
+                        {String((donor as { last_name?: string })?.last_name ?? "")} •{" "}
+                        {String(donation.payment_type ?? "-")}
+                      </p>
+                      {child && (child as { name?: string }).name ? (
+                        <p className="text-xs text-slate-500">
+                          Child: {String((child as { name?: string }).name)}
+                        </p>
+                      ) : null}
+                    </Link>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
       </Card>
 
       {showCreateChild ? (
