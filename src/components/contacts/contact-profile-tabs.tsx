@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
 import { DonationsManagement } from "@/components/donations/donations-management";
+
+const recordTypeOptions = ["person", "organization"] as const;
+const trackingStatusOptions = ["donor", "lead", "non_lead"] as const;
 
 type ContactProfileTabsProps = {
   contactId: string;
@@ -43,6 +46,19 @@ function parseCommunicationPreferences(value: unknown) {
   return [] as string[];
 }
 
+function buildOrganizationFormalLetterName(input: {
+  organizationName: string;
+  firstName: string;
+  lastName: string;
+}) {
+  const org = input.organizationName.trim();
+  const primaryName = `${input.firstName.trim()} ${input.lastName.trim()}`.trim();
+  if (!org && !primaryName) return "";
+  if (!org) return primaryName;
+  if (!primaryName) return org;
+  return `${org}\nc/o ${primaryName}`;
+}
+
 export function ContactProfileTabs({
   contactId,
   contactDetails,
@@ -67,6 +83,9 @@ export function ContactProfileTabs({
   const [selectedItem, setSelectedItem] = useState<WorkbenchItem | null>(null);
   const [showContactInfoModal, setShowContactInfoModal] = useState(false);
   const [contactInfo, setContactInfo] = useState({
+    recordType: String(contactDetails.entity_type ?? "person"),
+    trackingStatus: String(contactDetails.tracking_status ?? "lead"),
+    webconnexId: String(contactDetails.webconnex_id ?? ""),
     firstName: String(contactDetails.first_name ?? ""),
     lastName: String(contactDetails.last_name ?? ""),
     preferredName: String(contactDetails.preferred_name ?? ""),
@@ -94,6 +113,7 @@ export function ContactProfileTabs({
     mailingPostalCode: String(contactDetails.mailing_postal_code ?? "")
   });
   const [contactInfoDraft, setContactInfoDraft] = useState(contactInfo);
+  const [formalLetterManualOverride, setFormalLetterManualOverride] = useState(false);
   const [followUpType, setFollowUpType] = useState<"task" | "note">("task");
   const [followUpBody, setFollowUpBody] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -105,6 +125,40 @@ export function ContactProfileTabs({
     if (taskUrgency === "yellow") return "bg-amber-100 text-amber-800 border-amber-200";
     return "bg-slate-100 text-slate-700 border-slate-200";
   }, [taskUrgency]);
+
+  useEffect(() => {
+    setContactInfoDraft((prev) => {
+      if (prev.recordType !== "person" || !prev.organizationName) return prev;
+      return { ...prev, organizationName: "" };
+    });
+  }, [contactInfoDraft.recordType]);
+
+  useEffect(() => {
+    setContactInfoDraft((prev) => {
+      if (!prev.webconnexId.trim()) return prev;
+      if (prev.trackingStatus === "donor") return prev;
+      return { ...prev, trackingStatus: "donor" };
+    });
+  }, [contactInfoDraft.webconnexId, contactInfoDraft.trackingStatus]);
+
+  useEffect(() => {
+    if (contactInfoDraft.recordType !== "organization" || formalLetterManualOverride) return;
+    const generated = buildOrganizationFormalLetterName({
+      organizationName: contactInfoDraft.organizationName,
+      firstName: contactInfoDraft.firstName,
+      lastName: contactInfoDraft.lastName
+    });
+    setContactInfoDraft((prev) => {
+      if (prev.formalLetterName === generated) return prev;
+      return { ...prev, formalLetterName: generated };
+    });
+  }, [
+    contactInfoDraft.recordType,
+    contactInfoDraft.organizationName,
+    contactInfoDraft.firstName,
+    contactInfoDraft.lastName,
+    formalLetterManualOverride
+  ]);
 
   function openItem(item: WorkbenchItem) {
     setSelectedItem(item);
@@ -194,6 +248,20 @@ export function ContactProfileTabs({
 
   async function submitContactInfo(event: React.FormEvent) {
     event.preventDefault();
+    if (
+      contactInfoDraft.recordType === "organization" &&
+      !contactInfoDraft.organizationName.trim()
+    ) {
+      setError("Organization Name is required when Record Type is Organization.");
+      return;
+    }
+    if (
+      contactInfo.trackingStatus === "donor" &&
+      contactInfoDraft.trackingStatus !== "donor"
+    ) {
+      setError("Donor classification cannot be downgraded.");
+      return;
+    }
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -202,11 +270,20 @@ export function ContactProfileTabs({
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        entity_type: contactInfoDraft.recordType,
+        tracking_status:
+          contactInfoDraft.webconnexId.trim() !== ""
+            ? "donor"
+            : contactInfoDraft.trackingStatus,
+        webconnex_id: contactInfoDraft.webconnexId,
         first_name: contactInfoDraft.firstName,
         last_name: contactInfoDraft.lastName,
         preferred_name: contactInfoDraft.preferredName,
         formal_letter_name: contactInfoDraft.formalLetterName,
-        organization_name: contactInfoDraft.organizationName,
+        organization_name:
+          contactInfoDraft.recordType === "organization"
+            ? contactInfoDraft.organizationName
+            : "",
         donor_status: contactInfoDraft.donorStatus,
         member_status: contactInfoDraft.memberStatus,
         email: contactInfoDraft.email,
@@ -236,7 +313,11 @@ export function ContactProfileTabs({
       return;
     }
 
-    setContactInfo(contactInfoDraft);
+    setContactInfo({
+      ...contactInfoDraft,
+      trackingStatus:
+        contactInfoDraft.webconnexId.trim() !== "" ? "donor" : contactInfoDraft.trackingStatus
+    });
     setShowContactInfoModal(false);
     setMessage("Contact information updated.");
     setLoading(false);
@@ -321,6 +402,7 @@ export function ContactProfileTabs({
               type="button"
               onClick={() => {
                 setContactInfoDraft(contactInfo);
+                setFormalLetterManualOverride(false);
                 setShowContactInfoModal(true);
               }}
             >
@@ -328,6 +410,15 @@ export function ContactProfileTabs({
             </Button>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
+            <LabeledValue
+              label="Record Type"
+              value={contactInfo.recordType === "organization" ? "Organization" : "Person"}
+            />
+            <LabeledValue
+              label="Tracking Status"
+              value={contactInfo.trackingStatus.replaceAll("_", "-")}
+            />
+            <LabeledValue label="WebConnex ID" value={contactInfo.webconnexId} />
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Physical Address</p>
               <p className="text-sm text-slate-800">
@@ -380,8 +471,8 @@ export function ContactProfileTabs({
             id: String(campaign.id ?? ""),
             name: String(campaign.name ?? "")
           }))}
-          detailBasePath="/staff/donations"
-          campaignBasePath="/staff/campaigns"
+          detailBasePath="/staff/financial/donations"
+          campaignBasePath="/staff/financial/campaigns"
           fixedContact={{
             id: contactId,
             displayName:
@@ -581,7 +672,76 @@ export function ContactProfileTabs({
               <section className="rounded-md border border-slate-200 p-3">
                 <p className="mb-2 text-sm font-semibold text-slate-900">Core Contact</p>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label="First Name">
+                  <FormField label="Record Type">
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={contactInfoDraft.recordType}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          recordType: event.target.value
+                        }))
+                      }
+                    >
+                      {recordTypeOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option === "organization" ? "Organization" : "Person"}
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                  <FormField label="Tracking Status">
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={contactInfoDraft.trackingStatus}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          trackingStatus: event.target.value
+                        }))
+                      }
+                      disabled={Boolean(contactInfoDraft.webconnexId.trim())}
+                    >
+                      {trackingStatusOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option === "non_lead"
+                            ? "Non-Lead"
+                            : option.charAt(0).toUpperCase() + option.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                  <FormField label="WebConnex ID">
+                    <Input
+                      value={contactInfoDraft.webconnexId}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          webconnexId: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                  {contactInfoDraft.recordType === "organization" ? (
+                    <FormField label="Organization Name (required)">
+                      <Input
+                        value={contactInfoDraft.organizationName}
+                        onChange={(event) =>
+                          setContactInfoDraft((prev) => ({
+                            ...prev,
+                            organizationName: event.target.value
+                          }))
+                        }
+                      />
+                    </FormField>
+                  ) : null}
+                  <FormField
+                    label={
+                      contactInfoDraft.recordType === "organization"
+                        ? "Primary Contact First Name"
+                        : "First Name"
+                    }
+                  >
                     <Input
                       value={contactInfoDraft.firstName}
                       onChange={(event) =>
@@ -589,7 +749,13 @@ export function ContactProfileTabs({
                       }
                     />
                   </FormField>
-                  <FormField label="Last Name">
+                  <FormField
+                    label={
+                      contactInfoDraft.recordType === "organization"
+                        ? "Primary Contact Last Name"
+                        : "Last Name"
+                    }
+                  >
                     <Input
                       value={contactInfoDraft.lastName}
                       onChange={(event) =>
@@ -618,17 +784,18 @@ export function ContactProfileTabs({
                         }))
                       }
                     />
-                  </FormField>
-                  <FormField label="Organization Name">
-                    <Input
-                      value={contactInfoDraft.organizationName}
-                      onChange={(event) =>
-                        setContactInfoDraft((prev) => ({
-                          ...prev,
-                          organizationName: event.target.value
-                        }))
-                      }
-                    />
+                    {contactInfoDraft.recordType === "organization" ? (
+                      <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={formalLetterManualOverride}
+                          onChange={(event) =>
+                            setFormalLetterManualOverride(event.target.checked)
+                          }
+                        />
+                        Manually override organization formal letter name
+                      </label>
+                    ) : null}
                   </FormField>
                 </div>
               </section>
@@ -655,17 +822,19 @@ export function ContactProfileTabs({
                       }
                     />
                   </FormField>
-                  <FormField label="Mobile Number">
-                    <Input
-                      value={contactInfoDraft.mobileNumber}
-                      onChange={(event) =>
-                        setContactInfoDraft((prev) => ({
-                          ...prev,
-                          mobileNumber: event.target.value
-                        }))
-                      }
-                    />
-                  </FormField>
+                  {contactInfoDraft.recordType === "person" ? (
+                    <FormField label="Mobile Number">
+                      <Input
+                        value={contactInfoDraft.mobileNumber}
+                        onChange={(event) =>
+                          setContactInfoDraft((prev) => ({
+                            ...prev,
+                            mobileNumber: event.target.value
+                          }))
+                        }
+                      />
+                    </FormField>
+                  ) : null}
                   <FormField label="Email">
                     <Input
                       type="email"
@@ -687,32 +856,37 @@ export function ContactProfileTabs({
                       }
                     />
                   </FormField>
-                  <FormField label="Emergency Contact">
-                    <Input
-                      value={contactInfoDraft.emergencyContact}
-                      onChange={(event) =>
-                        setContactInfoDraft((prev) => ({
-                          ...prev,
-                          emergencyContact: event.target.value
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Emergency Contact Phone Number">
-                    <Input
-                      value={contactInfoDraft.emergencyContactPhone}
-                      onChange={(event) =>
-                        setContactInfoDraft((prev) => ({
-                          ...prev,
-                          emergencyContactPhone: event.target.value
-                        }))
-                      }
-                    />
-                  </FormField>
+                  {contactInfoDraft.recordType === "person" ? (
+                    <>
+                      <FormField label="Emergency Contact">
+                        <Input
+                          value={contactInfoDraft.emergencyContact}
+                          onChange={(event) =>
+                            setContactInfoDraft((prev) => ({
+                              ...prev,
+                              emergencyContact: event.target.value
+                            }))
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Emergency Contact Phone Number">
+                        <Input
+                          value={contactInfoDraft.emergencyContactPhone}
+                          onChange={(event) =>
+                            setContactInfoDraft((prev) => ({
+                              ...prev,
+                              emergencyContactPhone: event.target.value
+                            }))
+                          }
+                        />
+                      </FormField>
+                    </>
+                  ) : null}
                 </div>
               </section>
 
-              <section className="rounded-md border border-slate-200 p-3">
+              {contactInfoDraft.recordType === "person" ? (
+                <section className="rounded-md border border-slate-200 p-3">
                 <p className="mb-2 text-sm font-semibold text-slate-900">
                   Preferences - Communication
                 </p>
@@ -745,7 +919,8 @@ export function ContactProfileTabs({
                     }
                   )}
                 </div>
-              </section>
+                </section>
+              ) : null}
 
               <section className="rounded-md border border-slate-200 p-3">
                 <p className="mb-2 text-sm font-semibold text-slate-900">Physical Address</p>

@@ -13,7 +13,9 @@ export default async function StaffDashboardPage() {
   const supabase = await createClient();
 
   const [
-    { count: contactCount },
+    { count: donorCount },
+    { count: leadCount },
+    { count: nonLeadCount },
     { count: donationCount },
     { data: donationTotal },
     buckets,
@@ -24,7 +26,18 @@ export default async function StaffDashboardPage() {
       supabase
         .from("contacts")
         .select("*", { count: "exact", head: true })
-        .eq("organization_id", context.organizationId),
+        .eq("organization_id", context.organizationId)
+        .eq("tracking_status", "donor"),
+      supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", context.organizationId)
+        .eq("tracking_status", "lead"),
+      supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", context.organizationId)
+        .eq("tracking_status", "non_lead"),
       supabase
         .from("donations")
         .select("*", { count: "exact", head: true })
@@ -46,10 +59,18 @@ export default async function StaffDashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
-          <CardHeader title="Contacts" subtitle="Total constituent records" />
-          <p className="text-3xl font-semibold">{contactCount ?? 0}</p>
+          <CardHeader title="Donors" subtitle="Tracking Status: Donor" />
+          <p className="text-3xl font-semibold">{donorCount ?? 0}</p>
+        </Card>
+        <Card>
+          <CardHeader title="Leads" subtitle="Tracking Status: Lead" />
+          <p className="text-3xl font-semibold">{leadCount ?? 0}</p>
+        </Card>
+        <Card>
+          <CardHeader title="Non-Leads" subtitle="Tracking Status: Non-Lead" />
+          <p className="text-3xl font-semibold">{nonLeadCount ?? 0}</p>
         </Card>
         <Card>
           <CardHeader title="Donations" subtitle="Tracked transactions" />

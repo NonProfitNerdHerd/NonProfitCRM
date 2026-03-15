@@ -111,7 +111,7 @@ export function CampaignsDashboard({
           rows.map((campaign) => (
             <Link
               key={campaign.id}
-              href={`/staff/campaigns/${campaign.id}`}
+              href={`/staff/financial/campaigns/${campaign.id}`}
               className="block rounded-md border border-slate-200 px-4 py-3 hover:bg-slate-50"
             >
               <div className="flex items-center justify-between">

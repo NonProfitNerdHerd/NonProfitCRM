@@ -21,14 +21,28 @@ const menu: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/dashboard")
   },
   {
+    id: "donors",
+    href: "/staff/donors",
+    label: "Donors",
+    matches: (pathname) => pathname.startsWith("/staff/donors")
+  },
+  {
     id: "contacts",
     href: "/staff/contacts",
     label: "Contacts",
-    matches: (pathname) => pathname.startsWith("/staff/contacts"),
-    children: [
-      { href: "/staff/contacts/personal", label: "Personal" },
-      { href: "/staff/contacts/organizations", label: "Organizations" }
-    ]
+    matches: (pathname) => pathname === "/staff/contacts" || pathname.startsWith("/staff/contacts/")
+  },
+  {
+    id: "donor-organizations",
+    href: "/staff/donor-organizations",
+    label: "Donor Organizations",
+    matches: (pathname) => pathname.startsWith("/staff/donor-organizations")
+  },
+  {
+    id: "organizations",
+    href: "/staff/organizations",
+    label: "Organizations",
+    matches: (pathname) => pathname.startsWith("/staff/organizations")
   },
   {
     id: "financial",
@@ -60,35 +74,13 @@ const menu: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/memberships")
   },
   {
-    id: "imports",
-    href: "/staff/imports",
-    label: "Imports",
-    matches: (pathname) => pathname.startsWith("/staff/imports")
-  },
-  {
-    id: "reports",
-    href: "/staff/reports",
-    label: "Reports",
-    matches: (pathname) => pathname.startsWith("/staff/reports"),
-    children: [
-      { href: "/staff/reports", label: "Saved Reports" },
-      { href: "/staff/reports/contacts", label: "Contact Reports" },
-      { href: "/staff/reports/campaigns", label: "Campaign Reports" },
-      { href: "/staff/reports/donors", label: "Donor Reports" },
-      { href: "/staff/reports/projects", label: "Project Reports" },
-      { href: "/staff/reports/memberships", label: "Membership Reports" },
-      { href: "/staff/reports/executive", label: "Executive Reports" }
-    ]
-  },
-  {
     id: "administration",
     href: "/staff/admin/users",
     label: "Administration",
     matches: (pathname) => pathname.startsWith("/staff/admin"),
     children: [
       { href: "/staff/admin/users", label: "Users" },
-      { href: "/staff/admin/roles", label: "Roles" },
-      { href: "/staff/admin/integrations", label: "Integrations" }
+      { href: "/staff/admin/roles", label: "Roles" }
     ]
   }
 ];

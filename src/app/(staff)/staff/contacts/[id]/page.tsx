@@ -36,7 +36,11 @@ export default async function ContactDetailPage({ params }: PageProps) {
     <div className="space-y-4">
       <Card>
         <CardHeader
-          title={`${contact.first_name} ${contact.last_name}${contact.preferred_name ? ` (${contact.preferred_name})` : ""}`}
+          title={
+            String(contact.entity_type ?? "person") === "organization"
+              ? String(contact.organization_name || "Organization")
+              : `${contact.first_name} ${contact.last_name}${contact.preferred_name ? ` (${contact.preferred_name})` : ""}`
+          }
           subtitle="Contact profile"
         />
         <div className="grid gap-3 text-sm md:grid-cols-2">

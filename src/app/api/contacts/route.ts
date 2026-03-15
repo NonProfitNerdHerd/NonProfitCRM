@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from("contacts")
       .select(
-        "id, first_name, last_name, preferred_name, email, phone, organization_name, city, state"
+        "id, first_name, last_name, preferred_name, email, phone, organization_name, entity_type, tracking_status, city, state"
       )
       .eq("organization_id", context.organizationId)
       .order("last_name", { ascending: true })

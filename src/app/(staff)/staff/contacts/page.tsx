@@ -1,19 +1,23 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { getContactAnalytics } from "@/lib/data/analytics";
-import { ContactsAnalyticsDashboard } from "@/components/contacts/contacts-analytics-dashboard";
 import { requireStaffPermission } from "@/lib/auth/guards";
+import { listContacts } from "@/lib/data/contacts";
+import { ContactsList } from "@/components/contacts/contacts-list";
 
 export default async function ContactsPage() {
   await requireStaffPermission("can_view_contacts");
-  const analytics = await getContactAnalytics("30d");
+  const contacts = await listContacts("contacts");
 
   return (
     <Card>
       <CardHeader
-        title="Contacts Analytics"
-        subtitle="CRM totals plus new-contact trends for personal and organizational records"
+        title="Contacts"
+        subtitle="People with tracking status Lead or Non-Lead"
       />
-      <ContactsAnalyticsDashboard initial={analytics} />
+      <ContactsList
+        title="Contacts"
+        subtitle="Entity Type: Person • Tracking Status: Lead/Non-Lead"
+        contacts={contacts as Array<Record<string, unknown>>}
+      />
     </Card>
   );
 }

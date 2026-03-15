@@ -76,6 +76,34 @@ function contactsGranularity(range: AnalyticsRangeKey): "day" | "week" | "month"
   return "month";
 }
 
+function contactsRangeStartDate(range: AnalyticsRangeKey) {
+  const now = new Date();
+  const start = new Date(now);
+  if (range === "30d") start.setDate(now.getDate() - 29);
+  else if (range === "60d") start.setDate(now.getDate() - 59);
+  else if (range === "90d") start.setDate(now.getDate() - 89);
+  else if (range === "120d") start.setDate(now.getDate() - 119);
+  else if (range === "1y") start.setFullYear(now.getFullYear() - 1);
+  else if (range === "3y") start.setFullYear(now.getFullYear() - 3);
+  else start.setFullYear(now.getFullYear() - 5);
+  return start;
+}
+
+function startOfBucket(date: Date, mode: "day" | "week" | "month" | "year") {
+  const bucket = new Date(date);
+  bucket.setUTCHours(0, 0, 0, 0);
+  if (mode === "week") {
+    const day = bucket.getUTCDay();
+    const delta = day === 0 ? -6 : 1 - day;
+    bucket.setUTCDate(bucket.getUTCDate() + delta);
+  } else if (mode === "month") {
+    bucket.setUTCDate(1);
+  } else if (mode === "year") {
+    bucket.setUTCMonth(0, 1);
+  }
+  return bucket;
+}
+
 function financialGranularity(range: AnalyticsRangeKey): "day" | "week" | "month" | "year" {
   if (range === "30d") return "day";
   if (range === "60d") return "week";
@@ -88,27 +116,24 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   const supabase = await createClient();
 
   const [
-    personal,
-    organizations,
+    contactsResult,
     activityRowsResult,
     allContactsCountResult,
     personalContactsCountResult,
-    organizationContactsCountResult
+    organizationContactsCountResult,
+    donorContactsCountResult,
+    leadContactsCountResult,
+    nonLeadContactsCountResult
   ] = await Promise.all([
-    supabase.rpc("contact_trend_series", {
-      org_id: context.organizationId,
-      range_key: range,
-      contact_mode: "personal"
-    }),
-    supabase.rpc("contact_trend_series", {
-      org_id: context.organizationId,
-      range_key: range,
-      contact_mode: "organization"
-    }),
+    supabase
+      .from("contacts")
+      .select("id, created_at, tracking_status, organization_name, entity_type")
+      .eq("organization_id", context.organizationId)
+      .limit(50000),
     supabase
       .from("activity_log")
       .select(
-        "related_contact_id, action_type, action_summary, created_at, performed_by_user_id, contacts(id, first_name, last_name, organization_name)"
+        "related_contact_id, action_type, action_summary, created_at, performed_by_user_id, contacts(id, first_name, last_name, organization_name, entity_type)"
       )
       .eq("organization_id", context.organizationId)
       .not("related_contact_id", "is", null)
@@ -128,17 +153,64 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
       .select("*", { count: "exact", head: true })
       .eq("organization_id", context.organizationId)
       .not("organization_name", "is", null)
-      .neq("organization_name", "")
+      .neq("organization_name", ""),
+    supabase
+      .from("contacts")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("tracking_status", "donor"),
+    supabase
+      .from("contacts")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("tracking_status", "lead"),
+    supabase
+      .from("contacts")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("tracking_status", "non_lead")
   ]);
 
-  if (personal.error) throw personal.error;
-  if (organizations.error) throw organizations.error;
+  if (contactsResult.error) throw contactsResult.error;
   if (activityRowsResult.error) throw activityRowsResult.error;
   if (allContactsCountResult.error) throw allContactsCountResult.error;
   if (personalContactsCountResult.error) throw personalContactsCountResult.error;
   if (organizationContactsCountResult.error) throw organizationContactsCountResult.error;
+  if (donorContactsCountResult.error) throw donorContactsCountResult.error;
+  if (leadContactsCountResult.error) throw leadContactsCountResult.error;
+  if (nonLeadContactsCountResult.error) throw nonLeadContactsCountResult.error;
 
   const mode = contactsGranularity(range);
+  const startDate = startOfBucket(contactsRangeStartDate(range), mode);
+  const now = new Date();
+  const bucketStarts: Date[] = [];
+  let cursor = new Date(startDate);
+  while (cursor <= now) {
+    bucketStarts.push(new Date(cursor));
+    if (mode === "day") cursor.setUTCDate(cursor.getUTCDate() + 1);
+    else if (mode === "week") cursor.setUTCDate(cursor.getUTCDate() + 7);
+    else if (mode === "month") cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    else cursor.setUTCFullYear(cursor.getUTCFullYear() + 1);
+  }
+  const donorBuckets = new Map<string, number>();
+  const leadBuckets = new Map<string, number>();
+  const nonLeadBuckets = new Map<string, number>();
+  for (const bucket of bucketStarts) {
+    const key = bucket.toISOString().slice(0, 10);
+    donorBuckets.set(key, 0);
+    leadBuckets.set(key, 0);
+    nonLeadBuckets.set(key, 0);
+  }
+  for (const contact of contactsResult.data ?? []) {
+    const createdAt = contact.created_at ? new Date(String(contact.created_at)) : null;
+    if (!createdAt || Number.isNaN(createdAt.getTime()) || createdAt < startDate) continue;
+    const bucket = startOfBucket(createdAt, mode).toISOString().slice(0, 10);
+    const status = String(contact.tracking_status ?? "lead").toLowerCase();
+    if (status === "donor") donorBuckets.set(bucket, (donorBuckets.get(bucket) ?? 0) + 1);
+    else if (status === "non_lead")
+      nonLeadBuckets.set(bucket, (nonLeadBuckets.get(bucket) ?? 0) + 1);
+    else leadBuckets.set(bucket, (leadBuckets.get(bucket) ?? 0) + 1);
+  }
   const activityRows = (activityRowsResult.data as LatestActivityRow[] | null | undefined) ?? [];
 
   const latestByContact = new Map<string, LatestActivityRow>();
@@ -183,7 +255,8 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
       if (!row.related_contact_id) return null;
       const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
       const contactType: "Personal" | "Organization" =
-        contact?.organization_name && String(contact.organization_name).trim().length > 0
+        (String(contact?.entity_type ?? "").toLowerCase() === "organization" ||
+          (contact?.organization_name && String(contact.organization_name).trim().length > 0))
           ? "Organization"
           : "Personal";
       const contactName =
@@ -225,21 +298,37 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   return {
     range,
     granularity: mode,
-    personal: (personal.data as TrendPoint[] | null | undefined)?.map((row) => ({
-      x: row.bucket_start,
-      label: formatShortDate(row.bucket_start, mode),
-      y: Number(row.total)
-    })) ?? [],
-    organizations:
-      (organizations.data as TrendPoint[] | null | undefined)?.map((row) => ({
-        x: row.bucket_start,
-        label: formatShortDate(row.bucket_start, mode),
-        y: Number(row.total)
-      })) ?? [],
+    donors: bucketStarts.map((bucket) => {
+      const key = bucket.toISOString().slice(0, 10);
+      return {
+        x: key,
+        label: formatShortDate(key, mode),
+        y: donorBuckets.get(key) ?? 0
+      };
+    }),
+    leads: bucketStarts.map((bucket) => {
+      const key = bucket.toISOString().slice(0, 10);
+      return {
+        x: key,
+        label: formatShortDate(key, mode),
+        y: leadBuckets.get(key) ?? 0
+      };
+    }),
+    nonLeads: bucketStarts.map((bucket) => {
+      const key = bucket.toISOString().slice(0, 10);
+      return {
+        x: key,
+        label: formatShortDate(key, mode),
+        y: nonLeadBuckets.get(key) ?? 0
+      };
+    }),
     totals: {
       allContacts: allContactsCountResult.count ?? 0,
       personalContacts: personalContactsCountResult.count ?? 0,
-      organizationContacts: organizationContactsCountResult.count ?? 0
+      organizationContacts: organizationContactsCountResult.count ?? 0,
+      donors: donorContactsCountResult.count ?? 0,
+      leads: leadContactsCountResult.count ?? 0,
+      nonLeads: nonLeadContactsCountResult.count ?? 0
     },
     latestModifiedContacts
   };

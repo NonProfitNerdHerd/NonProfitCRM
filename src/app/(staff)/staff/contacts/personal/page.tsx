@@ -3,17 +3,17 @@ import { listContacts } from "@/lib/data/contacts";
 import { ContactsList } from "@/components/contacts/contacts-list";
 
 export default async function PersonalContactsPage() {
-  const contacts = await listContacts("personal");
+  const contacts = await listContacts("contacts");
 
   return (
     <Card>
       <CardHeader
-        title="Personal Contacts"
-        subtitle="Individual donor and member profiles"
+        title="Contacts"
+        subtitle="People with tracking status Lead or Non-Lead"
       />
       <ContactsList
-        title="Personal Contacts"
-        subtitle="Showing personal profiles only"
+        title="Contacts"
+        subtitle="Entity Type: Person • Tracking Status: Lead/Non-Lead"
         contacts={contacts as Array<Record<string, unknown>>}
       />
     </Card>

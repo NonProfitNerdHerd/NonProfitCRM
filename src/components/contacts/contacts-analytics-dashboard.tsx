@@ -8,12 +8,16 @@ import Link from "next/link";
 type ContactAnalyticsPayload = {
   range: AnalyticsRangeKey;
   granularity: "day" | "week" | "month" | "year";
-  personal: Array<{ x: string; label: string; y: number }>;
-  organizations: Array<{ x: string; label: string; y: number }>;
+  donors: Array<{ x: string; label: string; y: number }>;
+  leads: Array<{ x: string; label: string; y: number }>;
+  nonLeads: Array<{ x: string; label: string; y: number }>;
   totals: {
     allContacts: number;
     personalContacts: number;
     organizationContacts: number;
+    donors: number;
+    leads: number;
+    nonLeads: number;
   };
   latestModifiedContacts: Array<{
     contactId: string;
@@ -35,7 +39,7 @@ export function ContactsAnalyticsDashboard({
   const [payload, setPayload] = useState<ContactAnalyticsPayload>(initial);
   const [range, setRange] = useState<AnalyticsRangeKey>(initial.range);
   const [loading, setLoading] = useState(false);
-  const [expandedChart, setExpandedChart] = useState<"personal" | "organizations" | null>(null);
+  const [expandedChart, setExpandedChart] = useState<"donors" | "leads" | "nonLeads" | null>(null);
 
   async function onRangeChange(nextRange: AnalyticsRangeKey) {
     setRange(nextRange);
@@ -75,42 +79,59 @@ export function ContactsAnalyticsDashboard({
           <p className="text-xl font-semibold text-slate-900">{payload.totals.allContacts}</p>
         </div>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Personal Contacts</p>
-          <p className="text-xl font-semibold text-slate-900">{payload.totals.personalContacts}</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500">Donors</p>
+          <p className="text-xl font-semibold text-slate-900">{payload.totals.donors}</p>
         </div>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Organizational Contacts</p>
-          <p className="text-xl font-semibold text-slate-900">{payload.totals.organizationContacts}</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500">Leads / Non-Leads</p>
+          <p className="text-xl font-semibold text-slate-900">
+            {payload.totals.leads} / {payload.totals.nonLeads}
+          </p>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <LineChart
-          title="New Personal Contacts Trend"
-          yAxisLabel="New Contacts"
+          title="New Donors Trend"
+          yAxisLabel="New Donors"
           xAxisLabel="Time"
           size="compact"
-          onExpand={() => setExpandedChart("personal")}
+          onExpand={() => setExpandedChart("donors")}
           series={[
             {
-              name: "Personal Contacts",
+              name: "Donors",
               color: "#2563EB",
-              points: payload.personal.map((point) => ({ label: point.label, y: point.y }))
+              points: payload.donors.map((point) => ({ label: point.label, y: point.y }))
             }
           ]}
         />
 
         <LineChart
-          title="New Organizational Contacts Trend"
-          yAxisLabel="New Contacts"
+          title="New Leads Trend"
+          yAxisLabel="New Leads"
           xAxisLabel="Time"
           size="compact"
-          onExpand={() => setExpandedChart("organizations")}
+          onExpand={() => setExpandedChart("leads")}
           series={[
             {
-              name: "Organizational Contacts",
+              name: "Leads",
               color: "#7C3AED",
-              points: payload.organizations.map((point) => ({ label: point.label, y: point.y }))
+              points: payload.leads.map((point) => ({ label: point.label, y: point.y }))
+            }
+          ]}
+        />
+
+        <LineChart
+          title="New Non-Leads Trend"
+          yAxisLabel="New Non-Leads"
+          xAxisLabel="Time"
+          size="compact"
+          onExpand={() => setExpandedChart("nonLeads")}
+          series={[
+            {
+              name: "Non-Leads",
+              color: "#0F766E",
+              points: payload.nonLeads.map((point) => ({ label: point.label, y: point.y }))
             }
           ]}
         />
@@ -162,9 +183,11 @@ export function ContactsAnalyticsDashboard({
           <div className="w-[96vw] max-w-[1400px] rounded-xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h4 className="text-base font-semibold text-slate-900">
-                {expandedChart === "personal"
-                  ? "New Personal Contacts Trend"
-                  : "New Organizational Contacts Trend"}{" "}
+                {expandedChart === "donors"
+                  ? "New Donors Trend"
+                  : expandedChart === "leads"
+                    ? "New Leads Trend"
+                    : "New Non-Leads Trend"}{" "}
                 (Expanded)
               </h4>
               <button
@@ -177,21 +200,41 @@ export function ContactsAnalyticsDashboard({
             </div>
             <LineChart
               title={
-                expandedChart === "personal"
-                  ? "New Personal Contacts Trend"
-                  : "New Organizational Contacts Trend"
+                expandedChart === "donors"
+                  ? "New Donors Trend"
+                  : expandedChart === "leads"
+                    ? "New Leads Trend"
+                    : "New Non-Leads Trend"
               }
-              yAxisLabel="New Contacts"
+              yAxisLabel={
+                expandedChart === "donors"
+                  ? "New Donors"
+                  : expandedChart === "leads"
+                    ? "New Leads"
+                    : "New Non-Leads"
+              }
               xAxisLabel="Time"
               size="expanded"
               series={[
                 {
-                  name: expandedChart === "personal" ? "Personal Contacts" : "Organizational Contacts",
-                  color: expandedChart === "personal" ? "#2563EB" : "#7C3AED",
+                  name:
+                    expandedChart === "donors"
+                      ? "Donors"
+                      : expandedChart === "leads"
+                        ? "Leads"
+                        : "Non-Leads",
+                  color:
+                    expandedChart === "donors"
+                      ? "#2563EB"
+                      : expandedChart === "leads"
+                        ? "#7C3AED"
+                        : "#0F766E",
                   points:
-                    expandedChart === "personal"
-                      ? payload.personal.map((point) => ({ label: point.label, y: point.y }))
-                      : payload.organizations.map((point) => ({ label: point.label, y: point.y }))
+                    expandedChart === "donors"
+                      ? payload.donors.map((point) => ({ label: point.label, y: point.y }))
+                      : expandedChart === "leads"
+                        ? payload.leads.map((point) => ({ label: point.label, y: point.y }))
+                        : payload.nonLeads.map((point) => ({ label: point.label, y: point.y }))
                 }
               ]}
             />

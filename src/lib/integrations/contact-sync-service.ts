@@ -105,6 +105,7 @@ export class ContactSyncService {
 
     let contactId = (existingRef?.contact_id as string | undefined) ?? null;
     let actionTaken = "updated";
+    const normalizedEntityType = organizationName ? "organization" : "person";
 
     if (!contactId) {
       const allowEmailFallback = Boolean(
@@ -130,6 +131,9 @@ export class ContactSyncService {
           email: email || null,
           phone: phone || null,
           organization_name: organizationName || null,
+          entity_type: normalizedEntityType,
+          tracking_status: "donor",
+          webconnex_id: externalId,
           address_line_1: addressLine1 || null,
           city: city || null,
           state: state || null,
@@ -151,6 +155,9 @@ export class ContactSyncService {
           email: email || null,
           phone: phone || null,
           organization_name: organizationName || null,
+          entity_type: normalizedEntityType,
+          tracking_status: "donor",
+          webconnex_id: externalId,
           address_line_1: addressLine1 || null,
           city: city || null,
           state: state || null,

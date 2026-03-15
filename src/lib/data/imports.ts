@@ -95,16 +95,46 @@ export async function processCsvImport(params: {
     try {
       if (params.domain === "contacts") {
         const externalId = row[params.mapping.external_source_id ?? "external_source_id"];
+        const organizationName = row[params.mapping.organization_name ?? "organization_name"] ?? null;
+        const entityType =
+          typeof organizationName === "string" && organizationName.trim().length > 0
+            ? "organization"
+            : "person";
+        const sourcePlatform = String(params.sourcePlatform ?? "").toLowerCase();
+        const webconnexId =
+          (sourcePlatform === "webconnex" || sourcePlatform === "givingfuel") && externalId
+            ? String(externalId)
+            : null;
+        const rawTrackingStatus = String(
+          row[params.mapping.tracking_status ?? "tracking_status"] ?? ""
+        ).toLowerCase();
+        const trackingStatus =
+          webconnexId
+            ? "donor"
+            : rawTrackingStatus === "donor" ||
+                rawTrackingStatus === "lead" ||
+                rawTrackingStatus === "non_lead"
+              ? rawTrackingStatus
+              : "lead";
         const payload = {
           organization_id: organizationId,
           first_name: row[params.mapping.first_name ?? "first_name"] ?? "Unknown",
           last_name: row[params.mapping.last_name ?? "last_name"] ?? "Unknown",
           email: row[params.mapping.email ?? "email"] ?? null,
           phone: row[params.mapping.phone ?? "phone"] ?? null,
-          donor_status: row[params.mapping.donor_status ?? "donor_status"] ?? "prospect",
+          donor_status:
+            row[params.mapping.donor_status ?? "donor_status"] ??
+            (trackingStatus === "donor" ? "active" : trackingStatus === "non_lead" ? "inactive" : "prospect"),
           member_status: row[params.mapping.member_status ?? "member_status"] ?? "none",
+          tracking_status: trackingStatus,
+          entity_type: entityType,
+          webconnex_id: webconnexId,
           external_source: params.sourcePlatform,
           external_source_id: externalId || null,
+          organization_name:
+            typeof organizationName === "string" && organizationName.trim().length > 0
+              ? organizationName
+              : null,
           created_by: userId,
           updated_by: userId,
           import_job_id: jobId

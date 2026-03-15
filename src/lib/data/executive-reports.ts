@@ -38,9 +38,7 @@ export async function getExecutiveReportsData() {
 
   const [
     donationTrendResult,
-    personalContactsTrendResult,
-    organizationContactsTrendResult,
-    donorsResult,
+    contactsResult,
     membershipsResult,
     campaignsResult,
     projectsResult
@@ -49,22 +47,11 @@ export async function getExecutiveReportsData() {
       org_id: context.organizationId,
       range_key: "1y"
     }),
-    supabase.rpc("contact_trend_series", {
-      org_id: context.organizationId,
-      range_key: "1y",
-      contact_mode: "personal"
-    }),
-    supabase.rpc("contact_trend_series", {
-      org_id: context.organizationId,
-      range_key: "1y",
-      contact_mode: "organization"
-    }),
     supabase
-      .from("donations")
-      .select("contact_id, donation_date")
+      .from("contacts")
+      .select("id, created_at, tracking_status")
       .eq("organization_id", context.organizationId)
-      .not("contact_id", "is", null)
-      .order("donation_date", { ascending: true })
+      .order("created_at", { ascending: true })
       .limit(30000),
     supabase
       .from("memberships")
@@ -84,9 +71,7 @@ export async function getExecutiveReportsData() {
   ]);
 
   if (donationTrendResult.error) throw donationTrendResult.error;
-  if (personalContactsTrendResult.error) throw personalContactsTrendResult.error;
-  if (organizationContactsTrendResult.error) throw organizationContactsTrendResult.error;
-  if (donorsResult.error) throw donorsResult.error;
+  if (contactsResult.error) throw contactsResult.error;
   if (membershipsResult.error) throw membershipsResult.error;
   if (campaignsResult.error) throw campaignsResult.error;
   if (projectsResult.error) throw projectsResult.error;
@@ -97,31 +82,21 @@ export async function getExecutiveReportsData() {
   }
 
   const contactsMonthMap = new Map<string, number>();
-  for (const row of personalContactsTrendResult.data ?? []) {
-    const key = String(row.bucket_start).slice(0, 7);
-    contactsMonthMap.set(key, (contactsMonthMap.get(key) ?? 0) + Number(row.total ?? 0));
-  }
-  for (const row of organizationContactsTrendResult.data ?? []) {
-    const key = String(row.bucket_start).slice(0, 7);
-    contactsMonthMap.set(key, (contactsMonthMap.get(key) ?? 0) + Number(row.total ?? 0));
+  const donorCreatedMonthMap = new Map<string, number>();
+  for (const row of contactsResult.data ?? []) {
+    const key = String(row.created_at ?? "").slice(0, 7);
+    if (!key) continue;
+    contactsMonthMap.set(key, (contactsMonthMap.get(key) ?? 0) + 1);
+    if (String(row.tracking_status ?? "").toLowerCase() === "donor") {
+      donorCreatedMonthMap.set(key, (donorCreatedMonthMap.get(key) ?? 0) + 1);
+    }
   }
 
-  const donorMonthMap = new Map<string, Set<string>>();
-  for (const row of donorsResult.data ?? []) {
-    const key = String(row.donation_date ?? "").slice(0, 7);
-    const contactId = String(row.contact_id ?? "");
-    if (!key || !contactId) continue;
-    const current = donorMonthMap.get(key) ?? new Set<string>();
-    current.add(contactId);
-    donorMonthMap.set(key, current);
-  }
   const donorGrowthMap = new Map<string, number>();
-  const seenDonors = new Set<string>();
+  let cumulativeDonors = 0;
   for (const month of monthKeys) {
-    for (const donorId of donorMonthMap.get(month) ?? []) {
-      seenDonors.add(donorId);
-    }
-    donorGrowthMap.set(month, seenDonors.size);
+    cumulativeDonors += donorCreatedMonthMap.get(month) ?? 0;
+    donorGrowthMap.set(month, cumulativeDonors);
   }
 
   const membershipMonthMap = new Map<string, number>();

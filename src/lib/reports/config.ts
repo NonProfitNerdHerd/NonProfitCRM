@@ -50,7 +50,8 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
     defaultSort: { field: "name", direction: "asc" },
     columns: [
       { key: "name", label: "Name", defaultSelected: true, sortable: true },
-      { key: "contactType", label: "Contact Type", defaultSelected: true, sortable: true },
+      { key: "entityType", label: "Entity Type", defaultSelected: true, sortable: true },
+      { key: "trackingStatus", label: "Tracking Status", defaultSelected: true, sortable: true },
       { key: "email", label: "Email", defaultSelected: true, sortable: true },
       { key: "phone", label: "Phone", defaultSelected: true, sortable: true },
       { key: "address", label: "Address", sortable: false },
@@ -68,11 +69,11 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
     filters: [
       { key: "freeText", label: "Free Text Search", type: "text", placeholder: "Name, email, phone..." },
       {
-        key: "contactType",
-        label: "Contact Type",
+        key: "entityType",
+        label: "Entity Type",
         type: "select",
         options: [
-          { label: "Personal", value: "Personal" },
+          { label: "Person", value: "Person" },
           { label: "Organization", value: "Organization" }
         ]
       },
@@ -89,12 +90,13 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
         ]
       },
       {
-        key: "donorKind",
-        label: "Donor vs Non-Donor",
+        key: "trackingStatus",
+        label: "Tracking Status",
         type: "select",
         options: [
           { label: "Donor", value: "donor" },
-          { label: "Non-Donor", value: "non-donor" }
+          { label: "Lead", value: "lead" },
+          { label: "Non-Lead", value: "non_lead" }
         ]
       },
       {

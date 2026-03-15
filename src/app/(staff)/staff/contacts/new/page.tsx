@@ -9,7 +9,7 @@ export default async function NewContactPage() {
     <Card className="max-w-3xl">
       <CardHeader
         title="Create contact"
-        subtitle="Add a donor/member constituent record"
+        subtitle="Add a Person or Organization with required tracking status"
       />
       <ContactForm />
     </Card>

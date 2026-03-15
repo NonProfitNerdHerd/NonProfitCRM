@@ -557,6 +557,23 @@ async function prepareEntityPayload(input: {
 }) {
   const normalized = input.normalizedRow;
   if (input.entityType === "contact") {
+    const organizationName = text(normalized.organization_name) || null;
+    const entityType = organizationName ? "organization" : "person";
+    const externalSourceId = text(normalized.external_source_id) || null;
+    const sourcePlatform = text(input.sourcePlatform).toLowerCase();
+    const webconnexId =
+      sourcePlatform === "webconnex" || sourcePlatform === "givingfuel"
+        ? externalSourceId
+        : null;
+    const requestedTrackingStatus = text(normalized.tracking_status).toLowerCase();
+    const trackingStatus =
+      webconnexId
+        ? "donor"
+        : requestedTrackingStatus === "donor" ||
+            requestedTrackingStatus === "lead" ||
+            requestedTrackingStatus === "non_lead"
+          ? requestedTrackingStatus
+          : "lead";
     return {
       table: "contacts",
       payload: {
@@ -585,11 +602,16 @@ async function prepareEntityPayload(input: {
         communication_preferences: parseCommunicationPreferences(
           normalized.communication_preferences
         ),
-        donor_status: text(normalized.donor_status) || "prospect",
+        donor_status:
+          text(normalized.donor_status) ||
+          (trackingStatus === "donor" ? "active" : trackingStatus === "non_lead" ? "inactive" : "prospect"),
         member_status: text(normalized.member_status) || "none",
-        organization_name: text(normalized.organization_name) || null,
+        organization_name: organizationName,
+        entity_type: entityType,
+        tracking_status: trackingStatus,
+        webconnex_id: webconnexId,
         external_source: input.sourcePlatform,
-        external_source_id: text(normalized.external_source_id) || null,
+        external_source_id: externalSourceId,
         import_job_id: input.importJobId,
         created_by: input.userId,
         updated_by: input.userId

@@ -124,7 +124,7 @@ async function buildContactRows(orgId: string) {
       supabase
         .from("contacts")
         .select(
-          "id, first_name, last_name, preferred_name, organization_name, email, phone, address_line_1, address_line_2, city, state, postal_code, donor_status, member_status, created_at, updated_at"
+          "id, first_name, last_name, preferred_name, organization_name, email, phone, address_line_1, address_line_2, city, state, postal_code, entity_type, tracking_status, donor_status, member_status, created_at, updated_at"
         )
         .eq("organization_id", orgId)
         .order("last_name", { ascending: true })
@@ -197,12 +197,15 @@ async function buildContactRows(orgId: string) {
       .filter(Boolean)
       .join(", ");
     const lastActivityDate = lastActivity.get(contactId) ?? "";
-    const contactType = text(contact.organization_name) ? "Organization" : "Personal";
+    const entityType = lower(contact.entity_type) === "organization" ? "Organization" : "Person";
+    const trackingStatus = lower(contact.tracking_status) || "lead";
 
     return {
       id: contactId,
       name: contactDisplayName(contact),
-      contactType,
+      entityType,
+      contactType: entityType,
+      trackingStatus,
       email: text(contact.email),
       phone: text(contact.phone),
       address,
@@ -701,9 +704,11 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
       }
 
       if (reportType === "contacts") {
-        if (key === "contactType" && text(row.contactType) !== text(value)) return false;
+        if (key === "entityType" && text(row.entityType) !== text(value)) return false;
+        if (key === "contactType" && text(row.entityType) !== text(value)) return false;
         if (key === "membershipType" && !containsValue(row.membershipType, value)) return false;
         if (key === "membershipStatus" && lower(row.membershipStatus) !== lower(value)) return false;
+        if (key === "trackingStatus" && lower(row.trackingStatus) !== lower(value)) return false;
         if (key === "donorKind" && lower(row.donorKind) !== lower(value)) return false;
         if (key === "hasEmail" && lower(row.hasEmail) !== lower(value)) return false;
         if (key === "hasPhone" && lower(row.hasPhone) !== lower(value)) return false;

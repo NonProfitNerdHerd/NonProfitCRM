@@ -31,8 +31,8 @@ export function ContactsList({
               <th className="py-2">Organization</th>
               <th className="py-2">Email</th>
               <th className="py-2">Phone</th>
-              <th className="py-2">Donor Status</th>
-              <th className="py-2">Member Status</th>
+              <th className="py-2">Entity Type</th>
+              <th className="py-2">Tracking Status</th>
             </tr>
           </thead>
           <tbody>
@@ -46,8 +46,8 @@ export function ContactsList({
                 <td className="py-2">{(contact.organization_name as string) ?? "-"}</td>
                 <td className="py-2">{(contact.email as string) ?? "-"}</td>
                 <td className="py-2">{(contact.phone as string) ?? "-"}</td>
-                <td className="py-2">{(contact.donor_status as string) ?? "-"}</td>
-                <td className="py-2">{(contact.member_status as string) ?? "-"}</td>
+                <td className="py-2">{(contact.entity_type as string) ?? "-"}</td>
+                <td className="py-2">{String((contact.tracking_status as string) ?? "-").replaceAll("_", "-")}</td>
               </tr>
             ))}
           </tbody>

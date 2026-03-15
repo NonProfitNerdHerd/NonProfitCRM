@@ -45,7 +45,7 @@ export default async function DonationDetailPage({ params }: PageProps) {
           <p className="text-slate-500">Campaign</p>
           <p>
             {campaign ? (
-              <Link href={`/staff/campaigns/${donation.campaign_id as string}`}>
+              <Link href={`/staff/financial/campaigns/${donation.campaign_id as string}`}>
                 {campaign.name as string}
               </Link>
             ) : (

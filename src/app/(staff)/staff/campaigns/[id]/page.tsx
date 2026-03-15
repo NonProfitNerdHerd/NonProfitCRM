@@ -54,7 +54,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
               return (
                 <Link
                   key={donation.id}
-                  href={`/staff/donations/${donation.id}`}
+                  href={`/staff/financial/donations/${donation.id}`}
                   className="block rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
                 >
                   <div className="flex items-center justify-between">

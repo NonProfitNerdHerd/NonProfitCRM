@@ -31,8 +31,8 @@ export default async function DonationsPage({ searchParams }: PageProps) {
       <DonationsManagement
         initialDonations={donations as Array<Record<string, unknown>>}
         campaigns={campaigns.map((campaign) => ({ id: String(campaign.id), name: String(campaign.name) }))}
-        detailBasePath="/staff/donations"
-        campaignBasePath="/staff/campaigns"
+        detailBasePath="/staff/financial/donations"
+        campaignBasePath="/staff/financial/campaigns"
       />
     </Card>
   );

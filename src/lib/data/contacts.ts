@@ -13,11 +13,49 @@ function isContactExtendedSchemaError(error: unknown) {
     message.includes("formal_letter_name") ||
     message.includes("mobile_number") ||
     message.includes("emergency_contact") ||
-    message.includes("emergency_contact_phone")
+    message.includes("emergency_contact_phone") ||
+    message.includes("entity_type") ||
+    message.includes("tracking_status") ||
+    message.includes("webconnex_id")
   );
 }
 
-export async function listContacts(mode: "all" | "personal" | "organizations" = "all") {
+function normalizeEntityType(input: ContactInput) {
+  if (input.entity_type === "organization") return "organization";
+  return "person";
+}
+
+function normalizeTrackingStatus(input: ContactInput, webconnexId: string | null) {
+  if (webconnexId) return "donor";
+  return input.tracking_status;
+}
+
+function donorStatusFromTrackingStatus(trackingStatus: "donor" | "lead" | "non_lead") {
+  if (trackingStatus === "donor") return "active";
+  if (trackingStatus === "non_lead") return "inactive";
+  return "prospect";
+}
+
+function buildOrganizationFormalLetterName(input: ContactInput) {
+  const org = input.organization_name?.trim() ?? "";
+  const primaryName = [input.first_name?.trim() ?? "", input.last_name?.trim() ?? ""]
+    .filter(Boolean)
+    .join(" ");
+  if (!org && !primaryName) return "";
+  if (!org) return primaryName;
+  if (!primaryName) return org;
+  return `${org}\nc/o ${primaryName}`;
+}
+
+export async function listContacts(
+  mode:
+    | "all"
+    | "donors"
+    | "contacts"
+    | "donor_organizations"
+    | "organizations"
+    | "personal" = "all"
+) {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
 
@@ -28,11 +66,21 @@ export async function listContacts(mode: "all" | "personal" | "organizations" = 
     .order("last_name", { ascending: true })
     .limit(200);
 
-  if (mode === "personal") {
-    query = query.or("organization_name.is.null,organization_name.eq.");
+  if (mode === "donors") {
+    query = query.eq("entity_type", "person").eq("tracking_status", "donor");
+  }
+  if (mode === "contacts" || mode === "personal") {
+    query = query
+      .eq("entity_type", "person")
+      .in("tracking_status", ["lead", "non_lead"]);
+  }
+  if (mode === "donor_organizations") {
+    query = query.eq("entity_type", "organization").eq("tracking_status", "donor");
   }
   if (mode === "organizations") {
-    query = query.not("organization_name", "is", null).neq("organization_name", "");
+    query = query
+      .eq("entity_type", "organization")
+      .in("tracking_status", ["lead", "non_lead"]);
   }
 
   const { data, error } = await query;
@@ -59,36 +107,49 @@ export async function getContact(contactId: string) {
 export async function createContact(input: ContactInput) {
   const context = await requireStaffPermission("can_create_contacts");
   const supabase = await createClient();
+  const entityType = normalizeEntityType(input);
+  const webconnexId = input.webconnex_id?.trim() || null;
+  const trackingStatus = normalizeTrackingStatus(input, webconnexId);
+  const formalLetterName = input.formal_letter_name?.trim()
+    ? input.formal_letter_name.trim()
+    : entityType === "organization"
+      ? buildOrganizationFormalLetterName(input)
+      : null;
+  const donorStatus = input.donor_status ?? donorStatusFromTrackingStatus(trackingStatus);
 
   const insertPayload = {
-      organization_id: context.organizationId,
-      first_name: input.first_name,
-      last_name: input.last_name,
-      preferred_name: input.preferred_name || null,
-      formal_letter_name: input.formal_letter_name || null,
-      email: input.email || null,
-      alternate_email: input.alternate_email || null,
-      phone: input.phone || null,
-      mobile_number: input.mobile_number || null,
-      alternate_phone: input.alternate_phone || null,
-      emergency_contact: input.emergency_contact || null,
-      emergency_contact_phone: input.emergency_contact_phone || null,
-      communication_preferences: input.communication_preferences ?? [],
-      address_line_1: input.address_line_1 || null,
-      address_line_2: input.address_line_2 || null,
-      city: input.city || null,
-      state: input.state || null,
-      postal_code: input.postal_code || null,
-      mailing_address_line_1: input.mailing_address_line_1 || null,
-      mailing_address_line_2: input.mailing_address_line_2 || null,
-      mailing_city: input.mailing_city || null,
-      mailing_state: input.mailing_state || null,
-      mailing_postal_code: input.mailing_postal_code || null,
-      organization_name: input.organization_name || null,
-      donor_status: input.donor_status,
-      member_status: input.member_status,
-      created_by: context.userId,
-      updated_by: context.userId
+    organization_id: context.organizationId,
+    first_name: input.first_name,
+    last_name: input.last_name,
+    preferred_name: input.preferred_name || null,
+    formal_letter_name: formalLetterName,
+    email: input.email || null,
+    alternate_email: input.alternate_email || null,
+    phone: input.phone || null,
+    mobile_number: input.mobile_number || null,
+    alternate_phone: input.alternate_phone || null,
+    emergency_contact: input.emergency_contact || null,
+    emergency_contact_phone: input.emergency_contact_phone || null,
+    communication_preferences: input.communication_preferences ?? [],
+    address_line_1: input.address_line_1 || null,
+    address_line_2: input.address_line_2 || null,
+    city: input.city || null,
+    state: input.state || null,
+    postal_code: input.postal_code || null,
+    mailing_address_line_1: input.mailing_address_line_1 || null,
+    mailing_address_line_2: input.mailing_address_line_2 || null,
+    mailing_city: input.mailing_city || null,
+    mailing_state: input.mailing_state || null,
+    mailing_postal_code: input.mailing_postal_code || null,
+    organization_name:
+      entityType === "organization" ? input.organization_name?.trim() || null : null,
+    entity_type: entityType,
+    tracking_status: trackingStatus,
+    webconnex_id: webconnexId,
+    donor_status: donorStatus,
+    member_status: input.member_status ?? "none",
+    created_by: context.userId,
+    updated_by: context.userId
   };
 
   let { data, error } = await supabase
@@ -102,12 +163,18 @@ export async function createContact(input: ContactInput) {
       mobile_number: removedMobileNumber,
       emergency_contact: removedEmergencyContact,
       emergency_contact_phone: removedEmergencyContactPhone,
+      entity_type: removedEntityType,
+      tracking_status: removedTrackingStatus,
+      webconnex_id: removedWebconnexId,
       ...legacyPayload
     } = insertPayload;
     void removedFormalLetterName;
     void removedMobileNumber;
     void removedEmergencyContact;
     void removedEmergencyContactPhone;
+    void removedEntityType;
+    void removedTrackingStatus;
+    void removedWebconnexId;
 
     const retryResult = await supabase.from("contacts").insert(legacyPayload).select("id").single();
     data = retryResult.data;
@@ -122,35 +189,64 @@ export async function createContact(input: ContactInput) {
 export async function updateContact(contactId: string, input: ContactInput) {
   const context = await requireStaffPermission("can_edit_contacts");
   const supabase = await createClient();
+  const { data: existingContact, error: existingError } = await supabase
+    .from("contacts")
+    .select("tracking_status, webconnex_id")
+    .eq("organization_id", context.organizationId)
+    .eq("id", contactId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  const existingTrackingStatus = String(existingContact?.tracking_status ?? "").toLowerCase();
+  const existingWebconnexId = String(existingContact?.webconnex_id ?? "").trim();
+  const incomingWebconnexId = input.webconnex_id?.trim() ?? "";
+  const webconnexId = incomingWebconnexId || existingWebconnexId || null;
+  const entityType = normalizeEntityType(input);
+  const trackingStatus = normalizeTrackingStatus(input, webconnexId);
+
+  if (existingTrackingStatus === "donor" && trackingStatus !== "donor") {
+    throw new Error("Donor classification cannot be downgraded.");
+  }
+
+  const formalLetterName = input.formal_letter_name?.trim()
+    ? input.formal_letter_name.trim()
+    : entityType === "organization"
+      ? buildOrganizationFormalLetterName(input)
+      : null;
+  const donorStatus = input.donor_status ?? donorStatusFromTrackingStatus(trackingStatus);
 
   const updatePayload = {
-      first_name: input.first_name,
-      last_name: input.last_name,
-      preferred_name: input.preferred_name || null,
-      formal_letter_name: input.formal_letter_name || null,
-      email: input.email || null,
-      alternate_email: input.alternate_email || null,
-      phone: input.phone || null,
-      mobile_number: input.mobile_number || null,
-      alternate_phone: input.alternate_phone || null,
-      emergency_contact: input.emergency_contact || null,
-      emergency_contact_phone: input.emergency_contact_phone || null,
-      communication_preferences: input.communication_preferences ?? [],
-      address_line_1: input.address_line_1 || null,
-      address_line_2: input.address_line_2 || null,
-      city: input.city || null,
-      state: input.state || null,
-      postal_code: input.postal_code || null,
-      mailing_address_line_1: input.mailing_address_line_1 || null,
-      mailing_address_line_2: input.mailing_address_line_2 || null,
-      mailing_city: input.mailing_city || null,
-      mailing_state: input.mailing_state || null,
-      mailing_postal_code: input.mailing_postal_code || null,
-      organization_name: input.organization_name || null,
-      donor_status: input.donor_status,
-      member_status: input.member_status,
-      updated_by: context.userId,
-      updated_at: new Date().toISOString()
+    first_name: input.first_name,
+    last_name: input.last_name,
+    preferred_name: input.preferred_name || null,
+    formal_letter_name: formalLetterName,
+    email: input.email || null,
+    alternate_email: input.alternate_email || null,
+    phone: input.phone || null,
+    mobile_number: input.mobile_number || null,
+    alternate_phone: input.alternate_phone || null,
+    emergency_contact: input.emergency_contact || null,
+    emergency_contact_phone: input.emergency_contact_phone || null,
+    communication_preferences: input.communication_preferences ?? [],
+    address_line_1: input.address_line_1 || null,
+    address_line_2: input.address_line_2 || null,
+    city: input.city || null,
+    state: input.state || null,
+    postal_code: input.postal_code || null,
+    mailing_address_line_1: input.mailing_address_line_1 || null,
+    mailing_address_line_2: input.mailing_address_line_2 || null,
+    mailing_city: input.mailing_city || null,
+    mailing_state: input.mailing_state || null,
+    mailing_postal_code: input.mailing_postal_code || null,
+    organization_name:
+      entityType === "organization" ? input.organization_name?.trim() || null : null,
+    entity_type: entityType,
+    tracking_status: trackingStatus,
+    webconnex_id: webconnexId,
+    donor_status: donorStatus,
+    member_status: input.member_status ?? "none",
+    updated_by: context.userId,
+    updated_at: new Date().toISOString()
   };
 
   let { error } = await supabase
@@ -164,12 +260,18 @@ export async function updateContact(contactId: string, input: ContactInput) {
       mobile_number: removedMobileNumber,
       emergency_contact: removedEmergencyContact,
       emergency_contact_phone: removedEmergencyContactPhone,
+      entity_type: removedEntityType,
+      tracking_status: removedTrackingStatus,
+      webconnex_id: removedWebconnexId,
       ...legacyPayload
     } = updatePayload;
     void removedFormalLetterName;
     void removedMobileNumber;
     void removedEmergencyContact;
     void removedEmergencyContactPhone;
+    void removedEntityType;
+    void removedTrackingStatus;
+    void removedWebconnexId;
 
     const retryResult = await supabase
       .from("contacts")
