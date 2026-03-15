@@ -6,27 +6,16 @@ export default async function IntegrationsPage() {
   let integrations: Array<{
     integrationKey: string;
     name: string;
-    providerType: string;
-    description: string | null;
-    status: string;
-    connectionStatus: string;
-    lastSyncDate: string | null;
-    lastSyncResult: string;
-    isEnabled: boolean;
   }> = [];
-  let summary = {
-    totalIntegrations: 0,
-    enabledIntegrations: 0,
-    failedJobs: 0,
-    last24hSyncActivity: 0
-  };
   let apiPaused = false;
   let loadError: string | null = null;
 
   try {
     const result = await listIntegrationsForAdmin();
-    integrations = result.integrations;
-    summary = result.summary;
+    integrations = result.integrations.map((item) => ({
+      integrationKey: item.integrationKey,
+      name: item.name
+    }));
     apiPaused = Boolean((result as { apiPaused?: boolean }).apiPaused);
     loadError = (result as { schemaWarning?: string }).schemaWarning ?? null;
   } catch (error) {
@@ -37,22 +26,9 @@ export default async function IntegrationsPage() {
     integrations = [
       {
         integrationKey: "webconnex",
-        name: "Giving Fuel",
-        providerType: "Webconnex Product",
-        description: "Fallback integration row while environment migrations settle.",
-        status: "Disabled",
-        connectionStatus: "Not Tested",
-        lastSyncDate: null,
-        lastSyncResult: "Unavailable",
-        isEnabled: false
+        name: "Giving Fuel"
       }
     ];
-    summary = {
-      totalIntegrations: 1,
-      enabledIntegrations: 0,
-      failedJobs: 0,
-      last24hSyncActivity: 0
-    };
     apiPaused = true;
   }
 
@@ -67,11 +43,7 @@ export default async function IntegrationsPage() {
           {loadError}
         </p>
       ) : null}
-      <IntegrationsDashboard
-        initialIntegrations={integrations}
-        summary={summary}
-        apiPaused={apiPaused}
-      />
+      <IntegrationsDashboard initialIntegrations={integrations} apiPaused={apiPaused} />
     </Card>
   );
 }
