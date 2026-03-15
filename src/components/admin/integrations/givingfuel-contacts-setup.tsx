@@ -47,6 +47,7 @@ export function GivingFuelContactsSetup({
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"contacts" | "errors" | "history">("contacts");
+  const [errorStatusFilter, setErrorStatusFilter] = useState<"open" | "resolved">("open");
   const [resolvingErrorId, setResolvingErrorId] = useState<string | null>(null);
   const [payloadViewer, setPayloadViewer] = useState<Record<string, unknown> | null>(null);
   const [jobViewer, setJobViewer] = useState<{
@@ -149,6 +150,13 @@ export function GivingFuelContactsSetup({
   const latestContactJob = useMemo(() => {
     return data.jobs.find((job) => String(job.sync_scope ?? "") === "contacts") ?? null;
   }, [data.jobs]);
+  const filteredErrors = useMemo(() => {
+    return data.errors.filter((row) => {
+      const status = String(row.status ?? "").toLowerCase();
+      if (errorStatusFilter === "resolved") return status === "resolved";
+      return status !== "resolved";
+    });
+  }, [data.errors, errorStatusFilter]);
 
   useEffect(() => {
     void loadSyncedContacts(contactsLimit);
@@ -401,7 +409,24 @@ export function GivingFuelContactsSetup({
 
         {activeTab === "errors" ? (
           <div>
-            <h4 className="mb-2 text-sm font-semibold text-slate-900">Error Queue</h4>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold text-slate-900">Error Queue</h4>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Status
+                </label>
+                <select
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  value={errorStatusFilter}
+                  onChange={(event) =>
+                    setErrorStatusFilter(event.target.value as "open" | "resolved")
+                  }
+                >
+                  <option value="open">Open</option>
+                  <option value="resolved">Resolved</option>
+                </select>
+              </div>
+            </div>
             <p className="mb-2 text-xs text-slate-500">
               Retry + Resolve attempts this specific record again and only resolves it when retry succeeds.
             </p>
@@ -419,7 +444,7 @@ export function GivingFuelContactsSetup({
                   </tr>
                 </thead>
                 <tbody>
-                  {data.errors.map((row) => (
+                  {filteredErrors.map((row) => (
                     <tr key={String(row.id)} className="border-b border-slate-100">
                       <td className="py-2">{String(row.id ?? "-")}</td>
                       <td className="py-2">{String(row.sync_job_id ?? "-")}</td>
@@ -442,20 +467,27 @@ export function GivingFuelContactsSetup({
                             type="button"
                             variant="secondary"
                             onClick={() => void resolveError(String(row.id))}
-                            disabled={resolvingErrorId === String(row.id)}
+                            disabled={
+                              resolvingErrorId === String(row.id) ||
+                              String(row.status ?? "").toLowerCase() === "resolved"
+                            }
                           >
-                            {resolvingErrorId === String(row.id)
-                              ? "Retrying..."
-                              : "Retry + Resolve"}
+                            {String(row.status ?? "").toLowerCase() === "resolved"
+                              ? "Resolved"
+                              : resolvingErrorId === String(row.id)
+                                ? "Retrying..."
+                                : "Retry + Resolve"}
                           </Button>
                         </div>
                       </td>
                     </tr>
                   ))}
-                  {data.errors.length === 0 ? (
+                  {filteredErrors.length === 0 ? (
                     <tr>
                       <td className="py-3 text-slate-500" colSpan={7}>
-                        No unresolved errors in queue.
+                        {errorStatusFilter === "open"
+                          ? "No open errors in queue."
+                          : "No resolved errors found."}
                       </td>
                     </tr>
                   ) : null}
