@@ -144,7 +144,7 @@ export class DonationSyncService {
       (syncSettings.donationsCursor as string | null | undefined) ?? null;
     let processed = 0;
     let created = 0;
-    let updated = 0;
+    const updated = 0;
     let failed = 0;
     let skippedDuplicates = 0;
     let skippedUnmappedPages = 0;
