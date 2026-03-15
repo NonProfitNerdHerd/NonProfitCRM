@@ -48,6 +48,20 @@ type LatestActivityRow = {
     | null;
 };
 
+function isClassificationSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("tracking_status") ||
+    message.includes("entity_type") ||
+    message.includes("webconnex_id")
+  );
+}
+
 function formatShortDate(input: string, mode: "day" | "week" | "month" | "year") {
   const date = new Date(`${input}T00:00:00Z`);
   const year = date.getUTCFullYear();
@@ -86,6 +100,40 @@ function normalizeTrackingStatus(input: { tracking_status?: unknown }) {
   if (raw === "donor") return "donor" as const;
   if (raw === "non_lead" || raw === "nonlead") return "non_lead" as const;
   return "lead" as const;
+}
+
+function deriveLegacyTrackingStatus(input: {
+  donor_status?: unknown;
+  external_source?: unknown;
+  external_source_id?: unknown;
+}) {
+  const donorStatus = String(input.donor_status ?? "").toLowerCase();
+  const externalSource = String(input.external_source ?? "").toLowerCase();
+  const externalSourceId = String(input.external_source_id ?? "").trim();
+  const hasExternalGivingFuelId =
+    externalSourceId.length > 0 &&
+    (externalSource === "givingfuel" || externalSource === "webconnex");
+  if (hasExternalGivingFuelId) return "donor" as const;
+  if (donorStatus === "active" || donorStatus === "lapsed") return "donor" as const;
+  if (donorStatus === "inactive") return "non_lead" as const;
+  return "lead" as const;
+}
+
+function resolveTrackingStatus(input: {
+  tracking_status?: unknown;
+  donor_status?: unknown;
+  external_source?: unknown;
+  external_source_id?: unknown;
+}) {
+  const raw = String(input.tracking_status ?? "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("-", "_")
+    .replaceAll(" ", "_");
+  if (raw === "donor" || raw === "lead" || raw === "non_lead" || raw === "nonlead") {
+    return normalizeTrackingStatus({ tracking_status: raw });
+  }
+  return deriveLegacyTrackingStatus(input);
 }
 
 function contactsRangeStartDate(range: AnalyticsRangeKey) {
@@ -127,47 +175,71 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
 
-  const [
-    contactsResult,
-    activityRowsResult,
-    allContactsCountResult,
-    personalContactsCountResult,
-    organizationContactsCountResult
-  ] = await Promise.all([
-    supabase
+  const contactsResult = await supabase
+    .from("contacts")
+    .select(
+      "id, created_at, tracking_status, organization_name, entity_type, donor_status, external_source, external_source_id"
+    )
+    .eq("organization_id", context.organizationId)
+    .limit(50000);
+
+  let contactsRows = (contactsResult.data ?? []) as Array<Record<string, unknown>>;
+  if (contactsResult.error) {
+    if (!isClassificationSchemaMissingError(contactsResult.error)) throw contactsResult.error;
+    const legacyContactsResult = await supabase
       .from("contacts")
-      .select("id, created_at, tracking_status, organization_name, entity_type")
+      .select("id, created_at, organization_name, donor_status, external_source, external_source_id")
       .eq("organization_id", context.organizationId)
-      .limit(50000),
-    supabase
+      .limit(50000);
+    if (legacyContactsResult.error) throw legacyContactsResult.error;
+    contactsRows = (legacyContactsResult.data ?? []) as Array<Record<string, unknown>>;
+  }
+
+  const activityRowsResult = await supabase
+    .from("activity_log")
+    .select(
+      "related_contact_id, action_type, action_summary, created_at, performed_by_user_id, contacts(id, first_name, last_name, organization_name, entity_type)"
+    )
+    .eq("organization_id", context.organizationId)
+    .not("related_contact_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  let activityRowsData = activityRowsResult.data as LatestActivityRow[] | null | undefined;
+  if (activityRowsResult.error) {
+    if (!isClassificationSchemaMissingError(activityRowsResult.error)) throw activityRowsResult.error;
+    const legacyActivityRowsResult = await supabase
       .from("activity_log")
       .select(
-        "related_contact_id, action_type, action_summary, created_at, performed_by_user_id, contacts(id, first_name, last_name, organization_name, entity_type)"
+        "related_contact_id, action_type, action_summary, created_at, performed_by_user_id, contacts(id, first_name, last_name, organization_name)"
       )
       .eq("organization_id", context.organizationId)
       .not("related_contact_id", "is", null)
       .order("created_at", { ascending: false })
-      .limit(500),
-    supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", context.organizationId),
-    supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", context.organizationId)
-      .or("organization_name.is.null,organization_name.eq."),
-    supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", context.organizationId)
-      .not("organization_name", "is", null)
-      .neq("organization_name", ""),
-      
-  ]);
+      .limit(500);
+    if (legacyActivityRowsResult.error) throw legacyActivityRowsResult.error;
+    activityRowsData = legacyActivityRowsResult.data as LatestActivityRow[] | null | undefined;
+  }
 
-  if (contactsResult.error) throw contactsResult.error;
-  if (activityRowsResult.error) throw activityRowsResult.error;
+  const [allContactsCountResult, personalContactsCountResult, organizationContactsCountResult] =
+    await Promise.all([
+      supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", context.organizationId),
+      supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", context.organizationId)
+        .or("organization_name.is.null,organization_name.eq."),
+      supabase
+        .from("contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", context.organizationId)
+        .not("organization_name", "is", null)
+        .neq("organization_name", "")
+    ]);
+
   if (allContactsCountResult.error) throw allContactsCountResult.error;
   if (personalContactsCountResult.error) throw personalContactsCountResult.error;
   if (organizationContactsCountResult.error) throw organizationContactsCountResult.error;
@@ -196,9 +268,12 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
     leadBuckets.set(key, 0);
     nonLeadBuckets.set(key, 0);
   }
-  for (const contact of contactsResult.data ?? []) {
-    const status = normalizeTrackingStatus({
-      tracking_status: contact.tracking_status
+  for (const contact of contactsRows) {
+    const status = resolveTrackingStatus({
+      tracking_status: contact.tracking_status,
+      donor_status: contact.donor_status,
+      external_source: contact.external_source,
+      external_source_id: contact.external_source_id
     });
     if (status === "donor") donorsTotal += 1;
     else if (status === "non_lead") nonLeadsTotal += 1;
@@ -212,7 +287,7 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
       nonLeadBuckets.set(bucket, (nonLeadBuckets.get(bucket) ?? 0) + 1);
     else leadBuckets.set(bucket, (leadBuckets.get(bucket) ?? 0) + 1);
   }
-  const activityRows = (activityRowsResult.data as LatestActivityRow[] | null | undefined) ?? [];
+  const activityRows = activityRowsData ?? [];
 
   const latestByContact = new Map<string, LatestActivityRow>();
   for (const row of activityRows) {
