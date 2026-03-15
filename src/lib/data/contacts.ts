@@ -267,12 +267,14 @@ export async function createContact(input: ContactInput) {
 export async function updateContact(contactId: string, input: ContactInput) {
   const context = await requireStaffPermission("can_edit_contacts");
   const supabase = await createClient();
-  let { data: existingContact, error: existingError } = await supabase
+  const { data: existingContact, error: initialExistingError } = await supabase
     .from("contacts")
     .select("tracking_status, webconnex_id, donor_status, external_source, external_source_id")
     .eq("organization_id", context.organizationId)
     .eq("id", contactId)
     .maybeSingle();
+  let existingError = initialExistingError;
+  let existingContactRecord = (existingContact ?? null) as Record<string, unknown> | null;
   if (existingError && isClassificationSchemaMissingError(existingError)) {
     const fallbackResult = await supabase
       .from("contacts")
@@ -280,13 +282,13 @@ export async function updateContact(contactId: string, input: ContactInput) {
       .eq("organization_id", context.organizationId)
       .eq("id", contactId)
       .maybeSingle();
-    existingContact = fallbackResult.data;
+    existingContactRecord = (fallbackResult.data ?? null) as Record<string, unknown> | null;
     existingError = fallbackResult.error;
   }
   if (existingError) throw existingError;
 
-  const existingTrackingStatusRaw = String(existingContact?.tracking_status ?? "").toLowerCase();
-  const existingDonorStatus = String(existingContact?.donor_status ?? "").toLowerCase();
+  const existingTrackingStatusRaw = String(existingContactRecord?.tracking_status ?? "").toLowerCase();
+  const existingDonorStatus = String(existingContactRecord?.donor_status ?? "").toLowerCase();
   const existingTrackingStatus =
     existingTrackingStatusRaw ||
     (existingDonorStatus === "active" || existingDonorStatus === "lapsed"
@@ -294,10 +296,10 @@ export async function updateContact(contactId: string, input: ContactInput) {
       : existingDonorStatus === "inactive"
         ? "non_lead"
         : "lead");
-  const legacyExternalSource = String(existingContact?.external_source ?? "").toLowerCase();
-  const legacyExternalSourceId = String(existingContact?.external_source_id ?? "").trim();
+  const legacyExternalSource = String(existingContactRecord?.external_source ?? "").toLowerCase();
+  const legacyExternalSourceId = String(existingContactRecord?.external_source_id ?? "").trim();
   const existingWebconnexId =
-    String(existingContact?.webconnex_id ?? "").trim() ||
+    String(existingContactRecord?.webconnex_id ?? "").trim() ||
     ((legacyExternalSource === "webconnex" || legacyExternalSource === "givingfuel") &&
     legacyExternalSourceId
       ? legacyExternalSourceId
