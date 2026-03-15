@@ -72,10 +72,20 @@ function formatDateTime(input: string) {
 }
 
 function contactsGranularity(range: AnalyticsRangeKey): "day" | "week" | "month" | "year" {
-  if (range === "30d") return "day";
-  if (range === "60d" || range === "90d" || range === "120d") return "week";
-  if (range === "5y") return "year";
-  return "month";
+  if (range === "30d" || range === "60d") return "week";
+  if (range === "90d" || range === "120d" || range === "1y") return "month";
+  return "year";
+}
+
+function normalizeTrackingStatus(input: { tracking_status?: unknown }) {
+  const raw = String(input.tracking_status ?? "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("-", "_")
+    .replaceAll(" ", "_");
+  if (raw === "donor") return "donor" as const;
+  if (raw === "non_lead" || raw === "nonlead") return "non_lead" as const;
+  return "lead" as const;
 }
 
 function contactsRangeStartDate(range: AnalyticsRangeKey) {
@@ -122,10 +132,7 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
     activityRowsResult,
     allContactsCountResult,
     personalContactsCountResult,
-    organizationContactsCountResult,
-    donorContactsCountResult,
-    leadContactsCountResult,
-    nonLeadContactsCountResult
+    organizationContactsCountResult
   ] = await Promise.all([
     supabase
       .from("contacts")
@@ -156,21 +163,7 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
       .eq("organization_id", context.organizationId)
       .not("organization_name", "is", null)
       .neq("organization_name", ""),
-    supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", context.organizationId)
-      .eq("tracking_status", "donor"),
-    supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", context.organizationId)
-      .eq("tracking_status", "lead"),
-    supabase
-      .from("contacts")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", context.organizationId)
-      .eq("tracking_status", "non_lead")
+      
   ]);
 
   if (contactsResult.error) throw contactsResult.error;
@@ -178,9 +171,6 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   if (allContactsCountResult.error) throw allContactsCountResult.error;
   if (personalContactsCountResult.error) throw personalContactsCountResult.error;
   if (organizationContactsCountResult.error) throw organizationContactsCountResult.error;
-  if (donorContactsCountResult.error) throw donorContactsCountResult.error;
-  if (leadContactsCountResult.error) throw leadContactsCountResult.error;
-  if (nonLeadContactsCountResult.error) throw nonLeadContactsCountResult.error;
 
   const mode = contactsGranularity(range);
   const startDate = startOfBucket(contactsRangeStartDate(range), mode);
@@ -197,6 +187,9 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   const donorBuckets = new Map<string, number>();
   const leadBuckets = new Map<string, number>();
   const nonLeadBuckets = new Map<string, number>();
+  let donorsTotal = 0;
+  let leadsTotal = 0;
+  let nonLeadsTotal = 0;
   for (const bucket of bucketStarts) {
     const key = bucket.toISOString().slice(0, 10);
     donorBuckets.set(key, 0);
@@ -204,10 +197,16 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
     nonLeadBuckets.set(key, 0);
   }
   for (const contact of contactsResult.data ?? []) {
+    const status = normalizeTrackingStatus({
+      tracking_status: contact.tracking_status
+    });
+    if (status === "donor") donorsTotal += 1;
+    else if (status === "non_lead") nonLeadsTotal += 1;
+    else leadsTotal += 1;
+
     const createdAt = contact.created_at ? new Date(String(contact.created_at)) : null;
     if (!createdAt || Number.isNaN(createdAt.getTime()) || createdAt < startDate) continue;
     const bucket = startOfBucket(createdAt, mode).toISOString().slice(0, 10);
-    const status = String(contact.tracking_status ?? "lead").toLowerCase();
     if (status === "donor") donorBuckets.set(bucket, (donorBuckets.get(bucket) ?? 0) + 1);
     else if (status === "non_lead")
       nonLeadBuckets.set(bucket, (nonLeadBuckets.get(bucket) ?? 0) + 1);
@@ -328,9 +327,9 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
       allContacts: allContactsCountResult.count ?? 0,
       personalContacts: personalContactsCountResult.count ?? 0,
       organizationContacts: organizationContactsCountResult.count ?? 0,
-      donors: donorContactsCountResult.count ?? 0,
-      leads: leadContactsCountResult.count ?? 0,
-      nonLeads: nonLeadContactsCountResult.count ?? 0
+      donors: donorsTotal,
+      leads: leadsTotal,
+      nonLeads: nonLeadsTotal
     },
     latestModifiedContacts
   };
