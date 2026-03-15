@@ -146,12 +146,13 @@ export class WebconnexApiClient {
       "content-type": "application/json"
     };
     if (this.authMode() === "api_key_header" && this.apiKey) {
+      const headerName = this.authHeaderName.trim() || "apiKey";
       const rawValue =
-        this.authHeaderName.toLowerCase() === "authorization" &&
+        headerName.toLowerCase() === "authorization" &&
         !this.apiKey.toLowerCase().startsWith("bearer ")
           ? `Bearer ${this.apiKey}`
           : this.apiKey;
-      headers[this.authHeaderName] = ensureHeaderSafeValue(rawValue);
+      headers[headerName] = ensureHeaderSafeValue(rawValue);
     }
     return headers;
   }

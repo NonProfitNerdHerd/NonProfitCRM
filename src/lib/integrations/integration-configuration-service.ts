@@ -127,7 +127,7 @@ export class IntegrationConfigurationService {
       name?: string;
       baseUrl?: string;
       authType?: string;
-      apiKeyReference?: string;
+      apiKeyReference?: string | null;
       isEnabled?: boolean;
       timeoutMs?: number;
       retrySettings?: Record<string, unknown>;

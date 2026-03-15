@@ -434,7 +434,7 @@ export function GivingFuelContactsSetup({
                 <th className="py-2">Phone</th>
                 <th className="py-2">City</th>
                 <th className="py-2">State</th>
-                <th className="py-2">External ID</th>
+                <th className="py-2">GivingFuel ID</th>
                 <th className="py-2">Source</th>
                 <th className="py-2">Last Synced</th>
               </tr>

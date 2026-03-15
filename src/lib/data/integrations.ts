@@ -417,7 +417,7 @@ export async function updateIntegrationConfiguration(
     name?: string;
     baseUrl?: string;
     authType?: string;
-    apiKeyReference?: string;
+    apiKeyReference?: string | null;
     isEnabled?: boolean;
     timeoutMs?: number;
     retrySettings?: Record<string, unknown>;
@@ -437,7 +437,6 @@ export async function updateIntegrationConfiguration(
       const existingConfig = (existing?.configuration_json ?? {}) as Record<string, unknown>;
       const existingHasApiKey =
         Boolean(existingConfig.encryptedApiKey) ||
-        Boolean(existing?.api_key_reference) ||
         Boolean(existingConfig.apiKeyConfigured);
       const providedApiKey = payload.apiKey?.trim();
       if (!providedApiKey && !existingHasApiKey && payload.isEnabled !== false) {
@@ -451,6 +450,7 @@ export async function updateIntegrationConfiguration(
             name: payload.name ?? GIVINGFUEL_INTEGRATION_NAME,
             baseUrl: GIVINGFUEL_BASE_URL,
             authType: "api_key_header",
+            apiKeyReference: null,
             configuration: {
               ...(payload.configuration ?? {}),
               contactsPath: GIVINGFUEL_CUSTOMERS_PATH,

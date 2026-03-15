@@ -13,9 +13,22 @@ type ContactSyncResult = {
 };
 
 function readString(record: Record<string, unknown>, keys: string[]) {
+  const readByPath = (path: string) => {
+    if (!path.includes(".")) return record[path];
+    const segments = path.split(".");
+    let cursor: unknown = record;
+    for (const segment of segments) {
+      if (!cursor || typeof cursor !== "object") return undefined;
+      cursor = (cursor as Record<string, unknown>)[segment];
+    }
+    return cursor;
+  };
+
   for (const key of keys) {
-    const value = record[key];
+    const value = readByPath(key);
     if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "bigint") return value.toString();
   }
   return "";
 }
@@ -61,6 +74,7 @@ export class ContactSyncService {
         processed += 1;
         const externalId = readString(record, [
           "id",
+          "displayId",
           "customer_id",
           "customerId",
           "external_id",
@@ -81,15 +95,33 @@ export class ContactSyncService {
         }
 
         try {
-          const firstName = readString(record, ["first_name", "firstName", "firstNameOrgName"]);
-          const lastName = readString(record, ["last_name", "lastName"]);
+          const firstName = readString(record, [
+            "first_name",
+            "firstName",
+            "firstNameOrgName",
+            "billing.firstName"
+          ]);
+          const lastName = readString(record, ["last_name", "lastName", "billing.lastName"]);
           const email = readString(record, ["email", "primary_email"]);
-          const phone = readString(record, ["phone", "mobile_phone", "mobile", "primary_phone"]);
+          const phone = readString(record, [
+            "phone",
+            "mobile_phone",
+            "mobile",
+            "primary_phone",
+            "billing.phone"
+          ]);
           const organizationName = readString(record, ["organization_name", "organization"]);
+          const addressLine1 = readString(record, ["address_line_1", "billing.address.street1"]);
+          const city = readString(record, ["city", "billing.address.city"]);
+          const state = readString(record, ["state", "billing.address.state"]);
+          const postalCode = readString(record, ["postal_code", "billing.address.postalCode"]);
+          const country = readString(record, ["country", "billing.address.country"]);
           const sourceModifiedAt = readDateTime(record, [
             "updated_at",
             "last_modified_at",
-            "modified_at"
+            "modified_at",
+            "dateUpdated",
+            "dateCreated"
           ]);
 
           const { data: existingRef } = await supabase
@@ -125,6 +157,11 @@ export class ContactSyncService {
                 email: email || null,
                 phone: phone || null,
                 organization_name: organizationName || null,
+                address_line_1: addressLine1 || null,
+                city: city || null,
+                state: state || null,
+                postal_code: postalCode || null,
+                country: country || null,
                 donor_status: "active",
                 updated_at: new Date().toISOString()
               })
@@ -142,6 +179,11 @@ export class ContactSyncService {
                 email: email || null,
                 phone: phone || null,
                 organization_name: organizationName || null,
+                address_line_1: addressLine1 || null,
+                city: city || null,
+                state: state || null,
+                postal_code: postalCode || null,
+                country: country || null,
                 donor_status: "active",
                 member_status: "none",
                 external_source: "givingfuel",

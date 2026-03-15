@@ -27,15 +27,15 @@ function resolveApiKey(connection: IntegrationConnection) {
   const encryptedApiKey = configuration.encryptedApiKey;
   if (typeof encryptedApiKey === "string" && encryptedApiKey.trim()) {
     try {
-      return decryptIntegrationSecret(encryptedApiKey);
+      return decryptIntegrationSecret(encryptedApiKey).trim();
     } catch {
       return "";
     }
   }
   const specific = process.env.WEBCONNEX_API_KEY;
-  if (specific) return specific;
+  if (specific) return specific.trim();
   if (!connection.api_key_reference) return "";
-  return process.env[connection.api_key_reference] ?? "";
+  return (process.env[connection.api_key_reference] ?? "").trim();
 }
 
 export class WebconnexSyncService {
@@ -46,12 +46,14 @@ export class WebconnexSyncService {
   private buildClient(connection: IntegrationConnection, apiKeyOverride?: string) {
     const config = connection.configuration_json ?? {};
     const retry = connection.retry_settings ?? {};
+    const resolvedApiKey = apiKeyOverride?.trim() || resolveApiKey(connection);
+    const authHeaderName = String(config.authHeaderName ?? GIVINGFUEL_API_HEADER_NAME).trim();
     return new WebconnexApiClient({
       baseUrl: (connection.base_url ?? "").trim(),
       authType: connection.auth_type,
-      apiKey: apiKeyOverride?.trim() || resolveApiKey(connection),
+      apiKey: resolvedApiKey,
       apiKeyReference: connection.api_key_reference,
-      authHeaderName: String(config.authHeaderName ?? GIVINGFUEL_API_HEADER_NAME),
+      authHeaderName: authHeaderName || GIVINGFUEL_API_HEADER_NAME,
       staticQueryParams: (config.staticQueryParams as Record<
         string,
         string | number | boolean
@@ -105,6 +107,11 @@ export class WebconnexSyncService {
 
       if (!input.connection.base_url) {
         throw new Error("Base API URL is not configured.");
+      }
+      if (!resolveApiKey(input.connection)) {
+        throw new Error(
+          "GivingFuel API key is not configured. Enter API key and click Save / Connect before syncing."
+        );
       }
 
       if (input.scope === "contacts" || input.scope === "all") {
