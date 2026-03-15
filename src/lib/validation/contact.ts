@@ -53,20 +53,6 @@ export const contactSchema = z
       });
     }
 
-    if (value.webconnex_id?.trim() && value.tracking_status !== "donor") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Records with a GivingFuel ID must have Tracking Status set to Donor.",
-        path: ["tracking_status"]
-      });
-    }
-    if (value.webconnex_id?.trim() && value.entity_type !== "person") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Records with a GivingFuel ID must have Record Type set to Person.",
-        path: ["entity_type"]
-      });
-    }
   });
 
 export type ContactInput = z.input<typeof contactSchema>;

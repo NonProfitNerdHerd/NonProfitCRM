@@ -72,6 +72,11 @@ export function ContactProfileTabs({
   staffUsers
 }: ContactProfileTabsProps) {
   const router = useRouter();
+  const initialExternalSource = String(contactDetails.external_source ?? "").toLowerCase();
+  const initialGivingFuelId =
+    (initialExternalSource === "givingfuel" || initialExternalSource === "webconnex"
+      ? String(contactDetails.external_source_id ?? "")
+      : "") || String(contactDetails.webconnex_id ?? "");
   const [activeTab, setActiveTab] = useState<
     "activity" | "contactInfo" | "donations" | "notes" | "tasks" | "memberships"
   >("activity");
@@ -85,7 +90,7 @@ export function ContactProfileTabs({
   const [contactInfo, setContactInfo] = useState({
     recordType: String(contactDetails.entity_type ?? "person"),
     trackingStatus: String(contactDetails.tracking_status ?? "lead"),
-    webconnexId: String(contactDetails.webconnex_id ?? ""),
+    webconnexId: initialGivingFuelId,
     firstName: String(contactDetails.first_name ?? ""),
     lastName: String(contactDetails.last_name ?? ""),
     preferredName: String(contactDetails.preferred_name ?? ""),
@@ -140,14 +145,6 @@ export function ContactProfileTabs({
       return { ...prev, recordType: "person" };
     });
   }, [contactInfoDraft.webconnexId, contactInfoDraft.recordType]);
-
-  useEffect(() => {
-    setContactInfoDraft((prev) => {
-      if (!prev.webconnexId.trim()) return prev;
-      if (prev.trackingStatus === "donor") return prev;
-      return { ...prev, trackingStatus: "donor" };
-    });
-  }, [contactInfoDraft.webconnexId, contactInfoDraft.trackingStatus]);
 
   useEffect(() => {
     if (contactInfoDraft.recordType !== "organization" || formalLetterManualOverride) return;
@@ -287,11 +284,7 @@ export function ContactProfileTabs({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         entity_type: contactInfoDraft.recordType,
-        tracking_status:
-          contactInfoDraft.webconnexId.trim() !== ""
-            ? "donor"
-            : contactInfoDraft.trackingStatus,
-        webconnex_id: contactInfoDraft.webconnexId,
+        tracking_status: contactInfoDraft.trackingStatus,
         first_name: contactInfoDraft.firstName,
         last_name: contactInfoDraft.lastName,
         preferred_name: contactInfoDraft.preferredName,
@@ -774,7 +767,6 @@ export function ContactProfileTabs({
                           trackingStatus: event.target.value
                         }))
                       }
-                      disabled={Boolean(contactInfoDraft.webconnexId.trim())}
                     >
                       {trackingStatusOptions.map((option) => (
                         <option key={option} value={option}>
@@ -1111,12 +1103,8 @@ export function ContactProfileTabs({
                   <FormField label="GivingFuel ID">
                     <Input
                       value={contactInfoDraft.webconnexId}
-                      onChange={(event) =>
-                        setContactInfoDraft((prev) => ({
-                          ...prev,
-                          webconnexId: event.target.value
-                        }))
-                      }
+                      readOnly
+                      disabled
                     />
                   </FormField>
                 </div>

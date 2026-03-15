@@ -54,7 +54,6 @@ export function ContactForm() {
   const communicationPreferences = watch("communication_preferences") ?? [];
   const entityType = watch("entity_type");
   const trackingStatus = watch("tracking_status");
-  const webconnexId = watch("webconnex_id");
   const organizationName = watch("organization_name");
   const firstName = watch("first_name");
   const lastName = watch("last_name");
@@ -68,18 +67,6 @@ export function ContactForm() {
       setValue("organization_name", "", { shouldValidate: true, shouldDirty: true });
     }
   }, [entityType, organizationName, setValue]);
-
-  useEffect(() => {
-    if (webconnexId?.trim() && entityType !== "person") {
-      setValue("entity_type", "person", { shouldValidate: true, shouldDirty: true });
-    }
-  }, [entityType, webconnexId, setValue]);
-
-  useEffect(() => {
-    if (webconnexId?.trim() && trackingStatus !== "donor") {
-      setValue("tracking_status", "donor", { shouldValidate: true, shouldDirty: true });
-    }
-  }, [trackingStatus, webconnexId, setValue]);
 
   useEffect(() => {
     if (entityType !== "organization") return;
@@ -131,7 +118,6 @@ export function ContactForm() {
             <select
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               {...register("entity_type")}
-              disabled={Boolean(webconnexId?.trim())}
             >
               {entityTypeOptions.map((option) => (
                 <option key={option} value={option}>
@@ -148,7 +134,6 @@ export function ContactForm() {
             <select
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               {...register("tracking_status")}
-              disabled={Boolean(webconnexId?.trim())}
             >
               {trackingStatusOptions.map((option) => (
                 <option key={option} value={option}>
@@ -364,36 +349,20 @@ export function ContactForm() {
         ) : null}
       </div>
 
-      <section className="rounded-md border border-slate-200 p-3">
-        <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
-        <div>
-          <label className="mb-1 block text-sm font-medium">GivingFuel ID</label>
-          <Input
-            {...register("webconnex_id")}
-            placeholder="If provided, Tracking Status will be forced to Donor"
-          />
-        </div>
-        {errors.webconnex_id ? (
-          <p className="text-xs text-red-700">{errors.webconnex_id.message}</p>
-        ) : null}
-        {errors.tracking_status ? (
-          <p className="text-xs text-red-700">{errors.tracking_status.message}</p>
-        ) : null}
-        {errors.organization_name ? (
-          <p className="text-xs text-red-700">{errors.organization_name.message}</p>
-        ) : null}
-        {errors.root ? (
-          <p className="text-xs text-red-700">{errors.root.message}</p>
-        ) : null}
-      </section>
+      {errors.tracking_status ? (
+        <p className="text-xs text-red-700">{errors.tracking_status.message}</p>
+      ) : null}
+      {errors.organization_name ? (
+        <p className="text-xs text-red-700">{errors.organization_name.message}</p>
+      ) : null}
+      {errors.root ? (
+        <p className="text-xs text-red-700">{errors.root.message}</p>
+      ) : null}
 
       <div className="rounded-md border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600">
         {entityType === "person"
           ? "Person records default to Lead unless marked as Donor or Non-Lead."
           : "Organization records default to Lead. Organization Name is required."}
-        {webconnexId?.trim()
-          ? " GivingFuel ID detected, so Record Type is locked to Person and Tracking Status is locked to Donor."
-          : ""}
       </div>
 
       {submitError ? <p className="text-sm text-red-700">{submitError}</p> : null}

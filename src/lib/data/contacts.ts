@@ -20,14 +20,12 @@ function isContactExtendedSchemaError(error: unknown) {
   );
 }
 
-function normalizeEntityType(input: ContactInput, webconnexId: string | null) {
-  if (webconnexId) return "person";
+function normalizeEntityType(input: ContactInput) {
   if (input.entity_type === "organization") return "organization";
   return "person";
 }
 
-function normalizeTrackingStatus(input: ContactInput, webconnexId: string | null) {
-  if (webconnexId) return "donor";
+function normalizeTrackingStatus(input: ContactInput) {
   return input.tracking_status;
 }
 
@@ -186,9 +184,8 @@ export async function getContact(contactId: string) {
 export async function createContact(input: ContactInput) {
   const context = await requireStaffPermission("can_create_contacts");
   const supabase = await createClient();
-  const webconnexId = input.webconnex_id?.trim() || null;
-  const entityType = normalizeEntityType(input, webconnexId);
-  const trackingStatus = normalizeTrackingStatus(input, webconnexId);
+  const entityType = normalizeEntityType(input);
+  const trackingStatus = normalizeTrackingStatus(input);
   const formalLetterName = input.formal_letter_name?.trim()
     ? input.formal_letter_name.trim()
     : entityType === "organization"
@@ -224,7 +221,6 @@ export async function createContact(input: ContactInput) {
       entityType === "organization" ? input.organization_name?.trim() || null : null,
     entity_type: entityType,
     tracking_status: trackingStatus,
-    webconnex_id: webconnexId,
     donor_status: donorStatus,
     member_status: input.member_status ?? "none",
     created_by: context.userId,
@@ -244,7 +240,6 @@ export async function createContact(input: ContactInput) {
       emergency_contact_phone: removedEmergencyContactPhone,
       entity_type: removedEntityType,
       tracking_status: removedTrackingStatus,
-      webconnex_id: removedWebconnexId,
       ...legacyPayload
     } = insertPayload;
     void removedFormalLetterName;
@@ -253,7 +248,6 @@ export async function createContact(input: ContactInput) {
     void removedEmergencyContactPhone;
     void removedEntityType;
     void removedTrackingStatus;
-    void removedWebconnexId;
 
     const retryResult = await supabase.from("contacts").insert(legacyPayload).select("id").single();
     data = retryResult.data;
@@ -270,7 +264,7 @@ export async function updateContact(contactId: string, input: ContactInput) {
   const supabase = await createClient();
   const { data: existingContact, error: initialExistingError } = await supabase
     .from("contacts")
-    .select("tracking_status, webconnex_id, donor_status, external_source, external_source_id")
+    .select("tracking_status, donor_status")
     .eq("organization_id", context.organizationId)
     .eq("id", contactId)
     .maybeSingle();
@@ -279,7 +273,7 @@ export async function updateContact(contactId: string, input: ContactInput) {
   if (existingError && isClassificationSchemaMissingError(existingError)) {
     const fallbackResult = await supabase
       .from("contacts")
-      .select("donor_status, external_source, external_source_id")
+      .select("donor_status")
       .eq("organization_id", context.organizationId)
       .eq("id", contactId)
       .maybeSingle();
@@ -297,18 +291,8 @@ export async function updateContact(contactId: string, input: ContactInput) {
       : existingDonorStatus === "inactive"
         ? "non_lead"
         : "lead");
-  const legacyExternalSource = String(existingContactRecord?.external_source ?? "").toLowerCase();
-  const legacyExternalSourceId = String(existingContactRecord?.external_source_id ?? "").trim();
-  const existingWebconnexId =
-    String(existingContactRecord?.webconnex_id ?? "").trim() ||
-    ((legacyExternalSource === "webconnex" || legacyExternalSource === "givingfuel") &&
-    legacyExternalSourceId
-      ? legacyExternalSourceId
-      : "");
-  const incomingWebconnexId = input.webconnex_id?.trim() ?? "";
-  const webconnexId = incomingWebconnexId || existingWebconnexId || null;
-  const entityType = normalizeEntityType(input, webconnexId);
-  const trackingStatus = normalizeTrackingStatus(input, webconnexId);
+  const entityType = normalizeEntityType(input);
+  const trackingStatus = normalizeTrackingStatus(input);
 
   if (existingTrackingStatus === "donor" && trackingStatus !== "donor") {
     throw new Error("Donor classification cannot be downgraded.");
@@ -348,7 +332,6 @@ export async function updateContact(contactId: string, input: ContactInput) {
       entityType === "organization" ? input.organization_name?.trim() || null : null,
     entity_type: entityType,
     tracking_status: trackingStatus,
-    webconnex_id: webconnexId,
     donor_status: donorStatus,
     member_status: input.member_status ?? "none",
     updated_by: context.userId,
@@ -368,7 +351,6 @@ export async function updateContact(contactId: string, input: ContactInput) {
       emergency_contact_phone: removedEmergencyContactPhone,
       entity_type: removedEntityType,
       tracking_status: removedTrackingStatus,
-      webconnex_id: removedWebconnexId,
       ...legacyPayload
     } = updatePayload;
     void removedFormalLetterName;
@@ -377,7 +359,6 @@ export async function updateContact(contactId: string, input: ContactInput) {
     void removedEmergencyContactPhone;
     void removedEntityType;
     void removedTrackingStatus;
-    void removedWebconnexId;
 
     const retryResult = await supabase
       .from("contacts")

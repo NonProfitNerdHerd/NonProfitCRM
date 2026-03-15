@@ -132,14 +132,11 @@ export class ContactSyncService {
           phone: phone || null,
           organization_name: normalizedOrganizationName,
           entity_type: normalizedEntityType,
-          tracking_status: "donor",
-          webconnex_id: externalId,
           address_line_1: addressLine1 || null,
           city: city || null,
           state: state || null,
           postal_code: postalCode || null,
           country: country || null,
-          donor_status: "active",
           updated_at: new Date().toISOString()
         })
         .eq("organization_id", input.organizationId)
@@ -156,14 +153,13 @@ export class ContactSyncService {
           phone: phone || null,
           organization_name: normalizedOrganizationName,
           entity_type: normalizedEntityType,
-          tracking_status: "donor",
-          webconnex_id: externalId,
+          tracking_status: "lead",
           address_line_1: addressLine1 || null,
           city: city || null,
           state: state || null,
           postal_code: postalCode || null,
           country: country || null,
-          donor_status: "active",
+          donor_status: "prospect",
           member_status: "none",
           external_source: "givingfuel",
           external_source_id: externalId

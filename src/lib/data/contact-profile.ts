@@ -98,9 +98,9 @@ async function fetchContactRecord(
   contactId: string
 ) {
   const fullSelect =
-    "id, organization_id, first_name, last_name, preferred_name, formal_letter_name, organization_name, entity_type, tracking_status, webconnex_id, donor_status, member_status, email, alternate_email, phone, mobile_number, alternate_phone, emergency_contact, emergency_contact_phone, communication_preferences, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at";
+    "id, organization_id, first_name, last_name, preferred_name, formal_letter_name, organization_name, entity_type, tracking_status, webconnex_id, external_source, external_source_id, donor_status, member_status, email, alternate_email, phone, mobile_number, alternate_phone, emergency_contact, emergency_contact_phone, communication_preferences, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at";
   const legacySelect =
-    "id, organization_id, first_name, last_name, preferred_name, organization_name, donor_status, member_status, email, alternate_email, phone, alternate_phone, communication_preferences, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at";
+    "id, organization_id, first_name, last_name, preferred_name, organization_name, donor_status, member_status, external_source, external_source_id, email, alternate_email, phone, alternate_phone, communication_preferences, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at";
 
   const fullResult = (await supabase
     .from("contacts")
@@ -127,7 +127,9 @@ async function fetchContactRecord(
             emergency_contact_phone: null,
             entity_type: "person",
             tracking_status: "lead",
-            webconnex_id: null
+            webconnex_id: null,
+            external_source: null,
+            external_source_id: null
           }
         : null,
       error: null
