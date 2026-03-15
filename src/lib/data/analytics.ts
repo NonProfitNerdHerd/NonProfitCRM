@@ -184,7 +184,7 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   const startDate = startOfBucket(contactsRangeStartDate(range), mode);
   const now = new Date();
   const bucketStarts: Date[] = [];
-  let cursor = new Date(startDate);
+  const cursor = new Date(startDate);
   while (cursor <= now) {
     bucketStarts.push(new Date(cursor));
     if (mode === "day") cursor.setUTCDate(cursor.getUTCDate() + 1);
