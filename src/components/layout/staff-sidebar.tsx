@@ -72,7 +72,8 @@ const menu: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/admin"),
     children: [
       { href: "/staff/admin/users", label: "Users" },
-      { href: "/staff/admin/roles", label: "Roles" }
+      { href: "/staff/admin/roles", label: "Roles" },
+      { href: "/staff/admin/integrations", label: "Integrations" }
     ]
   }
 ];
