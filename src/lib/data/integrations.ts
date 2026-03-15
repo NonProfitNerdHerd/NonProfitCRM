@@ -720,11 +720,7 @@ export async function listRecentSyncedContactsForIntegration(
   const context = await requireIntegrationsAdmin();
   const boundedLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 100) : 20;
   try {
-    const { connection } = await getDefinitionAndConnection(
-      context.organizationId,
-      context.userId,
-      integrationKey
-    );
+    await getDefinitionAndConnection(context.organizationId, context.userId, integrationKey);
     const supabase = await createIntegrationClient();
     const { data, error } = await supabase
       .from("contact_external_references")
