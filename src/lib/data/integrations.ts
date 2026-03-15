@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireSessionContext } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 import {
+  IntegrationConnection,
   IntegrationDashboardItem,
   IntegrationErrorQueueItem,
   IntegrationSyncJob,
@@ -50,6 +51,8 @@ function isMissingIntegrationsSchemaError(error: unknown) {
 function createFallbackDetail(integrationKey: string, organizationId: string) {
   const now = new Date().toISOString();
   const name = integrationKey === "webconnex" ? "Webconnex" : integrationKey;
+  const fallbackWebconnexBaseUrl =
+    process.env.WEBCONNEX_BASE_URL ?? process.env.WEBCONNEX_API_BASE_URL ?? "";
   return {
     definition: {
       id: `fallback-${integrationKey}`,
@@ -72,9 +75,9 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       organization_id: organizationId,
       integration_definition_id: `fallback-${integrationKey}`,
       name,
-      base_url: "",
+      base_url: fallbackWebconnexBaseUrl,
       auth_type: "api_key_header",
-      api_key_reference: null,
+      api_key_reference: "WEBCONNEX_API_KEY",
       is_enabled: false,
       connection_status: "not_tested",
       last_connection_test_date: null,
@@ -124,6 +127,48 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       failedRecordsCount: 0
     },
     schemaWarning: INTEGRATIONS_SCHEMA_ERROR_MESSAGE
+  };
+}
+
+function buildSchemaFreeWebconnexConnection(organizationId: string): IntegrationConnection {
+  const now = new Date().toISOString();
+  const fallbackWebconnexBaseUrl =
+    process.env.WEBCONNEX_BASE_URL ?? process.env.WEBCONNEX_API_BASE_URL ?? "";
+  return {
+    id: "schema-free-webconnex-connection",
+    organization_id: organizationId,
+    integration_definition_id: "schema-free-webconnex-definition",
+    name: "Webconnex",
+    base_url: fallbackWebconnexBaseUrl,
+    auth_type: "api_key_header",
+    api_key_reference: "WEBCONNEX_API_KEY",
+    is_enabled: true,
+    connection_status: "not_tested",
+    last_connection_test_date: null,
+    last_connection_test_result: null,
+    timeout_ms: 30000,
+    retry_settings: { maxRetries: 3, backoffMs: 1000 },
+    debug_logging_enabled: false,
+    configuration_json: {
+      contactsPath: "/contacts",
+      transactionsPath: "/transactions",
+      testPath: "/health",
+      authHeaderName: "Authorization"
+    },
+    sync_settings_json: {
+      syncMode: "manual_and_scheduled",
+      scheduleFrequency: "daily",
+      contactSyncEnabled: true,
+      donationSyncEnabled: true,
+      fullSyncEnabled: true,
+      incrementalSyncEnabled: true,
+      fallbackContactMatch: "email_if_configured"
+    },
+    field_mapping_json: { contacts: {}, donations: {} },
+    created_by: null,
+    updated_by: null,
+    created_at: now,
+    updated_at: now
   };
 }
 
@@ -389,7 +434,17 @@ export async function testIntegrationConnection(integrationKey: string) {
     return result;
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
-      throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
+      if (integrationKey !== "webconnex") {
+        throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
+      }
+      const schemaFreeConnection = buildSchemaFreeWebconnexConnection(context.organizationId);
+      const result = await webconnexSyncService.testConnection(schemaFreeConnection);
+      return {
+        ...result,
+        message: result.ok
+          ? `${result.message} (schema-free mode: using environment-backed Webconnex configuration)`
+          : `${result.message} (schema-free mode: set WEBCONNEX_BASE_URL/WEBCONNEX_API_BASE_URL and WEBCONNEX_API_KEY)`
+      };
     }
     throw error;
   }
