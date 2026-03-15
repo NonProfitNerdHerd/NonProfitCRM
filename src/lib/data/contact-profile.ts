@@ -39,7 +39,10 @@ function isContactExtendedSchemaError(error: unknown) {
     message.includes("formal_letter_name") ||
     message.includes("mobile_number") ||
     message.includes("emergency_contact") ||
-    message.includes("emergency_contact_phone")
+    message.includes("emergency_contact_phone") ||
+    message.includes("entity_type") ||
+    message.includes("tracking_status") ||
+    message.includes("webconnex_id")
   );
 }
 
