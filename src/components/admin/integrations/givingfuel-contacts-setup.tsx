@@ -49,6 +49,11 @@ export function GivingFuelContactsSetup({
   const [activeTab, setActiveTab] = useState<"contacts" | "errors" | "history">("contacts");
   const [errorStatusFilter, setErrorStatusFilter] = useState<"open" | "resolved">("open");
   const [resolvingErrorId, setResolvingErrorId] = useState<string | null>(null);
+  const [bulkResolving, setBulkResolving] = useState(false);
+  const [bulkResolveProgress, setBulkResolveProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [payloadViewer, setPayloadViewer] = useState<Record<string, unknown> | null>(null);
   const [jobViewer, setJobViewer] = useState<{
     job: Record<string, unknown> | null;
@@ -130,6 +135,68 @@ export function GivingFuelContactsSetup({
     }
   }
 
+  async function resolveAllOpenErrors() {
+    setMessage(null);
+    setError(null);
+
+    if (openErrors.length === 0) {
+      setMessage("No open errors to resolve.");
+      return;
+    }
+
+    setBulkResolving(true);
+    setBulkResolveProgress({ done: 0, total: openErrors.length });
+
+    let resolvedCount = 0;
+    let failedCount = 0;
+    try {
+      for (let index = 0; index < openErrors.length; index += 1) {
+        const row = openErrors[index];
+        const errorId = String(row.id ?? "");
+        setBulkResolveProgress({ done: index, total: openErrors.length });
+
+        if (!errorId) {
+          failedCount += 1;
+          continue;
+        }
+
+        try {
+          const response = await fetch(
+            `/api/admin/integrations/${encodeURIComponent(integrationKey)}/errors/${encodeURIComponent(errorId)}/resolve`,
+            { method: "POST" }
+          );
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(payload?.message ?? "Unable to resolve error.");
+          }
+          resolvedCount += 1;
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      setBulkResolveProgress({ done: openErrors.length, total: openErrors.length });
+      await refresh();
+
+      if (failedCount > 0) {
+        setError(
+          `Retry + Resolve All finished: ${resolvedCount} resolved, ${failedCount} failed. Failed items remain in Open.`
+        );
+        return;
+      }
+      setMessage(`Retry + Resolve All completed: ${resolvedCount} item(s) resolved.`);
+    } catch (bulkResolveError) {
+      setError(
+        bulkResolveError instanceof Error
+          ? bulkResolveError.message
+          : "Unable to complete Retry + Resolve All."
+      );
+    } finally {
+      setBulkResolving(false);
+      setBulkResolveProgress(null);
+    }
+  }
+
   async function openJob(jobId: string) {
     setError(null);
     try {
@@ -150,6 +217,9 @@ export function GivingFuelContactsSetup({
   const latestContactJob = useMemo(() => {
     return data.jobs.find((job) => String(job.sync_scope ?? "") === "contacts") ?? null;
   }, [data.jobs]);
+  const openErrors = useMemo(() => {
+    return data.errors.filter((row) => String(row.status ?? "").toLowerCase() !== "resolved");
+  }, [data.errors]);
   const filteredErrors = useMemo(() => {
     return data.errors.filter((row) => {
       const status = String(row.status ?? "").toLowerCase();
@@ -421,15 +491,31 @@ export function GivingFuelContactsSetup({
                   onChange={(event) =>
                     setErrorStatusFilter(event.target.value as "open" | "resolved")
                   }
+                  disabled={bulkResolving}
                 >
                   <option value="open">Open</option>
                   <option value="resolved">Resolved</option>
                 </select>
+                {errorStatusFilter === "open" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void resolveAllOpenErrors()}
+                    disabled={bulkResolving || openErrors.length === 0}
+                  >
+                    {bulkResolving ? "Retrying All..." : "Retry + Resolve All Open"}
+                  </Button>
+                ) : null}
               </div>
             </div>
             <p className="mb-2 text-xs text-slate-500">
               Retry + Resolve attempts this specific record again and only resolves it when retry succeeds.
             </p>
+            {bulkResolveProgress ? (
+              <p className="mb-2 text-xs text-slate-500">
+                Resolving {bulkResolveProgress.done} of {bulkResolveProgress.total}...
+              </p>
+            ) : null}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -468,6 +554,7 @@ export function GivingFuelContactsSetup({
                             variant="secondary"
                             onClick={() => void resolveError(String(row.id))}
                             disabled={
+                              bulkResolving ||
                               resolvingErrorId === String(row.id) ||
                               String(row.status ?? "").toLowerCase() === "resolved"
                             }
