@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
@@ -98,10 +99,16 @@ export function StaffSidebar() {
   return (
     <aside className="sticky top-0 h-screen w-64 border-r border-slate-200 bg-white px-4 py-6">
       <div className="mb-8">
-        <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
-          NonprofitCRM
-        </p>
-        <h2 className="text-lg font-semibold text-slate-900">Staff Console</h2>
+        <Link href="/staff/dashboard" className="block">
+          <Image
+            src="/herdcore-logo.png"
+            alt="HerdCore"
+            width={220}
+            height={72}
+            className="h-auto w-full max-w-[220px]"
+            priority
+          />
+        </Link>
       </div>
       <nav className="space-y-1">
         {menu.map((item) => {
