@@ -117,7 +117,7 @@ export class WebconnexSyncService {
       ? mappedPageField.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
       : typeof mappedPageField === "string" && mappedPageField.trim()
         ? [mappedPageField.trim()]
-        : ["page", "page_name", "pageName", "form_name", "fund", "campaign"];
+        : ["formName", "form_name", "page", "page_name", "pageName", "formId", "formAccRef", "campaign"];
 
     while (hasMore && pages < maxPages) {
       pages += 1;

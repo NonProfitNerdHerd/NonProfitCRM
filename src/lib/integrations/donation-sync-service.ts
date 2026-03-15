@@ -230,14 +230,20 @@ export class DonationSyncService {
           record,
           toStringCandidates(mapping.externalTransactionId, [
             "id",
+            "displayId",
             "transaction_id",
             "transactionId",
-            "external_transaction_id"
+            "external_transaction_id",
+            "orderId",
+            "orderDisplayId",
+            "gatewayReference"
           ])
         );
         const externalContactId = readString(
           record,
           toStringCandidates(mapping.externalContactId, [
+            "customerId",
+            "orderCustomerId",
             "contact_id",
             "customer_id",
             "customer.id",
@@ -249,6 +255,10 @@ export class DonationSyncService {
         const externalPageValue = readString(
           record,
           toStringCandidates(mapping.pageValue, [
+            "formName",
+            "form_name",
+            "formAccRef",
+            "formId",
             "page",
             "page_name",
             "pageName",
@@ -353,11 +363,13 @@ export class DonationSyncService {
 
           const amount = readNumber(
             record,
-            toStringCandidates(mapping.amount, ["amount", "total", "value"])
+            toStringCandidates(mapping.amount, ["total", "amount", "value"])
           );
           const donationDate = readDate(
             record,
             toStringCandidates(mapping.donationDate, [
+              "dateCreated",
+              "dateUpdated",
               "donation_date",
               "transaction_date",
               "date",
@@ -366,11 +378,17 @@ export class DonationSyncService {
           );
           const paymentMethod = readString(
             record,
-            toStringCandidates(mapping.paymentMethod, ["payment_method", "payment_type", "method"])
+            toStringCandidates(mapping.paymentMethod, [
+              "paymentMethod",
+              "paymentType",
+              "payment_method",
+              "payment_type",
+              "method"
+            ])
           );
           const campaign = readString(
             record,
-            toStringCandidates(mapping.campaignName, ["campaign", "fund", "designation"])
+            toStringCandidates(mapping.campaignName, ["formName", "campaign", "fund", "designation"])
           );
           const status = normalizeDonationStatus(
             readString(record, toStringCandidates(mapping.status, ["status"])) || "posted"

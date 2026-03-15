@@ -28,16 +28,16 @@ const DEFAULT_WEBCONNEX_FIELD_MAPPING = {
   },
   donations: {
     externalTransactionId: "id",
-    externalContactId: "contact_id",
-    pageValue: "page",
-    amount: "amount",
-    donationDate: "donation_date",
-    paymentMethod: "payment_method",
+    externalContactId: "customerId",
+    pageValue: "formName",
+    amount: "total",
+    donationDate: "dateCreated",
+    paymentMethod: "paymentMethod",
     status: "status",
-    campaignName: "campaign",
-    subCampaignName: "sub_campaign",
-    campaign: "campaign",
-    notes: "notes"
+    campaignName: "formName",
+    subCampaignName: "formAccRef",
+    campaign: "formName",
+    notes: "gatewayMessage"
   }
 };
 
