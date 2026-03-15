@@ -75,7 +75,7 @@ export class WebconnexApiClient {
     this.timeoutMs = config.timeoutMs ?? 30000;
     this.maxRetries = config.maxRetries ?? 3;
     this.backoffMs = config.backoffMs ?? 1000;
-    this.authHeaderName = config.authHeaderName ?? "Authorization";
+    this.authHeaderName = config.authHeaderName ?? "apiKey";
     this.contactsPath = config.contactsPath ?? "/contacts";
     this.transactionsPath = config.transactionsPath ?? "/transactions";
     this.testPath = config.testPath ?? "/health";
@@ -98,10 +98,13 @@ export class WebconnexApiClient {
       "content-type": "application/json"
     };
     if (this.authMode() === "api_key_header" && this.apiKey) {
-      headers[this.authHeaderName] =
-        this.authHeaderName.toLowerCase() === "authorization"
+      const rawValue =
+        this.authHeaderName.toLowerCase() === "authorization" &&
+        !this.apiKey.toLowerCase().startsWith("bearer ")
           ? `Bearer ${this.apiKey}`
           : this.apiKey;
+      headers[this.authHeaderName] =
+        rawValue;
     }
     return headers;
   }
@@ -156,7 +159,18 @@ export class WebconnexApiClient {
     }
     try {
       await this.request(this.testPath);
-      return { ok: true, message: "Connection test succeeded." };
+      try {
+        await this.getContacts({ pageSize: 1 });
+      } catch (contactsError) {
+        return {
+          ok: false,
+          message:
+            contactsError instanceof Error
+              ? `Connection OK but contacts read failed: ${contactsError.message}`
+              : "Connection OK but contacts read failed."
+        };
+      }
+      return { ok: true, message: "Connection test succeeded (contacts endpoint reachable)." };
     } catch (error) {
       return {
         ok: false,

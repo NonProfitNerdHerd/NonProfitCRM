@@ -47,7 +47,7 @@ export function WebconnexIntegrationDetail({
   const fieldMapping = (connection.field_mapping_json as Record<string, unknown>) ?? {};
 
   const [configForm, setConfigForm] = useState({
-    name: String(connection.name ?? "Webconnex"),
+    name: String(connection.name ?? "Giving Fuel"),
     baseUrl: String(connection.base_url ?? ""),
     authType: String(connection.auth_type ?? "api_key_header"),
     apiKeyReference: String(connection.api_key_reference ?? ""),
@@ -58,7 +58,8 @@ export function WebconnexIntegrationDetail({
     debugLoggingEnabled: Boolean(connection.debug_logging_enabled ?? false),
     contactsPath: String(configJson.contactsPath ?? "/contacts"),
     transactionsPath: String(configJson.transactionsPath ?? "/transactions"),
-    testPath: String(configJson.testPath ?? "/health")
+    testPath: String(configJson.testPath ?? "/health"),
+    authHeaderName: String(configJson.authHeaderName ?? "apiKey")
   });
 
   const [syncForm, setSyncForm] = useState({
@@ -125,7 +126,8 @@ export function WebconnexIntegrationDetail({
             configuration: {
               contactsPath: configForm.contactsPath,
               transactionsPath: configForm.transactionsPath,
-              testPath: configForm.testPath
+              testPath: configForm.testPath,
+              authHeaderName: configForm.authHeaderName || "apiKey"
             }
           })
         }),
@@ -363,6 +365,15 @@ export function WebconnexIntegrationDetail({
                   setConfigForm((prev) => ({ ...prev, apiKeyReference: event.target.value }))
                 }
                 placeholder="Env key name only (secret hidden)"
+              />
+            </Field>
+            <Field label="Auth header name">
+              <Input
+                value={configForm.authHeaderName}
+                onChange={(event) =>
+                  setConfigForm((prev) => ({ ...prev, authHeaderName: event.target.value }))
+                }
+                placeholder="apiKey"
               />
             </Field>
             <Field label="Timeout (ms)">

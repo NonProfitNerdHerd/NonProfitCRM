@@ -35,7 +35,7 @@ export class WebconnexSyncService {
       authType: connection.auth_type,
       apiKey: resolveApiKey(connection),
       apiKeyReference: connection.api_key_reference,
-      authHeaderName: String(config.authHeaderName ?? "Authorization"),
+      authHeaderName: String(config.authHeaderName ?? "apiKey"),
       timeoutMs: Number(connection.timeout_ms ?? 30000),
       maxRetries: Number(retry.maxRetries ?? 3),
       backoffMs: Number(retry.backoffMs ?? 1000),

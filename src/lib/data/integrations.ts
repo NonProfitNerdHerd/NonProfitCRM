@@ -89,7 +89,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
         contactsPath: "/contacts",
         transactionsPath: "/transactions",
         testPath: "/health",
-        authHeaderName: "Authorization"
+        authHeaderName: "apiKey"
       },
       sync_settings_json: {
         syncMode: "manual_and_scheduled",
@@ -153,7 +153,7 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
       contactsPath: "/contacts",
       transactionsPath: "/transactions",
       testPath: "/health",
-      authHeaderName: "Authorization"
+      authHeaderName: "apiKey"
     },
     sync_settings_json: {
       syncMode: "manual_and_scheduled",

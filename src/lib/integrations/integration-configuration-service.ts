@@ -89,7 +89,7 @@ export class IntegrationConfigurationService {
                 contactsPath: "/contacts",
                 transactionsPath: "/transactions",
                 testPath: "/health",
-                authHeaderName: "Authorization"
+                authHeaderName: "apiKey"
               }
             : {},
         sync_settings_json:
