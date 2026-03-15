@@ -4,6 +4,7 @@ type WebconnexClientConfig = {
   apiKey?: string;
   apiKeyReference?: string | null;
   authHeaderName?: string;
+  staticQueryParams?: Record<string, string | number | boolean>;
   timeoutMs?: number;
   maxRetries?: number;
   backoffMs?: number;
@@ -63,6 +64,7 @@ export class WebconnexApiClient {
   private maxRetries: number;
   private backoffMs: number;
   private authHeaderName: string;
+  private staticQueryParams: Record<string, string | number | boolean>;
   private contactsPath: string;
   private transactionsPath: string;
   private testPath: string;
@@ -76,6 +78,7 @@ export class WebconnexApiClient {
     this.maxRetries = config.maxRetries ?? 3;
     this.backoffMs = config.backoffMs ?? 1000;
     this.authHeaderName = config.authHeaderName ?? "apiKey";
+    this.staticQueryParams = config.staticQueryParams ?? {};
     this.contactsPath = config.contactsPath ?? "/contacts";
     this.transactionsPath = config.transactionsPath ?? "/transactions";
     this.testPath = config.testPath ?? "/health";
@@ -85,7 +88,7 @@ export class WebconnexApiClient {
 
   private authMode() {
     if (["none", "no_auth", "noauth", "public", "unauthenticated"].includes(this.authType)) {
-      return "none";
+      return this.apiKey ? "api_key_header" : "none";
     }
     if (["api_key_query", "query", "query_param"].includes(this.authType)) {
       return "api_key_query";
@@ -112,6 +115,10 @@ export class WebconnexApiClient {
   private async request(path: string, params?: Record<string, string | number>) {
     const url = new URL(`${this.baseUrl}${path}`);
     const authMode = this.authMode();
+    for (const [key, value] of Object.entries(this.staticQueryParams)) {
+      if (value === "" || value === null || value === undefined) continue;
+      url.searchParams.set(key, String(value));
+    }
     for (const [key, value] of Object.entries(params ?? {})) {
       if (value === "" || value === null || value === undefined) continue;
       url.searchParams.set(key, String(value));
@@ -180,10 +187,12 @@ export class WebconnexApiClient {
   }
 
   async getContacts(params?: ListParams): Promise<ListResponse> {
+    const queryParams: Record<string, string | number> = {};
+    if (params?.cursor) queryParams.cursor = params.cursor;
+    if (params?.updatedSince) queryParams.updated_since = params.updatedSince;
+    if (params?.pageSize && params.pageSize > 0) queryParams.page_size = params.pageSize;
     const payload = await this.request(this.contactsPath, {
-      cursor: params?.cursor ?? "",
-      updated_since: params?.updatedSince ?? "",
-      page_size: params?.pageSize ?? 100
+      ...queryParams
     });
     return {
       records: normalizeRecords(payload),
@@ -192,10 +201,12 @@ export class WebconnexApiClient {
   }
 
   async getTransactions(params?: ListParams): Promise<ListResponse> {
+    const queryParams: Record<string, string | number> = {};
+    if (params?.cursor) queryParams.cursor = params.cursor;
+    if (params?.updatedSince) queryParams.updated_since = params.updatedSince;
+    if (params?.pageSize && params.pageSize > 0) queryParams.page_size = params.pageSize;
     const payload = await this.request(this.transactionsPath, {
-      cursor: params?.cursor ?? "",
-      updated_since: params?.updatedSince ?? "",
-      page_size: params?.pageSize ?? 100
+      ...queryParams
     });
     return {
       records: normalizeRecords(payload),

@@ -36,6 +36,10 @@ export class WebconnexSyncService {
       apiKey: resolveApiKey(connection),
       apiKeyReference: connection.api_key_reference,
       authHeaderName: String(config.authHeaderName ?? "apiKey"),
+      staticQueryParams: (config.staticQueryParams as Record<
+        string,
+        string | number | boolean
+      >) ?? { product: "givingfuel.com" },
       timeoutMs: Number(connection.timeout_ms ?? 30000),
       maxRetries: Number(retry.maxRetries ?? 3),
       backoffMs: Number(retry.backoffMs ?? 1000),

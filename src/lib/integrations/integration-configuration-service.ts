@@ -86,10 +86,11 @@ export class IntegrationConfigurationService {
         configuration_json:
           definition.provider_key === "webconnex"
             ? {
-                contactsPath: "/contacts",
-                transactionsPath: "/transactions",
-                testPath: "/health",
-                authHeaderName: "apiKey"
+                contactsPath: "/v2/public/search/customers",
+                transactionsPath: "/v2/public/search/transactions",
+                testPath: "/v2/public/search/customers",
+                authHeaderName: "apiKey",
+                staticQueryParams: { product: "givingfuel.com" }
               }
             : {},
         sync_settings_json:

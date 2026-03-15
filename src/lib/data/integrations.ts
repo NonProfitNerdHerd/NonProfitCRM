@@ -86,10 +86,11 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       retry_settings: { maxRetries: 3, backoffMs: 1000 },
       debug_logging_enabled: false,
       configuration_json: {
-        contactsPath: "/contacts",
-        transactionsPath: "/transactions",
-        testPath: "/health",
-        authHeaderName: "apiKey"
+        contactsPath: "/v2/public/search/customers",
+        transactionsPath: "/v2/public/search/transactions",
+        testPath: "/v2/public/search/customers",
+        authHeaderName: "apiKey",
+        staticQueryParams: { product: "givingfuel.com" }
       },
       sync_settings_json: {
         syncMode: "manual_and_scheduled",
@@ -150,10 +151,11 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
     retry_settings: { maxRetries: 3, backoffMs: 1000 },
     debug_logging_enabled: false,
     configuration_json: {
-      contactsPath: "/contacts",
-      transactionsPath: "/transactions",
-      testPath: "/health",
-      authHeaderName: "apiKey"
+      contactsPath: "/v2/public/search/customers",
+      transactionsPath: "/v2/public/search/transactions",
+      testPath: "/v2/public/search/customers",
+      authHeaderName: "apiKey",
+      staticQueryParams: { product: "givingfuel.com" }
     },
     sync_settings_json: {
       syncMode: "manual_and_scheduled",

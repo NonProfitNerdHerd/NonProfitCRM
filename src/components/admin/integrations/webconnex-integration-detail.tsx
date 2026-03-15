@@ -56,10 +56,15 @@ export function WebconnexIntegrationDetail({
     maxRetries: Number((connection.retry_settings as Record<string, unknown>)?.maxRetries ?? 3),
     backoffMs: Number((connection.retry_settings as Record<string, unknown>)?.backoffMs ?? 1000),
     debugLoggingEnabled: Boolean(connection.debug_logging_enabled ?? false),
-    contactsPath: String(configJson.contactsPath ?? "/contacts"),
-    transactionsPath: String(configJson.transactionsPath ?? "/transactions"),
-    testPath: String(configJson.testPath ?? "/health"),
-    authHeaderName: String(configJson.authHeaderName ?? "apiKey")
+    contactsPath: String(configJson.contactsPath ?? "/v2/public/search/customers"),
+    transactionsPath: String(configJson.transactionsPath ?? "/v2/public/search/transactions"),
+    testPath: String(configJson.testPath ?? "/v2/public/search/customers"),
+    authHeaderName: String(configJson.authHeaderName ?? "apiKey"),
+    product: String(
+      ((configJson.staticQueryParams as Record<string, unknown> | undefined)?.product as
+        | string
+        | undefined) ?? "givingfuel.com"
+    )
   });
 
   const [syncForm, setSyncForm] = useState({
@@ -127,7 +132,10 @@ export function WebconnexIntegrationDetail({
               contactsPath: configForm.contactsPath,
               transactionsPath: configForm.transactionsPath,
               testPath: configForm.testPath,
-              authHeaderName: configForm.authHeaderName || "apiKey"
+              authHeaderName: configForm.authHeaderName || "apiKey",
+              staticQueryParams: {
+                product: configForm.product || "givingfuel.com"
+              }
             }
           })
         }),
@@ -374,6 +382,15 @@ export function WebconnexIntegrationDetail({
                   setConfigForm((prev) => ({ ...prev, authHeaderName: event.target.value }))
                 }
                 placeholder="apiKey"
+              />
+            </Field>
+            <Field label="Product (query param)">
+              <Input
+                value={configForm.product}
+                onChange={(event) =>
+                  setConfigForm((prev) => ({ ...prev, product: event.target.value }))
+                }
+                placeholder="givingfuel.com"
               />
             </Field>
             <Field label="Timeout (ms)">
