@@ -23,6 +23,9 @@ const logService = new IntegrationLogService();
 const jobRunner = new IntegrationJobRunner();
 const retryService = new IntegrationRetryService();
 const webconnexSyncService = new WebconnexSyncService();
+const INTEGRATIONS_API_PAUSED = process.env.INTEGRATIONS_API_PAUSED !== "false";
+const INTEGRATIONS_API_PAUSED_MESSAGE =
+  "Integrations API is temporarily disabled. We will restart this integration implementation from scratch.";
 const INTEGRATIONS_SCHEMA_ERROR_MESSAGE =
   "Integrations schema is not available in this environment yet. Run Supabase migration 202603130021 (and newer) and retry.";
 
@@ -278,7 +281,8 @@ export async function listIntegrationsForAdmin() {
         enabledIntegrations: enabled,
         failedJobs,
         last24hSyncActivity: last24hActivity
-      }
+      },
+      apiPaused: INTEGRATIONS_API_PAUSED
     };
   } catch (error) {
     if (!isMissingIntegrationsSchemaError(error)) throw error;
@@ -303,7 +307,8 @@ export async function listIntegrationsForAdmin() {
         failedJobs: 0,
         last24hSyncActivity: 0
       },
-      schemaWarning: INTEGRATIONS_SCHEMA_ERROR_MESSAGE
+      schemaWarning: INTEGRATIONS_SCHEMA_ERROR_MESSAGE,
+      apiPaused: INTEGRATIONS_API_PAUSED
     };
   }
 }
@@ -357,7 +362,8 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
           (sum, job) => sum + Number(job.records_failed ?? 0),
           0
         )
-      }
+      },
+      apiPaused: INTEGRATIONS_API_PAUSED
     };
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
@@ -415,6 +421,9 @@ export async function updateIntegrationConfiguration(
 
 export async function testIntegrationConnection(integrationKey: string) {
   const context = await requireIntegrationsAdmin();
+  if (INTEGRATIONS_API_PAUSED) {
+    throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
+  }
   try {
     const { connection } = await getDefinitionAndConnection(
       context.organizationId,
@@ -457,6 +466,9 @@ export async function testIntegrationConnection(integrationKey: string) {
 
 export async function runIntegrationSync(integrationKey: string, scope: SyncScope) {
   const context = await requireIntegrationsAdmin();
+  if (INTEGRATIONS_API_PAUSED) {
+    throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
+  }
   try {
     const { definition, connection } = await getDefinitionAndConnection(
       context.organizationId,
@@ -490,6 +502,9 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
 
 export async function retryFailedIntegrationSync(integrationKey: string) {
   const context = await requireIntegrationsAdmin();
+  if (INTEGRATIONS_API_PAUSED) {
+    throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
+  }
   try {
     const { connection } = await getDefinitionAndConnection(
       context.organizationId,
@@ -608,4 +623,8 @@ export async function resolveIntegrationError(integrationKey: string, errorId: s
     }
     throw error;
   }
+}
+
+export function integrationsApiPaused() {
+  return INTEGRATIONS_API_PAUSED;
 }

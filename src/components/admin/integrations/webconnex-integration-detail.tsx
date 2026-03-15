@@ -11,6 +11,7 @@ type DetailPayload = {
   jobs: Array<Record<string, unknown>>;
   errors: Array<Record<string, unknown>>;
   overview: Record<string, unknown>;
+  apiPaused?: boolean;
 };
 
 type TabKey =
@@ -42,6 +43,7 @@ export function WebconnexIntegrationDetail({
   } | null>(null);
 
   const connection = data.connection;
+  const apiPaused = Boolean(data.apiPaused);
   const syncSettings = (connection.sync_settings_json as Record<string, unknown>) ?? {};
   const configJson = (connection.configuration_json as Record<string, unknown>) ?? {};
   const fieldMapping = (connection.field_mapping_json as Record<string, unknown>) ?? {};
@@ -192,6 +194,11 @@ export function WebconnexIntegrationDetail({
     <div className="space-y-4">
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {apiPaused ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Integrations API is temporarily disabled while this integration is restarted from scratch.
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <Tab active={activeTab === "overview"} onClick={() => setActiveTab("overview")}>
@@ -250,7 +257,7 @@ export function WebconnexIntegrationDetail({
             <Button
               type="button"
               variant="secondary"
-              disabled={Boolean(loading)}
+              disabled={Boolean(loading) || apiPaused}
               onClick={() =>
                 void runAction(
                   "test",
@@ -268,7 +275,7 @@ export function WebconnexIntegrationDetail({
             <Button
               type="button"
               variant="secondary"
-              disabled={Boolean(loading)}
+              disabled={Boolean(loading) || apiPaused}
               onClick={() =>
                 void runAction(
                   "contacts",
@@ -286,7 +293,7 @@ export function WebconnexIntegrationDetail({
             <Button
               type="button"
               variant="secondary"
-              disabled={Boolean(loading)}
+              disabled={Boolean(loading) || apiPaused}
               onClick={() =>
                 void runAction(
                   "donations",
@@ -304,7 +311,7 @@ export function WebconnexIntegrationDetail({
             <Button
               type="button"
               variant="secondary"
-              disabled={Boolean(loading)}
+              disabled={Boolean(loading) || apiPaused}
               onClick={() =>
                 void runAction(
                   "all",
@@ -322,7 +329,7 @@ export function WebconnexIntegrationDetail({
             <Button
               type="button"
               variant="secondary"
-              disabled={Boolean(loading)}
+              disabled={Boolean(loading) || apiPaused}
               onClick={() =>
                 void runAction(
                   "retry",
@@ -666,7 +673,7 @@ export function WebconnexIntegrationDetail({
           <Button
             type="button"
             variant="secondary"
-            disabled={Boolean(loading)}
+            disabled={Boolean(loading) || apiPaused}
             onClick={() =>
               void runAction(
                 "retry-all",

@@ -27,10 +27,12 @@ type SummaryCards = {
 
 export function IntegrationsDashboard({
   initialIntegrations,
-  summary
+  summary,
+  apiPaused = false
 }: {
   initialIntegrations: IntegrationRow[];
   summary: SummaryCards;
+  apiPaused?: boolean;
 }) {
   const [rows, setRows] = useState(initialIntegrations);
   const [search, setSearch] = useState("");
@@ -137,6 +139,12 @@ export function IntegrationsDashboard({
       </div>
 
       <section className="rounded-md border border-slate-200 p-4">
+        {apiPaused ? (
+          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Integrations API is temporarily disabled while this integration implementation is being
+            restarted from scratch.
+          </p>
+        ) : null}
         <div className="mb-3 grid gap-3 md:grid-cols-3">
           <Input
             value={search}
@@ -198,7 +206,7 @@ export function IntegrationsDashboard({
                         type="button"
                         variant="secondary"
                         onClick={() => void testConnection(row.integrationKey)}
-                        disabled={Boolean(loadingKey)}
+                        disabled={Boolean(loadingKey) || apiPaused}
                       >
                         {loadingKey === `test-${row.integrationKey}` ? "Testing..." : "Test Connection"}
                       </Button>
@@ -206,7 +214,7 @@ export function IntegrationsDashboard({
                         type="button"
                         variant="secondary"
                         onClick={() => void runSync(row.integrationKey)}
-                        disabled={Boolean(loadingKey)}
+                        disabled={Boolean(loadingKey) || apiPaused}
                       >
                         {loadingKey === `sync-${row.integrationKey}` ? "Syncing..." : "Run Sync"}
                       </Button>

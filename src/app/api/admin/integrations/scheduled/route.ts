@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { IntegrationSchedulerService } from "@/lib/integrations/integration-scheduler-service";
+import { integrationsApiPaused } from "@/lib/data/integrations";
 
 function authorized(request: Request) {
   const expected = process.env.INTEGRATION_SCHEDULER_TOKEN;
@@ -11,6 +12,12 @@ function authorized(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    if (integrationsApiPaused()) {
+      return NextResponse.json(
+        { message: "Integrations API is temporarily disabled." },
+        { status: 503 }
+      );
+    }
     if (!authorized(request)) {
       return NextResponse.json({ message: "Unauthorized scheduler call." }, { status: 401 });
     }

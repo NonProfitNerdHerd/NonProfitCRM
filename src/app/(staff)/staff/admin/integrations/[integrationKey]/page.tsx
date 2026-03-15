@@ -34,6 +34,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         jobs: Array<Record<string, unknown>>;
         errors: Array<Record<string, unknown>>;
         overview: Record<string, unknown>;
+        apiPaused?: boolean;
       }
     | null = null;
   let loadError: string | null = null;
@@ -45,6 +46,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
       jobs: Array<Record<string, unknown>>;
       errors: Array<Record<string, unknown>>;
       overview: Record<string, unknown>;
+      apiPaused?: boolean;
     };
     loadError =
       (detail as { schemaWarning?: string | null })?.schemaWarning ??
@@ -105,7 +107,8 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         totalContactsSynced: 0,
         totalDonationsSynced: 0,
         failedRecordsCount: 0
-      }
+      },
+      apiPaused: true
     };
   }
 
@@ -135,6 +138,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
           jobs: Array<Record<string, unknown>>;
           errors: Array<Record<string, unknown>>;
           overview: Record<string, unknown>;
+          apiPaused?: boolean;
         }}
         initialTab={resolveTab(query.tab)}
       />

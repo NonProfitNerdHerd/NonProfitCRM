@@ -20,12 +20,14 @@ export default async function IntegrationsPage() {
     failedJobs: 0,
     last24hSyncActivity: 0
   };
+  let apiPaused = false;
   let loadError: string | null = null;
 
   try {
     const result = await listIntegrationsForAdmin();
     integrations = result.integrations;
     summary = result.summary;
+    apiPaused = Boolean((result as { apiPaused?: boolean }).apiPaused);
     loadError = (result as { schemaWarning?: string }).schemaWarning ?? null;
   } catch (error) {
     loadError =
@@ -51,6 +53,7 @@ export default async function IntegrationsPage() {
       failedJobs: 0,
       last24hSyncActivity: 0
     };
+    apiPaused = true;
   }
 
   return (
@@ -64,7 +67,11 @@ export default async function IntegrationsPage() {
           {loadError}
         </p>
       ) : null}
-      <IntegrationsDashboard initialIntegrations={integrations} summary={summary} />
+      <IntegrationsDashboard
+        initialIntegrations={integrations}
+        summary={summary}
+        apiPaused={apiPaused}
+      />
     </Card>
   );
 }
