@@ -232,7 +232,7 @@ export class ContactSyncService {
     logService: IntegrationLogService;
   }): Promise<ContactSyncResult> {
     const supabase = await createIntegrationClient();
-    const syncSettings = input.connection.sync_settings_json ?? {};
+    const syncSettings = { ...(input.connection.sync_settings_json ?? {}) } as Record<string, unknown>;
     let cursor: string | null = (syncSettings.contactsCursor as string | null | undefined) ?? null;
     let processed = 0;
     let created = 0;
@@ -355,6 +355,26 @@ export class ContactSyncService {
           ])
         : "";
       cursor = (page.nextCursor ?? fallbackCursor) || cursor;
+      if (cursor && (pagesProcessed % 5 === 0 || !hasMore)) {
+        syncSettings.contactsCursor = cursor;
+        const { error: checkpointError } = await supabase
+          .from("integration_connections")
+          .update({
+            sync_settings_json: syncSettings
+          })
+          .eq("organization_id", input.organizationId)
+          .eq("id", input.connection.id);
+        if (checkpointError) {
+          await input.logService.enqueueError({
+            organizationId: input.organizationId,
+            integrationConnectionId: input.connection.id,
+            jobId: input.job.id,
+            entityType: "integration",
+            payload: { contactsCursor: cursor, pagesProcessed },
+            errorMessage: `Failed to persist contacts cursor checkpoint: ${checkpointError.message}`
+          });
+        }
+      }
       if (!hasMore) break;
       if (!cursor) {
         hasMore = false;
