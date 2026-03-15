@@ -56,7 +56,7 @@ function extractNextCursor(payload: unknown): string | null {
 
 export class WebconnexApiClient {
   // Pull-only integration: Webconnex calls are always GET requests.
-  private readonly requestMethod: "GET" = "GET";
+  private readonly requestMethod = "GET" as const;
   private baseUrl: string;
   private timeoutMs: number;
   private maxRetries: number;
