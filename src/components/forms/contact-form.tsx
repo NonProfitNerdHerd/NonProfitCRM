@@ -70,6 +70,12 @@ export function ContactForm() {
   }, [entityType, organizationName, setValue]);
 
   useEffect(() => {
+    if (webconnexId?.trim() && entityType !== "person") {
+      setValue("entity_type", "person", { shouldValidate: true, shouldDirty: true });
+    }
+  }, [entityType, webconnexId, setValue]);
+
+  useEffect(() => {
     if (webconnexId?.trim() && trackingStatus !== "donor") {
       setValue("tracking_status", "donor", { shouldValidate: true, shouldDirty: true });
     }
@@ -125,6 +131,7 @@ export function ContactForm() {
             <select
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               {...register("entity_type")}
+              disabled={Boolean(webconnexId?.trim())}
             >
               {entityTypeOptions.map((option) => (
                 <option key={option} value={option}>
@@ -360,7 +367,7 @@ export function ContactForm() {
       <section className="rounded-md border border-slate-200 p-3">
         <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
         <div>
-          <label className="mb-1 block text-sm font-medium">WebConnex ID</label>
+          <label className="mb-1 block text-sm font-medium">GivingFuel ID</label>
           <Input
             {...register("webconnex_id")}
             placeholder="If provided, Tracking Status will be forced to Donor"
@@ -385,7 +392,7 @@ export function ContactForm() {
           ? "Person records default to Lead unless marked as Donor or Non-Lead."
           : "Organization records default to Lead. Organization Name is required."}
         {webconnexId?.trim()
-          ? " WebConnex ID detected, so Tracking Status is locked to Donor."
+          ? " GivingFuel ID detected, so Record Type is locked to Person and Tracking Status is locked to Donor."
           : ""}
       </div>
 

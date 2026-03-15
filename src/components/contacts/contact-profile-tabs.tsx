@@ -136,6 +136,14 @@ export function ContactProfileTabs({
   useEffect(() => {
     setContactInfoDraft((prev) => {
       if (!prev.webconnexId.trim()) return prev;
+      if (prev.recordType === "person") return prev;
+      return { ...prev, recordType: "person" };
+    });
+  }, [contactInfoDraft.webconnexId, contactInfoDraft.recordType]);
+
+  useEffect(() => {
+    setContactInfoDraft((prev) => {
+      if (!prev.webconnexId.trim()) return prev;
       if (prev.trackingStatus === "donor") return prev;
       return { ...prev, trackingStatus: "donor" };
     });
@@ -524,7 +532,7 @@ export function ContactProfileTabs({
 
           <section className="rounded-md border border-slate-200 p-3">
             <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
-            <LabeledValue label="WebConnex ID" value={contactInfo.webconnexId} />
+            <LabeledValue label="GivingFuel ID" value={contactInfo.webconnexId} />
           </section>
         </div>
       ) : null}
@@ -747,6 +755,7 @@ export function ContactProfileTabs({
                           recordType: event.target.value
                         }))
                       }
+                      disabled={Boolean(contactInfoDraft.webconnexId.trim())}
                     >
                       {recordTypeOptions.map((option) => (
                         <option key={option} value={option}>
@@ -1099,7 +1108,7 @@ export function ContactProfileTabs({
               <section className="rounded-md border border-slate-200 p-3">
                 <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label="WebConnex ID">
+                  <FormField label="GivingFuel ID">
                     <Input
                       value={contactInfoDraft.webconnexId}
                       onChange={(event) =>

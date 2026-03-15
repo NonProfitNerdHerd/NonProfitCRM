@@ -20,7 +20,8 @@ function isContactExtendedSchemaError(error: unknown) {
   );
 }
 
-function normalizeEntityType(input: ContactInput) {
+function normalizeEntityType(input: ContactInput, webconnexId: string | null) {
+  if (webconnexId) return "person";
   if (input.entity_type === "organization") return "organization";
   return "person";
 }
@@ -185,8 +186,8 @@ export async function getContact(contactId: string) {
 export async function createContact(input: ContactInput) {
   const context = await requireStaffPermission("can_create_contacts");
   const supabase = await createClient();
-  const entityType = normalizeEntityType(input);
   const webconnexId = input.webconnex_id?.trim() || null;
+  const entityType = normalizeEntityType(input, webconnexId);
   const trackingStatus = normalizeTrackingStatus(input, webconnexId);
   const formalLetterName = input.formal_letter_name?.trim()
     ? input.formal_letter_name.trim()
@@ -306,7 +307,7 @@ export async function updateContact(contactId: string, input: ContactInput) {
       : "");
   const incomingWebconnexId = input.webconnex_id?.trim() ?? "";
   const webconnexId = incomingWebconnexId || existingWebconnexId || null;
-  const entityType = normalizeEntityType(input);
+  const entityType = normalizeEntityType(input, webconnexId);
   const trackingStatus = normalizeTrackingStatus(input, webconnexId);
 
   if (existingTrackingStatus === "donor" && trackingStatus !== "donor") {

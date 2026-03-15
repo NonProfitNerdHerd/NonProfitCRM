@@ -81,7 +81,6 @@ export class ContactSyncService {
       "primary_phone",
       "billing.phone"
     ]);
-    const organizationName = readString(input.record, ["organization_name", "organization"]);
     const addressLine1 = readString(input.record, ["address_line_1", "billing.address.street1"]);
     const city = readString(input.record, ["city", "billing.address.city"]);
     const state = readString(input.record, ["state", "billing.address.state"]);
@@ -105,7 +104,8 @@ export class ContactSyncService {
 
     let contactId = (existingRef?.contact_id as string | undefined) ?? null;
     let actionTaken = "updated";
-    const normalizedEntityType = organizationName ? "organization" : "person";
+    const normalizedEntityType = "person";
+    const normalizedOrganizationName = null;
 
     if (!contactId) {
       const allowEmailFallback = Boolean(
@@ -130,7 +130,7 @@ export class ContactSyncService {
           last_name: lastName || "Unknown",
           email: email || null,
           phone: phone || null,
-          organization_name: organizationName || null,
+          organization_name: normalizedOrganizationName,
           entity_type: normalizedEntityType,
           tracking_status: "donor",
           webconnex_id: externalId,
@@ -154,7 +154,7 @@ export class ContactSyncService {
           last_name: lastName || "Unknown",
           email: email || null,
           phone: phone || null,
-          organization_name: organizationName || null,
+          organization_name: normalizedOrganizationName,
           entity_type: normalizedEntityType,
           tracking_status: "donor",
           webconnex_id: externalId,
