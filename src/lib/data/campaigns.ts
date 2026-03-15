@@ -175,6 +175,77 @@ export async function createCampaign(input: CampaignInput) {
   return data.id;
 }
 
+export async function updateCampaign(campaignId: string, input: CampaignInput) {
+  const context = await requireSessionContext();
+  const supabase = await createClient();
+  const { data: allowed, error: allowedError } = await supabase.rpc("can_create_campaigns", {
+    org_id: context.organizationId
+  });
+  if (allowedError) throw allowedError;
+  if (!allowed) throw new Error("You are not allowed to edit campaigns.");
+
+  ensureDateOrder(input.startDate, input.endDate);
+
+  const [{ data: campaign, error: campaignError }, { data: childCampaigns, error: childError }] =
+    await Promise.all([
+      supabase
+        .from("campaigns")
+        .select("id, name")
+        .eq("organization_id", context.organizationId)
+        .eq("id", campaignId)
+        .maybeSingle(),
+      supabase
+        .from("sub_campaigns")
+        .select("id, name, start_date, end_date")
+        .eq("organization_id", context.organizationId)
+        .eq("campaign_id", campaignId)
+    ]);
+  if (campaignError) throw campaignError;
+  if (childError) throw childError;
+  if (!campaign) throw new Error("Campaign not found.");
+
+  for (const child of childCampaigns ?? []) {
+    const childStart = typeof child.start_date === "string" ? child.start_date : "";
+    const childEnd = typeof child.end_date === "string" ? child.end_date : "";
+    if (!childStart || !childEnd) {
+      throw new Error(
+        `Child campaign "${String(child.name ?? "Unknown")}" is missing dates. Please update child campaign dates before editing parent date range.`
+      );
+    }
+    if (input.startDate && childStart < input.startDate) {
+      throw new Error(
+        `Child campaign "${String(child.name ?? "Unknown")}" starts before the parent campaign start date.`
+      );
+    }
+    if (input.endDate && childEnd > input.endDate) {
+      throw new Error(
+        `Child campaign "${String(child.name ?? "Unknown")}" ends after the parent campaign end date.`
+      );
+    }
+  }
+
+  const { error } = await supabase
+    .from("campaigns")
+    .update({
+      name: input.name,
+      description: input.description ?? null,
+      status: input.status ?? "Active",
+      start_date: input.startDate ?? null,
+      end_date: input.endDate ?? null,
+      updated_by: context.userId
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("id", campaignId);
+  if (error) throw error;
+
+  await recordActivity({
+    entityType: "campaign",
+    entityId: campaignId,
+    actionType: "updated",
+    actionSummary: `Updated campaign ${input.name}`
+  });
+}
+
 export async function createChildCampaign(parentCampaignId: string, input: CampaignInput) {
   const context = await requireSessionContext();
   const supabase = await createClient();

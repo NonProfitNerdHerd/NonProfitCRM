@@ -30,6 +30,14 @@ type ChildCampaignDraft = {
   endDate: string;
 };
 
+type ParentCampaignDraft = {
+  name: string;
+  description: string;
+  status: "Active" | "Inactive";
+  startDate: string;
+  endDate: string;
+};
+
 export function CampaignDetailPanel({
   campaignId,
   initialData
@@ -40,6 +48,7 @@ export function CampaignDetailPanel({
   const [data, setData] = useState(initialData);
   const [showCreateChild, setShowCreateChild] = useState(false);
   const [editingChild, setEditingChild] = useState<ChildCampaignDraft | null>(null);
+  const [editingParent, setEditingParent] = useState<ParentCampaignDraft | null>(null);
   const [activeTab, setActiveTab] = useState<"children" | "donations">("children");
   const [expandedChildDonationId, setExpandedChildDonationId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -88,6 +97,16 @@ export function CampaignDetailPanel({
     if (!response.ok) throw new Error(payload?.message ?? "Unable to update child campaign.");
   }
 
+  async function updateParent(values: CampaignFormPayload) {
+    const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(values)
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.message ?? "Unable to update parent campaign.");
+  }
+
   if (!campaign) return null;
 
   return (
@@ -97,6 +116,23 @@ export function CampaignDetailPanel({
 
       <Card>
         <CardHeader title={campaign.name} subtitle={campaign.description ?? "No description"} />
+        <div className="mb-3 flex justify-end">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              setEditingParent({
+                name: campaign.name,
+                description: campaign.description ?? "",
+                status: campaign.status,
+                startDate: campaign.start_date ?? "",
+                endDate: campaign.end_date ?? ""
+              })
+            }
+          >
+            Edit Campaign
+          </Button>
+        </div>
         <div className="grid gap-3 text-sm md:grid-cols-4">
           <div>
             <p className="text-slate-500">Status</p>
@@ -381,6 +417,33 @@ export function CampaignDetailPanel({
                 startDate: campaign.start_date,
                 endDate: campaign.end_date
               }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {editingParent ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="text-base font-semibold text-slate-900">Edit Parent Campaign</h4>
+              <Button type="button" variant="secondary" onClick={() => setEditingParent(null)}>
+                Close
+              </Button>
+            </div>
+            <CampaignForm
+              onCancel={() => setEditingParent(null)}
+              onSubmitCampaign={async (values) => {
+                await updateParent(values);
+              }}
+              onSuccess={async () => {
+                setEditingParent(null);
+                await refreshCampaign();
+                setMessage("Parent campaign updated.");
+                setError(null);
+              }}
+              initialValues={editingParent}
+              submitLabel="Save Campaign"
             />
           </div>
         </div>
