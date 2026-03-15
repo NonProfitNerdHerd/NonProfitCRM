@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
@@ -14,6 +14,22 @@ type DetailPayload = {
   apiPaused?: boolean;
 };
 
+type SyncedContact = {
+  externalRecordId: string;
+  lastSyncedDate: string | null;
+  sourceSystem: string;
+  contact: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    city: string;
+    state: string;
+    updatedAt: string | null;
+  };
+};
+
 export function GivingFuelContactsSetup({
   integrationKey,
   initialData
@@ -23,9 +39,13 @@ export function GivingFuelContactsSetup({
 }) {
   const [data, setData] = useState(initialData);
   const [apiKey, setApiKey] = useState("");
-  const [loading, setLoading] = useState<"test" | "save" | null>(null);
+  const [loading, setLoading] = useState<"test" | "save" | "sync" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [contactsLimit, setContactsLimit] = useState<20 | 50 | 100>(20);
+  const [syncedContacts, setSyncedContacts] = useState<SyncedContact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
 
   const apiPaused = Boolean(data.apiPaused);
   const config = (data.connection.configuration_json as Record<string, unknown>) ?? {};
@@ -38,8 +58,27 @@ export function GivingFuelContactsSetup({
     setData(payload as DetailPayload);
   }
 
+  async function loadSyncedContacts(limit: 20 | 50 | 100 = contactsLimit) {
+    setContactsLoading(true);
+    setContactsError(null);
+    try {
+      const response = await fetch(
+        `/api/admin/integrations/${encodeURIComponent(integrationKey)}/contacts?limit=${String(limit)}`
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message ?? "Unable to load synced contacts.");
+      }
+      setSyncedContacts((payload?.contacts ?? []) as SyncedContact[]);
+    } catch (loadError) {
+      setContactsError(loadError instanceof Error ? loadError.message : "Unable to load synced contacts.");
+    } finally {
+      setContactsLoading(false);
+    }
+  }
+
   async function runAction(
-    action: "test" | "save",
+    action: "test" | "save" | "sync",
     request: () => Promise<Response>,
     successMessage: string
   ) {
@@ -53,6 +92,7 @@ export function GivingFuelContactsSetup({
         throw new Error(payload?.message ?? "Request failed.");
       }
       await refresh();
+      await loadSyncedContacts();
       setMessage(payload?.message ?? successMessage);
       if (action === "save") setApiKey("");
     } catch (actionError) {
@@ -65,6 +105,11 @@ export function GivingFuelContactsSetup({
   const latestContactJob = useMemo(() => {
     return data.jobs.find((job) => String(job.sync_scope ?? "") === "contacts") ?? null;
   }, [data.jobs]);
+
+  useEffect(() => {
+    void loadSyncedContacts(contactsLimit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [integrationKey, contactsLimit]);
 
   return (
     <div className="space-y-4">
@@ -139,6 +184,24 @@ export function GivingFuelContactsSetup({
           >
             {loading === "save" ? "Saving..." : "Save / Connect"}
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={apiPaused || Boolean(loading)}
+            onClick={() =>
+              void runAction(
+                "sync",
+                () =>
+                  fetch(
+                    `/api/admin/integrations/${encodeURIComponent(integrationKey)}/sync/contacts`,
+                    { method: "POST" }
+                  ),
+                "Contacts sync completed."
+              )
+            }
+          >
+            {loading === "sync" ? "Syncing..." : "Run Contacts Sync"}
+          </Button>
         </div>
       </section>
 
@@ -174,6 +237,79 @@ export function GivingFuelContactsSetup({
             label="Last Contacts Job Status"
             value={latestContactJob ? String(latestContactJob.status ?? "-") : "Never run"}
           />
+        </div>
+      </section>
+
+      <section className="rounded-md border border-slate-200 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-slate-900">Recently Synced Contacts</h4>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              Show
+            </label>
+            <select
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              value={contactsLimit}
+              onChange={(event) =>
+                setContactsLimit(Number(event.target.value) as 20 | 50 | 100)
+              }
+              disabled={contactsLoading}
+            >
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void loadSyncedContacts()}
+              disabled={contactsLoading}
+            >
+              {contactsLoading ? "Loading..." : "Refresh"}
+            </Button>
+          </div>
+        </div>
+
+        {contactsError ? <p className="mb-2 text-sm text-red-700">{contactsError}</p> : null}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-600">
+                <th className="py-2">Name</th>
+                <th className="py-2">Email</th>
+                <th className="py-2">Phone</th>
+                <th className="py-2">City</th>
+                <th className="py-2">State</th>
+                <th className="py-2">External ID</th>
+                <th className="py-2">Source</th>
+                <th className="py-2">Last Synced</th>
+              </tr>
+            </thead>
+            <tbody>
+              {syncedContacts.map((row) => (
+                <tr key={`${row.externalRecordId}-${row.contact.id}`} className="border-b border-slate-100">
+                  <td className="py-2">
+                    {`${row.contact.firstName} ${row.contact.lastName}`.trim() || "-"}
+                  </td>
+                  <td className="py-2">{row.contact.email || "-"}</td>
+                  <td className="py-2">{row.contact.phone || "-"}</td>
+                  <td className="py-2">{row.contact.city || "-"}</td>
+                  <td className="py-2">{row.contact.state || "-"}</td>
+                  <td className="py-2">{row.externalRecordId || "-"}</td>
+                  <td className="py-2">{row.sourceSystem || "-"}</td>
+                  <td className="py-2">{formatDate(row.lastSyncedDate)}</td>
+                </tr>
+              ))}
+              {!contactsLoading && syncedContacts.length === 0 ? (
+                <tr>
+                  <td className="py-3 text-slate-500" colSpan={8}>
+                    No synced contacts available yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>

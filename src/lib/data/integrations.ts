@@ -37,6 +37,22 @@ const INTEGRATIONS_API_PAUSED_MESSAGE =
 const INTEGRATIONS_SCHEMA_ERROR_MESSAGE =
   "Integrations schema is not available in this environment yet. Run Supabase migration 202603130021 (and newer) and retry.";
 
+export type RecentSyncedContactRow = {
+  externalRecordId: string;
+  lastSyncedDate: string | null;
+  sourceSystem: string;
+  contact: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    city: string;
+    state: string;
+    updatedAt: string | null;
+  };
+};
+
 function isMissingIntegrationsSchemaError(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { code?: string; message?: string; details?: string };
@@ -695,4 +711,72 @@ export async function resolveIntegrationError(integrationKey: string, errorId: s
 
 export function integrationsApiPaused() {
   return INTEGRATIONS_API_PAUSED;
+}
+
+export async function listRecentSyncedContactsForIntegration(
+  integrationKey: string,
+  limit = 20
+): Promise<RecentSyncedContactRow[]> {
+  const context = await requireIntegrationsAdmin();
+  const boundedLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 100) : 20;
+  try {
+    const { connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    const supabase = await createIntegrationClient();
+    const { data, error } = await supabase
+      .from("contact_external_references")
+      .select(
+        "external_record_id, source_system, last_synced_date, contacts(id, first_name, last_name, email, phone, city, state, updated_at)"
+      )
+      .eq("organization_id", context.organizationId)
+      .in(
+        "source_system",
+        integrationKey === GIVINGFUEL_INTEGRATION_KEY
+          ? ["givingfuel", "webconnex"]
+          : [integrationKey]
+      )
+      .order("last_synced_date", { ascending: false })
+      .limit(boundedLimit);
+    if (error) {
+      // Backward compatibility: older rows may have webconnex source_system.
+      if (
+        integrationKey === GIVINGFUEL_INTEGRATION_KEY &&
+        (error.code === "PGRST116" || error.code === "PGRST205")
+      ) {
+        return [];
+      }
+      throw error;
+    }
+
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    return rows.map((row) => {
+      const contact = (Array.isArray(row.contacts) ? row.contacts[0] : row.contacts) as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      return {
+        externalRecordId: String(row.external_record_id ?? ""),
+        lastSyncedDate:
+          typeof row.last_synced_date === "string" ? row.last_synced_date : null,
+        sourceSystem: String(row.source_system ?? ""),
+        contact: {
+          id: String(contact?.id ?? ""),
+          firstName: String(contact?.first_name ?? ""),
+          lastName: String(contact?.last_name ?? ""),
+          email: String(contact?.email ?? ""),
+          phone: String(contact?.phone ?? ""),
+          city: String(contact?.city ?? ""),
+          state: String(contact?.state ?? ""),
+          updatedAt:
+            typeof contact?.updated_at === "string" ? String(contact.updated_at) : null
+        }
+      };
+    });
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) return [];
+    throw error;
+  }
 }
