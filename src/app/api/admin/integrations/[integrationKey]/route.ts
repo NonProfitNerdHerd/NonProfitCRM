@@ -20,7 +20,8 @@ const configurationSchema = z.object({
   debugLoggingEnabled: z.boolean().optional(),
   configuration: z.record(z.string(), z.unknown()).optional(),
   syncSettings: z.record(z.string(), z.unknown()).optional(),
-  fieldMapping: z.record(z.string(), z.unknown()).optional()
+  fieldMapping: z.record(z.string(), z.unknown()).optional(),
+  apiKey: z.string().optional()
 });
 
 export async function GET(_request: Request, { params }: RouteProps) {

@@ -2,31 +2,18 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { getIntegrationDetailForAdmin } from "@/lib/data/integrations";
-import { WebconnexIntegrationDetail } from "@/components/admin/integrations/webconnex-integration-detail";
+import { GivingFuelContactsSetup } from "@/components/admin/integrations/givingfuel-contacts-setup";
 
 type RouteProps = {
   params: Promise<{ integrationKey: string }>;
   searchParams?: Promise<{ tab?: string }>;
 };
 
-function resolveTab(tab: string | undefined) {
-  if (!tab) return "overview";
-  if (
-    tab === "overview" ||
-    tab === "configuration" ||
-    tab === "sync" ||
-    tab === "mapping" ||
-    tab === "history" ||
-    tab === "errors"
-  ) {
-    return tab;
-  }
-  return "overview";
-}
-
 export default async function IntegrationDetailPage({ params, searchParams }: RouteProps) {
   const { integrationKey } = await params;
-  const query = searchParams ? await searchParams : {};
+  if (searchParams) {
+    await searchParams;
+  }
   let detail:
     | {
         definition: Record<string, unknown>;
@@ -123,14 +110,14 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
       </div>
       <CardHeader
         title={`${String(detail?.connection?.name ?? detail?.definition?.name ?? integrationKey)} Integration`}
-        subtitle="Connection configuration, sync settings, history, and error queue"
+        subtitle="GivingFuel contacts API key setup and contacts synchronization"
       />
       {loadError ? (
         <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           {loadError}
         </p>
       ) : null}
-      <WebconnexIntegrationDetail
+      <GivingFuelContactsSetup
         integrationKey={integrationKey}
         initialData={detail as {
           definition: Record<string, unknown>;
@@ -140,7 +127,6 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
           overview: Record<string, unknown>;
           apiPaused?: boolean;
         }}
-        initialTab={resolveTab(query.tab)}
       />
     </Card>
   );

@@ -23,7 +23,13 @@ export async function POST(_request: Request, { params }: RouteProps) {
           "Contact sync completed with row-level errors. Check Error Queue and Sync History."
       });
     }
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      message:
+        result.recordsProcessed === 0
+          ? "No contact records were returned from GivingFuel."
+          : "Contacts sync completed successfully."
+    });
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Failed to run contact sync" },

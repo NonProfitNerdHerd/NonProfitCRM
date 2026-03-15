@@ -16,6 +16,14 @@ import { IntegrationRetryService } from "@/lib/integrations/integration-retry-se
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
 import { createIntegrationClient } from "@/lib/integrations/db";
 import { logAuditEvent } from "@/lib/data/audit";
+import {
+  GIVINGFUEL_API_HEADER_NAME,
+  GIVINGFUEL_BASE_URL,
+  GIVINGFUEL_CUSTOMERS_PATH,
+  GIVINGFUEL_INTEGRATION_KEY,
+  GIVINGFUEL_INTEGRATION_NAME,
+  GIVINGFUEL_PRODUCT_VALUE
+} from "@/lib/integrations/givingfuel-contacts-config";
 
 const registryService = new IntegrationRegistryService();
 const configurationService = new IntegrationConfigurationService();
@@ -23,7 +31,7 @@ const logService = new IntegrationLogService();
 const jobRunner = new IntegrationJobRunner();
 const retryService = new IntegrationRetryService();
 const webconnexSyncService = new WebconnexSyncService();
-const INTEGRATIONS_API_PAUSED = process.env.INTEGRATIONS_API_PAUSED !== "false";
+const INTEGRATIONS_API_PAUSED = process.env.INTEGRATIONS_API_PAUSED === "true";
 const INTEGRATIONS_API_PAUSED_MESSAGE =
   "Integrations API is temporarily disabled. We will restart this integration implementation from scratch.";
 const INTEGRATIONS_SCHEMA_ERROR_MESSAGE =
@@ -53,19 +61,19 @@ function isMissingIntegrationsSchemaError(error: unknown) {
 
 function createFallbackDetail(integrationKey: string, organizationId: string) {
   const now = new Date().toISOString();
-  const name = integrationKey === "webconnex" ? "Giving Fuel" : integrationKey;
-  const fallbackWebconnexBaseUrl =
-    process.env.WEBCONNEX_BASE_URL ?? process.env.WEBCONNEX_API_BASE_URL ?? "";
+  const name =
+    integrationKey === GIVINGFUEL_INTEGRATION_KEY ? GIVINGFUEL_INTEGRATION_NAME : integrationKey;
+  const fallbackWebconnexBaseUrl = GIVINGFUEL_BASE_URL;
   return {
     definition: {
       id: `fallback-${integrationKey}`,
       name,
       provider_key: integrationKey,
       description:
-        integrationKey === "webconnex"
-          ? "Giving Fuel (Webconnex) API synchronization for contacts and donations/transactions."
+        integrationKey === GIVINGFUEL_INTEGRATION_KEY
+          ? "GivingFuel Contacts API sync from Webconnex v2 public customers endpoint."
           : "Integration metadata unavailable until migrations are applied.",
-      category: "donations",
+      category: "contacts",
       is_active: true,
       supports_manual_sync: true,
       supports_scheduled_sync: true,
@@ -80,7 +88,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       name,
       base_url: fallbackWebconnexBaseUrl,
       auth_type: "api_key_header",
-      api_key_reference: "WEBCONNEX_API_KEY",
+      api_key_reference: null,
       is_enabled: false,
       connection_status: "not_tested",
       last_connection_test_date: null,
@@ -89,26 +97,25 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       retry_settings: { maxRetries: 3, backoffMs: 1000 },
       debug_logging_enabled: false,
       configuration_json: {
-        contactsPath: "/v2/public/search/customers",
-        transactionsPath: "/v2/public/search/transactions",
-        testPath: "/v2/public/search/customers",
-        authHeaderName: "apiKey",
-        staticQueryParams: { product: "givingfuel.com" }
+        contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+        testPath: GIVINGFUEL_CUSTOMERS_PATH,
+        authHeaderName: GIVINGFUEL_API_HEADER_NAME,
+        staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
+        apiKeyConfigured: false
       },
       sync_settings_json: {
         syncMode: "manual_and_scheduled",
         scheduleFrequency: "daily",
         contactSyncEnabled: true,
-        donationSyncEnabled: true,
-        fullSyncEnabled: true,
+        donationSyncEnabled: false,
+        fullSyncEnabled: false,
         incrementalSyncEnabled: true,
         fallbackContactMatch: "email_if_configured",
         initialImportStartDate: null,
         lastSuccessfulSyncDate: null
       },
       field_mapping_json: {
-        contacts: {},
-        donations: {}
+        contacts: {}
       },
       created_by: null,
       updated_by: null,
@@ -136,16 +143,15 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
 
 function buildSchemaFreeWebconnexConnection(organizationId: string): IntegrationConnection {
   const now = new Date().toISOString();
-  const fallbackWebconnexBaseUrl =
-    process.env.WEBCONNEX_BASE_URL ?? process.env.WEBCONNEX_API_BASE_URL ?? "";
+  const fallbackWebconnexBaseUrl = GIVINGFUEL_BASE_URL;
   return {
     id: "schema-free-webconnex-connection",
     organization_id: organizationId,
     integration_definition_id: "schema-free-webconnex-definition",
-    name: "Giving Fuel",
+    name: GIVINGFUEL_INTEGRATION_NAME,
     base_url: fallbackWebconnexBaseUrl,
     auth_type: "api_key_header",
-    api_key_reference: "WEBCONNEX_API_KEY",
+    api_key_reference: null,
     is_enabled: true,
     connection_status: "not_tested",
     last_connection_test_date: null,
@@ -154,26 +160,40 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
     retry_settings: { maxRetries: 3, backoffMs: 1000 },
     debug_logging_enabled: false,
     configuration_json: {
-      contactsPath: "/v2/public/search/customers",
-      transactionsPath: "/v2/public/search/transactions",
-      testPath: "/v2/public/search/customers",
-      authHeaderName: "apiKey",
-      staticQueryParams: { product: "givingfuel.com" }
+      contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+      testPath: GIVINGFUEL_CUSTOMERS_PATH,
+      authHeaderName: GIVINGFUEL_API_HEADER_NAME,
+      staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
+      apiKeyConfigured: false
     },
     sync_settings_json: {
       syncMode: "manual_and_scheduled",
       scheduleFrequency: "daily",
       contactSyncEnabled: true,
-      donationSyncEnabled: true,
-      fullSyncEnabled: true,
+      donationSyncEnabled: false,
+      fullSyncEnabled: false,
       incrementalSyncEnabled: true,
       fallbackContactMatch: "email_if_configured"
     },
-    field_mapping_json: { contacts: {}, donations: {} },
+    field_mapping_json: { contacts: {} },
     created_by: null,
     updated_by: null,
     created_at: now,
     updated_at: now
+  };
+}
+
+function sanitizeConnectionForUi(connection: IntegrationConnection): IntegrationConnection {
+  const config = { ...(connection.configuration_json ?? {}) } as Record<string, unknown>;
+  const hasApiKey =
+    Boolean(config.encryptedApiKey) ||
+    Boolean(connection.api_key_reference) ||
+    Boolean(config.apiKeyConfigured);
+  delete config.encryptedApiKey;
+  config.apiKeyConfigured = hasApiKey;
+  return {
+    ...connection,
+    configuration_json: config
   };
 }
 
@@ -245,10 +265,11 @@ export async function listIntegrationsForAdmin() {
         context.userId,
         definition
       );
+      const safeConnection = sanitizeConnectionForUi(connection);
       const jobs = await logService.listJobs(context.organizationId, connection.id);
       rows.push({
         definition,
-        connection,
+        connection: safeConnection,
         lastJob: jobs[0] ?? null
       });
     }
@@ -266,8 +287,8 @@ export async function listIntegrationsForAdmin() {
         integrationKey: row.definition.provider_key,
         name: row.connection?.name || row.definition.name,
         providerType:
-          row.definition.provider_key === "webconnex"
-            ? "Webconnex Product"
+          row.definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
+            ? "Contacts"
             : row.definition.category,
         description: row.definition.description,
         status: row.connection?.is_enabled ? "Enabled" : "Disabled",
@@ -290,8 +311,8 @@ export async function listIntegrationsForAdmin() {
       integrations: [
         {
           integrationKey: "webconnex",
-          name: "Giving Fuel",
-          providerType: "Webconnex Product",
+          name: GIVINGFUEL_INTEGRATION_NAME,
+          providerType: "Contacts",
           description:
             "Webconnex API synchronization is available after migration 202603130021 is applied.",
           status: "Disabled",
@@ -321,6 +342,7 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
       context.userId,
       integrationKey
     );
+    const safeConnection = sanitizeConnectionForUi(connection);
     const jobs = await logService.listJobs(context.organizationId, connection.id);
     const errors = await logService.listErrors(context.organizationId, connection.id);
 
@@ -331,14 +353,14 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
 
     return {
       definition,
-      connection,
+      connection: safeConnection,
       jobs,
       errors,
       overview: {
-        integrationName: connection.name || definition.name,
+        integrationName: safeConnection.name || definition.name,
         description: definition.description,
-        currentStatus: connection.is_enabled ? "Enabled" : "Disabled",
-        connectionStatus: connection.connection_status,
+        currentStatus: safeConnection.is_enabled ? "Enabled" : "Disabled",
+        connectionStatus: safeConnection.connection_status,
         lastSuccessfulSync: lastSuccess?.completed_date ?? null,
         lastFailedSync: lastFailure?.completed_date ?? null,
         lastSyncDurationMs: jobs[0]?.duration_ms ?? null,
@@ -390,17 +412,53 @@ export async function updateIntegrationConfiguration(
     configuration?: Record<string, unknown>;
     syncSettings?: Record<string, unknown>;
     fieldMapping?: Record<string, unknown>;
+    apiKey?: string;
   }
 ) {
   const context = await requireIntegrationsAdmin();
   try {
     const definition = await registryService.getDefinition(integrationKey);
     if (!definition) throw new Error("Integration not found.");
+    if (integrationKey === GIVINGFUEL_INTEGRATION_KEY) {
+      const existing = await configurationService.getConnection(context.organizationId, definition);
+      const existingConfig = (existing?.configuration_json ?? {}) as Record<string, unknown>;
+      const existingHasApiKey =
+        Boolean(existingConfig.encryptedApiKey) ||
+        Boolean(existing?.api_key_reference) ||
+        Boolean(existingConfig.apiKeyConfigured);
+      const providedApiKey = payload.apiKey?.trim();
+      if (!providedApiKey && !existingHasApiKey && payload.isEnabled !== false) {
+        throw new Error("API key is required before connecting GivingFuel Contacts.");
+      }
+    }
+    const normalizedPayload =
+      integrationKey === GIVINGFUEL_INTEGRATION_KEY
+        ? {
+            ...payload,
+            name: payload.name ?? GIVINGFUEL_INTEGRATION_NAME,
+            baseUrl: GIVINGFUEL_BASE_URL,
+            authType: "api_key_header",
+            configuration: {
+              ...(payload.configuration ?? {}),
+              contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+              testPath: GIVINGFUEL_CUSTOMERS_PATH,
+              authHeaderName: GIVINGFUEL_API_HEADER_NAME,
+              staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
+              defaultLimit: 100
+            },
+            syncSettings: {
+              ...(payload.syncSettings ?? {}),
+              contactSyncEnabled: true,
+              donationSyncEnabled: false,
+              fullSyncEnabled: false
+            }
+          }
+        : payload;
     const connection = await configurationService.upsertConfiguration({
       organizationId: context.organizationId,
       userId: context.userId,
       definition,
-      payload
+      payload: normalizedPayload
     });
     await logAuditEvent({
       organizationId: context.organizationId,
@@ -410,7 +468,7 @@ export async function updateIntegrationConfiguration(
       targetEntityId: connection.id,
       metadata: { integrationKey }
     });
-    return connection;
+    return sanitizeConnectionForUi(connection);
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
       throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
@@ -419,7 +477,10 @@ export async function updateIntegrationConfiguration(
   }
 }
 
-export async function testIntegrationConnection(integrationKey: string) {
+export async function testIntegrationConnection(
+  integrationKey: string,
+  apiKeyOverride?: string
+) {
   const context = await requireIntegrationsAdmin();
   if (INTEGRATIONS_API_PAUSED) {
     throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
@@ -430,10 +491,12 @@ export async function testIntegrationConnection(integrationKey: string) {
       context.userId,
       integrationKey
     );
-    if (integrationKey !== "webconnex") {
+    if (integrationKey !== GIVINGFUEL_INTEGRATION_KEY) {
       return { ok: false, message: `No test connector implemented for ${integrationKey}.` };
     }
-    const result = await webconnexSyncService.testConnection(connection);
+    const result = await webconnexSyncService.testConnection(connection, {
+      apiKeyOverride: apiKeyOverride?.trim() || undefined
+    });
     const supabase = await createIntegrationClient();
     await supabase
       .from("integration_connections")
@@ -448,11 +511,13 @@ export async function testIntegrationConnection(integrationKey: string) {
     return result;
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
-      if (integrationKey !== "webconnex") {
+      if (integrationKey !== GIVINGFUEL_INTEGRATION_KEY) {
         throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
       }
       const schemaFreeConnection = buildSchemaFreeWebconnexConnection(context.organizationId);
-      const result = await webconnexSyncService.testConnection(schemaFreeConnection);
+      const result = await webconnexSyncService.testConnection(schemaFreeConnection, {
+        apiKeyOverride: apiKeyOverride?.trim() || undefined
+      });
       return {
         ...result,
         message: result.ok
@@ -468,6 +533,9 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
   const context = await requireIntegrationsAdmin();
   if (INTEGRATIONS_API_PAUSED) {
     throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
+  }
+  if (integrationKey === GIVINGFUEL_INTEGRATION_KEY && scope !== "contacts") {
+    throw new Error("GivingFuel Contacts integration currently supports contacts sync only.");
   }
   try {
     const { definition, connection } = await getDefinitionAndConnection(

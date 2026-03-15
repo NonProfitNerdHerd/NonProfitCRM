@@ -11,17 +11,18 @@ type WebconnexClientConfig = {
   contactsPath?: string;
   transactionsPath?: string;
   testPath?: string;
+  defaultLimit?: number;
 };
 
 type ListParams = {
-  cursor?: string | null;
-  updatedSince?: string | null;
-  pageSize?: number;
+  startingAfter?: string | null;
+  limit?: number;
 };
 
 type ListResponse = {
   records: Array<Record<string, unknown>>;
   nextCursor: string | null;
+  hasMore: boolean;
 };
 
 function wait(ms: number) {
@@ -36,7 +37,13 @@ function normalizeRecords(payload: unknown): Array<Record<string, unknown>> {
   }
   if (!payload || typeof payload !== "object") return [];
   const container = payload as Record<string, unknown>;
-  const candidates = [container.records, container.items, container.data];
+  const candidates = [
+    container.records,
+    container.items,
+    container.data,
+    container.customers,
+    container.results
+  ];
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) {
       return candidate as Array<Record<string, unknown>>;
@@ -48,11 +55,36 @@ function normalizeRecords(payload: unknown): Array<Record<string, unknown>> {
 function extractNextCursor(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
   const container = payload as Record<string, unknown>;
-  const direct = container.next_cursor ?? container.nextCursor ?? container.cursor;
+  const direct =
+    container.next_cursor ??
+    container.nextCursor ??
+    container.cursor ??
+    container.startingAfter ??
+    container.nextStartingAfter;
   if (typeof direct === "string" && direct.trim()) return direct;
   const pagination = container.pagination as Record<string, unknown> | undefined;
-  const nested = pagination?.next_cursor ?? pagination?.nextCursor;
+  const nested =
+    pagination?.next_cursor ??
+    pagination?.nextCursor ??
+    pagination?.startingAfter ??
+    pagination?.nextStartingAfter;
   return typeof nested === "string" && nested.trim() ? nested : null;
+}
+
+function extractHasMore(payload: unknown) {
+  if (!payload || typeof payload !== "object") return false;
+  const container = payload as Record<string, unknown>;
+  const direct = container.hasMore ?? container.has_more;
+  if (typeof direct === "boolean") return direct;
+  const pagination = container.pagination as Record<string, unknown> | undefined;
+  if (typeof pagination?.hasMore === "boolean") return pagination.hasMore;
+  if (typeof pagination?.has_more === "boolean") return Boolean(pagination.has_more);
+  return false;
+}
+
+function recordStableId(record: Record<string, unknown>) {
+  const candidate = record.id ?? record.customerId ?? record.customer_id;
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : "";
 }
 
 export class WebconnexApiClient {
@@ -68,6 +100,7 @@ export class WebconnexApiClient {
   private contactsPath: string;
   private transactionsPath: string;
   private testPath: string;
+  private defaultLimit: number;
   private apiKey?: string;
   private apiKeyReference?: string | null;
 
@@ -82,6 +115,7 @@ export class WebconnexApiClient {
     this.contactsPath = config.contactsPath ?? "/contacts";
     this.transactionsPath = config.transactionsPath ?? "/transactions";
     this.testPath = config.testPath ?? "/health";
+    this.defaultLimit = config.defaultLimit ?? 100;
     this.apiKey = config.apiKey;
     this.apiKeyReference = config.apiKeyReference ?? null;
   }
@@ -167,7 +201,7 @@ export class WebconnexApiClient {
     try {
       await this.request(this.testPath);
       try {
-        await this.getContacts({ pageSize: 1 });
+        await this.getContacts({ limit: 1 });
       } catch (contactsError) {
         return {
           ok: false,
@@ -188,29 +222,43 @@ export class WebconnexApiClient {
 
   async getContacts(params?: ListParams): Promise<ListResponse> {
     const queryParams: Record<string, string | number> = {};
-    if (params?.cursor) queryParams.cursor = params.cursor;
-    if (params?.updatedSince) queryParams.updated_since = params.updatedSince;
-    if (params?.pageSize && params.pageSize > 0) queryParams.page_size = params.pageSize;
+    const limit =
+      typeof params?.limit === "number" && params.limit > 0 ? params.limit : this.defaultLimit;
+    queryParams.limit = limit;
+    if (params?.startingAfter) queryParams.startingAfter = params.startingAfter;
     const payload = await this.request(this.contactsPath, {
       ...queryParams
     });
+    const records = normalizeRecords(payload);
+    const extractedCursor = extractNextCursor(payload);
+    const hasMore = extractHasMore(payload);
+    const fallbackCursor =
+      records.length > 0 ? recordStableId(records[records.length - 1] as Record<string, unknown>) : "";
     return {
-      records: normalizeRecords(payload),
-      nextCursor: extractNextCursor(payload)
+      records,
+      nextCursor: extractedCursor || (hasMore ? fallbackCursor : null),
+      hasMore
     };
   }
 
   async getTransactions(params?: ListParams): Promise<ListResponse> {
     const queryParams: Record<string, string | number> = {};
-    if (params?.cursor) queryParams.cursor = params.cursor;
-    if (params?.updatedSince) queryParams.updated_since = params.updatedSince;
-    if (params?.pageSize && params.pageSize > 0) queryParams.page_size = params.pageSize;
+    const limit =
+      typeof params?.limit === "number" && params.limit > 0 ? params.limit : this.defaultLimit;
+    queryParams.limit = limit;
+    if (params?.startingAfter) queryParams.startingAfter = params.startingAfter;
     const payload = await this.request(this.transactionsPath, {
       ...queryParams
     });
+    const records = normalizeRecords(payload);
+    const extractedCursor = extractNextCursor(payload);
+    const hasMore = extractHasMore(payload);
+    const fallbackCursor =
+      records.length > 0 ? recordStableId(records[records.length - 1] as Record<string, unknown>) : "";
     return {
-      records: normalizeRecords(payload),
-      nextCursor: extractNextCursor(payload)
+      records,
+      nextCursor: extractedCursor || (hasMore ? fallbackCursor : null),
+      hasMore
     };
   }
 

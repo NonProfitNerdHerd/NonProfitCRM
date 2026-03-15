@@ -26,7 +26,7 @@ export default async function IntegrationsPage() {
     integrations = [
       {
         integrationKey: "webconnex",
-        name: "Giving Fuel"
+        name: "GivingFuel Contacts"
       }
     ];
     apiPaused = true;

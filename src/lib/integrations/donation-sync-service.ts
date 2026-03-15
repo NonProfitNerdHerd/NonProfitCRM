@@ -55,25 +55,22 @@ export class DonationSyncService {
   }): Promise<DonationSyncResult> {
     const supabase = await createIntegrationClient();
     const syncSettings = input.connection.sync_settings_json ?? {};
-    const incremental = Boolean(syncSettings.incrementalSyncEnabled ?? true);
-    const initialStart = (syncSettings.initialImportStartDate as string | null | undefined) ?? null;
-    const updatedSince = incremental
-      ? ((syncSettings.lastSuccessfulSyncDate as string | null | undefined) ?? initialStart)
-      : null;
-
     let cursor: string | null =
       (syncSettings.donationsCursor as string | null | undefined) ?? null;
     let processed = 0;
     let created = 0;
     let updated = 0;
     let failed = 0;
+    let hasMore = true;
+    let guard = 0;
 
-    do {
+    while (hasMore && guard < 10000) {
+      guard += 1;
       const page = await input.apiClient.getTransactions({
-        cursor,
-        updatedSince,
-        pageSize: 100
+        startingAfter: cursor,
+        limit: 100
       });
+      hasMore = page.hasMore;
 
       for (const record of page.records) {
         processed += 1;
@@ -241,7 +238,10 @@ export class DonationSyncService {
       }
 
       cursor = page.nextCursor;
-    } while (cursor);
+      if (!hasMore || !cursor) {
+        hasMore = false;
+      }
+    }
 
     return {
       processed,

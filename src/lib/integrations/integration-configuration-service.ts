@@ -1,5 +1,14 @@
 import { createIntegrationClient } from "@/lib/integrations/db";
 import { IntegrationConnection, IntegrationDefinition } from "@/lib/integrations/types";
+import {
+  GIVINGFUEL_API_HEADER_NAME,
+  GIVINGFUEL_BASE_URL,
+  GIVINGFUEL_CUSTOMERS_PATH,
+  GIVINGFUEL_INTEGRATION_KEY,
+  GIVINGFUEL_INTEGRATION_NAME,
+  GIVINGFUEL_PRODUCT_VALUE
+} from "@/lib/integrations/givingfuel-contacts-config";
+import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 
 const DEFAULT_WEBCONNEX_FIELD_MAPPING = {
   contacts: {
@@ -29,8 +38,8 @@ const DEFAULT_WEBCONNEX_SYNC_SETTINGS = {
   syncMode: "manual_and_scheduled",
   scheduleFrequency: "daily",
   contactSyncEnabled: true,
-  donationSyncEnabled: true,
-  fullSyncEnabled: true,
+  donationSyncEnabled: false,
+  fullSyncEnabled: false,
   incrementalSyncEnabled: true,
   fallbackContactMatch: "email_if_configured",
   initialImportStartDate: null,
@@ -40,7 +49,7 @@ const DEFAULT_WEBCONNEX_SYNC_SETTINGS = {
 };
 
 function defaultConnectionName(definition: IntegrationDefinition) {
-  if (definition.provider_key === "webconnex") return "Giving Fuel";
+  if (definition.provider_key === GIVINGFUEL_INTEGRATION_KEY) return GIVINGFUEL_INTEGRATION_NAME;
   return definition.name;
 }
 
@@ -75,7 +84,7 @@ export class IntegrationConfigurationService {
         organization_id: organizationId,
         integration_definition_id: definition.id,
         name: defaultConnectionName(definition),
-        base_url: null,
+        base_url: definition.provider_key === GIVINGFUEL_INTEGRATION_KEY ? GIVINGFUEL_BASE_URL : null,
         auth_type: "api_key_header",
         api_key_reference: null,
         is_enabled: false,
@@ -84,19 +93,23 @@ export class IntegrationConfigurationService {
         retry_settings: { maxRetries: 3, backoffMs: 1000 },
         debug_logging_enabled: false,
         configuration_json:
-          definition.provider_key === "webconnex"
+          definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
             ? {
-                contactsPath: "/v2/public/search/customers",
-                transactionsPath: "/v2/public/search/transactions",
-                testPath: "/v2/public/search/customers",
-                authHeaderName: "apiKey",
-                staticQueryParams: { product: "givingfuel.com" }
+                contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+                testPath: GIVINGFUEL_CUSTOMERS_PATH,
+                authHeaderName: GIVINGFUEL_API_HEADER_NAME,
+                staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
+                apiKeyConfigured: false
               }
             : {},
         sync_settings_json:
-          definition.provider_key === "webconnex" ? DEFAULT_WEBCONNEX_SYNC_SETTINGS : {},
+          definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
+            ? DEFAULT_WEBCONNEX_SYNC_SETTINGS
+            : {},
         field_mapping_json:
-          definition.provider_key === "webconnex" ? DEFAULT_WEBCONNEX_FIELD_MAPPING : {},
+          definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
+            ? DEFAULT_WEBCONNEX_FIELD_MAPPING
+            : {},
         created_by: userId,
         updated_by: userId
       })
@@ -122,6 +135,7 @@ export class IntegrationConfigurationService {
       configuration?: Record<string, unknown>;
       syncSettings?: Record<string, unknown>;
       fieldMapping?: Record<string, unknown>;
+      apiKey?: string;
     };
   }): Promise<IntegrationConnection> {
     const supabase = await createIntegrationClient();
@@ -131,6 +145,22 @@ export class IntegrationConfigurationService {
       input.definition
     );
     const current = connection;
+
+    const mergedConfiguration = {
+      ...(current.configuration_json ?? {}),
+      ...(input.payload.configuration ?? {})
+    } as Record<string, unknown>;
+
+    if (typeof input.payload.apiKey === "string") {
+      const trimmed = input.payload.apiKey.trim();
+      if (trimmed) {
+        mergedConfiguration.encryptedApiKey = encryptIntegrationSecret(trimmed);
+        mergedConfiguration.apiKeyConfigured = true;
+      } else {
+        delete mergedConfiguration.encryptedApiKey;
+        mergedConfiguration.apiKeyConfigured = false;
+      }
+    }
 
     const { data, error } = await supabase
       .from("integration_connections")
@@ -144,7 +174,7 @@ export class IntegrationConfigurationService {
         retry_settings: input.payload.retrySettings ?? current.retry_settings,
         debug_logging_enabled:
           input.payload.debugLoggingEnabled ?? current.debug_logging_enabled,
-        configuration_json: input.payload.configuration ?? current.configuration_json,
+        configuration_json: mergedConfiguration,
         sync_settings_json: input.payload.syncSettings ?? current.sync_settings_json,
         field_mapping_json: input.payload.fieldMapping ?? current.field_mapping_json,
         updated_by: input.userId

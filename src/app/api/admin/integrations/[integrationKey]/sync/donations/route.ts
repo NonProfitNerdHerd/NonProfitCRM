@@ -8,6 +8,12 @@ type RouteProps = {
 export async function POST(_request: Request, { params }: RouteProps) {
   try {
     const { integrationKey } = await params;
+    if (integrationKey === "webconnex") {
+      return NextResponse.json(
+        { message: "GivingFuel Contacts integration does not include donations sync." },
+        { status: 400 }
+      );
+    }
     const result = await runIntegrationSync(integrationKey, "donations");
     if (result.status === "failed") {
       return NextResponse.json(

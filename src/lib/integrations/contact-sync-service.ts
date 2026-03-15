@@ -2,6 +2,7 @@ import { createIntegrationClient } from "@/lib/integrations/db";
 import { IntegrationConnection, IntegrationSyncJob } from "@/lib/integrations/types";
 import { IntegrationLogService } from "@/lib/integrations/integration-log-service";
 import { WebconnexApiClient } from "@/lib/integrations/webconnex-api-client";
+import { GIVINGFUEL_DEFAULT_PAGE_LIMIT } from "@/lib/integrations/givingfuel-contacts-config";
 
 type ContactSyncResult = {
   processed: number;
@@ -40,29 +41,32 @@ export class ContactSyncService {
   }): Promise<ContactSyncResult> {
     const supabase = await createIntegrationClient();
     const syncSettings = input.connection.sync_settings_json ?? {};
-    const incremental = Boolean(syncSettings.incrementalSyncEnabled ?? true);
-    const initialStart = (syncSettings.initialImportStartDate as string | null | undefined) ?? null;
-    const updatedSince = incremental
-      ? ((syncSettings.lastSuccessfulSyncDate as string | null | undefined) ?? initialStart)
-      : null;
-
-    let cursor: string | null =
-      (syncSettings.contactsCursor as string | null | undefined) ?? null;
+    let cursor: string | null = (syncSettings.contactsCursor as string | null | undefined) ?? null;
     let processed = 0;
     let created = 0;
     let updated = 0;
     let failed = 0;
+    let hasMore = true;
+    let pageGuard = 0;
 
-    do {
+    while (hasMore && pageGuard < 10000) {
+      pageGuard += 1;
       const page = await input.apiClient.getContacts({
-        cursor,
-        updatedSince,
-        pageSize: 100
+        startingAfter: cursor,
+        limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT
       });
+      hasMore = page.hasMore;
 
       for (const record of page.records) {
         processed += 1;
-        const externalId = readString(record, ["id", "external_id", "contact_id", "donor_id"]);
+        const externalId = readString(record, [
+          "id",
+          "customer_id",
+          "customerId",
+          "external_id",
+          "contact_id",
+          "donor_id"
+        ]);
         if (!externalId) {
           failed += 1;
           await input.logService.enqueueError({
@@ -92,7 +96,7 @@ export class ContactSyncService {
             .from("contact_external_references")
             .select("id, contact_id")
             .eq("organization_id", input.organizationId)
-            .eq("source_system", "webconnex")
+            .in("source_system", ["givingfuel", "webconnex"])
             .eq("external_record_id", externalId)
             .maybeSingle();
 
@@ -140,7 +144,7 @@ export class ContactSyncService {
                 organization_name: organizationName || null,
                 donor_status: "active",
                 member_status: "none",
-                external_source: "webconnex",
+                external_source: "givingfuel",
                 external_source_id: externalId
               })
               .select("id")
@@ -155,7 +159,7 @@ export class ContactSyncService {
             {
               organization_id: input.organizationId,
               contact_id: contactId,
-              source_system: "webconnex",
+              source_system: "givingfuel",
               external_record_id: externalId,
               external_record_type: "contact",
               last_source_modified_date: sourceModifiedAt,
@@ -191,7 +195,11 @@ export class ContactSyncService {
       }
 
       cursor = page.nextCursor;
-    } while (cursor);
+      if (!hasMore) break;
+      if (!cursor) {
+        hasMore = false;
+      }
+    }
 
     return {
       processed,

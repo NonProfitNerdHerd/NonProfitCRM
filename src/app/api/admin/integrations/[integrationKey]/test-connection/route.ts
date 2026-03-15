@@ -8,7 +8,10 @@ type RouteProps = {
 export async function POST(_request: Request, { params }: RouteProps) {
   try {
     const { integrationKey } = await params;
-    const result = await testIntegrationConnection(integrationKey);
+    const payload = await _request.json().catch(() => null);
+    const apiKey =
+      payload && typeof payload.apiKey === "string" ? payload.apiKey : undefined;
+    const result = await testIntegrationConnection(integrationKey, apiKey);
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(

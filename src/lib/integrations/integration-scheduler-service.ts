@@ -60,7 +60,7 @@ export class IntegrationSchedulerService {
           userId: fallbackUser,
           definition,
           connection: connection as IntegrationConnection,
-          scope: "all",
+          scope: definition.provider_key === "webconnex" ? "contacts" : "all",
           jobType: "scheduled"
         });
         results.push({

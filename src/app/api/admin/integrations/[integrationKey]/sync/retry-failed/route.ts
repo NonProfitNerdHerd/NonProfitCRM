@@ -8,6 +8,12 @@ type RouteProps = {
 export async function POST(_request: Request, { params }: RouteProps) {
   try {
     const { integrationKey } = await params;
+    if (integrationKey === "webconnex") {
+      return NextResponse.json(
+        { message: "GivingFuel Contacts retry is not enabled in this phase." },
+        { status: 400 }
+      );
+    }
     const result = await retryFailedIntegrationSync(integrationKey);
     const syncStatus = (result as { syncResult?: { status?: string; errorSummary?: string } })
       .syncResult?.status;

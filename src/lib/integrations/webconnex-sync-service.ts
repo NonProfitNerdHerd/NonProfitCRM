@@ -4,6 +4,13 @@ import { IntegrationLogService } from "@/lib/integrations/integration-log-servic
 import { WebconnexApiClient } from "@/lib/integrations/webconnex-api-client";
 import { ContactSyncService } from "@/lib/integrations/contact-sync-service";
 import { DonationSyncService } from "@/lib/integrations/donation-sync-service";
+import {
+  GIVINGFUEL_API_HEADER_NAME,
+  GIVINGFUEL_CUSTOMERS_PATH,
+  GIVINGFUEL_DEFAULT_PAGE_LIMIT,
+  GIVINGFUEL_PRODUCT_VALUE
+} from "@/lib/integrations/givingfuel-contacts-config";
+import { decryptIntegrationSecret } from "@/lib/integrations/secrets";
 
 type SyncExecutionResult = {
   jobId: string;
@@ -16,6 +23,15 @@ type SyncExecutionResult = {
 };
 
 function resolveApiKey(connection: IntegrationConnection) {
+  const configuration = (connection.configuration_json ?? {}) as Record<string, unknown>;
+  const encryptedApiKey = configuration.encryptedApiKey;
+  if (typeof encryptedApiKey === "string" && encryptedApiKey.trim()) {
+    try {
+      return decryptIntegrationSecret(encryptedApiKey);
+    } catch {
+      return "";
+    }
+  }
   const specific = process.env.WEBCONNEX_API_KEY;
   if (specific) return specific;
   if (!connection.api_key_reference) return "";
@@ -27,30 +43,31 @@ export class WebconnexSyncService {
   private contactSyncService = new ContactSyncService();
   private donationSyncService = new DonationSyncService();
 
-  private buildClient(connection: IntegrationConnection) {
+  private buildClient(connection: IntegrationConnection, apiKeyOverride?: string) {
     const config = connection.configuration_json ?? {};
     const retry = connection.retry_settings ?? {};
     return new WebconnexApiClient({
       baseUrl: (connection.base_url ?? "").trim(),
       authType: connection.auth_type,
-      apiKey: resolveApiKey(connection),
+      apiKey: apiKeyOverride?.trim() || resolveApiKey(connection),
       apiKeyReference: connection.api_key_reference,
-      authHeaderName: String(config.authHeaderName ?? "apiKey"),
+      authHeaderName: String(config.authHeaderName ?? GIVINGFUEL_API_HEADER_NAME),
       staticQueryParams: (config.staticQueryParams as Record<
         string,
         string | number | boolean
-      >) ?? { product: "givingfuel.com" },
+      >) ?? { product: GIVINGFUEL_PRODUCT_VALUE },
       timeoutMs: Number(connection.timeout_ms ?? 30000),
       maxRetries: Number(retry.maxRetries ?? 3),
       backoffMs: Number(retry.backoffMs ?? 1000),
-      contactsPath: String(config.contactsPath ?? "/contacts"),
+      contactsPath: String(config.contactsPath ?? GIVINGFUEL_CUSTOMERS_PATH),
       transactionsPath: String(config.transactionsPath ?? "/transactions"),
-      testPath: String(config.testPath ?? "/health")
+      testPath: String(config.testPath ?? GIVINGFUEL_CUSTOMERS_PATH),
+      defaultLimit: Number(config.defaultLimit ?? GIVINGFUEL_DEFAULT_PAGE_LIMIT)
     });
   }
 
-  async testConnection(connection: IntegrationConnection) {
-    const client = this.buildClient(connection);
+  async testConnection(connection: IntegrationConnection, options?: { apiKeyOverride?: string }) {
+    const client = this.buildClient(connection, options?.apiKeyOverride);
     return client.testConnection();
   }
 
