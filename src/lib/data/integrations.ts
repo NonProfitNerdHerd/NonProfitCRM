@@ -50,7 +50,7 @@ function isMissingIntegrationsSchemaError(error: unknown) {
 
 function createFallbackDetail(integrationKey: string, organizationId: string) {
   const now = new Date().toISOString();
-  const name = integrationKey === "webconnex" ? "Webconnex" : integrationKey;
+  const name = integrationKey === "webconnex" ? "Giving Fuel" : integrationKey;
   const fallbackWebconnexBaseUrl =
     process.env.WEBCONNEX_BASE_URL ?? process.env.WEBCONNEX_API_BASE_URL ?? "";
   return {
@@ -60,7 +60,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       provider_key: integrationKey,
       description:
         integrationKey === "webconnex"
-          ? "Webconnex API synchronization for contacts and donations/transactions."
+          ? "Giving Fuel (Webconnex) API synchronization for contacts and donations/transactions."
           : "Integration metadata unavailable until migrations are applied.",
       category: "donations",
       is_active: true,
@@ -138,7 +138,7 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
     id: "schema-free-webconnex-connection",
     organization_id: organizationId,
     integration_definition_id: "schema-free-webconnex-definition",
-    name: "Webconnex",
+    name: "Giving Fuel",
     base_url: fallbackWebconnexBaseUrl,
     auth_type: "api_key_header",
     api_key_reference: "WEBCONNEX_API_KEY",
@@ -259,8 +259,11 @@ export async function listIntegrationsForAdmin() {
     return {
       integrations: rows.map((row) => ({
         integrationKey: row.definition.provider_key,
-        name: row.definition.name,
-        providerType: row.definition.category,
+        name: row.connection?.name || row.definition.name,
+        providerType:
+          row.definition.provider_key === "webconnex"
+            ? "Webconnex Product"
+            : row.definition.category,
         description: row.definition.description,
         status: row.connection?.is_enabled ? "Enabled" : "Disabled",
         connectionStatus: row.connection?.connection_status ?? "Not Tested",
@@ -281,8 +284,8 @@ export async function listIntegrationsForAdmin() {
       integrations: [
         {
           integrationKey: "webconnex",
-          name: "Webconnex",
-          providerType: "donations",
+          name: "Giving Fuel",
+          providerType: "Webconnex Product",
           description:
             "Webconnex API synchronization is available after migration 202603130021 is applied.",
           status: "Disabled",
@@ -325,7 +328,7 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
       jobs,
       errors,
       overview: {
-        integrationName: definition.name,
+        integrationName: connection.name || definition.name,
         description: definition.description,
         currentStatus: connection.is_enabled ? "Enabled" : "Disabled",
         connectionStatus: connection.connection_status,

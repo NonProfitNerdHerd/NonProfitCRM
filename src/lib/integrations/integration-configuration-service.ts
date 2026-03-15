@@ -39,6 +39,11 @@ const DEFAULT_WEBCONNEX_SYNC_SETTINGS = {
   donationsCursor: null
 };
 
+function defaultConnectionName(definition: IntegrationDefinition) {
+  if (definition.provider_key === "webconnex") return "Giving Fuel";
+  return definition.name;
+}
+
 export class IntegrationConfigurationService {
   async getConnection(
     organizationId: string,
@@ -69,7 +74,7 @@ export class IntegrationConfigurationService {
       .insert({
         organization_id: organizationId,
         integration_definition_id: definition.id,
-        name: definition.name,
+        name: defaultConnectionName(definition),
         base_url: null,
         auth_type: "api_key_header",
         api_key_reference: null,

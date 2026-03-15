@@ -35,8 +35,8 @@ export default async function IntegrationsPage() {
     integrations = [
       {
         integrationKey: "webconnex",
-        name: "Webconnex",
-        providerType: "donations",
+        name: "Giving Fuel",
+        providerType: "Webconnex Product",
         description: "Fallback integration row while environment migrations settle.",
         status: "Disabled",
         connectionStatus: "Not Tested",

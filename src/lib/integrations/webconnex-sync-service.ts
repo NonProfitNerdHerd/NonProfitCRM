@@ -12,6 +12,7 @@ type SyncExecutionResult = {
   recordsCreated: number;
   recordsUpdated: number;
   recordsFailed: number;
+  errorSummary?: string | null;
 };
 
 function resolveApiKey(connection: IntegrationConnection) {
@@ -77,7 +78,7 @@ export class WebconnexSyncService {
     let errorSummary: string | null = null;
 
     try {
-      if (!input.connection.is_enabled) {
+      if (!input.connection.is_enabled && input.jobType === "scheduled") {
         throw new Error("Integration connection is disabled.");
       }
 
@@ -177,7 +178,8 @@ export class WebconnexSyncService {
       recordsProcessed,
       recordsCreated,
       recordsUpdated,
-      recordsFailed
+      recordsFailed,
+      errorSummary
     };
   }
 }

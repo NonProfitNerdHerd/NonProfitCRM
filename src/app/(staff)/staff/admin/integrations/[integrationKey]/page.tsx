@@ -58,7 +58,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
     detail = {
       definition: {
         id: `fallback-${integrationKey}`,
-        name: integrationKey === "webconnex" ? "Webconnex" : integrationKey,
+        name: integrationKey === "webconnex" ? "Giving Fuel" : integrationKey,
         provider_key: integrationKey,
         description: "Fallback integration detail due environment configuration mismatch.",
         category: "donations",
@@ -73,7 +73,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         id: `fallback-${integrationKey}-connection`,
         organization_id: "",
         integration_definition_id: `fallback-${integrationKey}`,
-        name: integrationKey === "webconnex" ? "Webconnex" : integrationKey,
+        name: integrationKey === "webconnex" ? "Giving Fuel" : integrationKey,
         base_url: "",
         auth_type: "api_key_header",
         api_key_reference: null,
@@ -95,7 +95,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
       jobs: [],
       errors: [],
       overview: {
-        integrationName: integrationKey === "webconnex" ? "Webconnex" : integrationKey,
+        integrationName: integrationKey === "webconnex" ? "Giving Fuel" : integrationKey,
         description: "Integration framework fallback detail",
         currentStatus: "Disabled",
         connectionStatus: "Not Tested",
@@ -119,7 +119,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         </Link>
       </div>
       <CardHeader
-        title={`${String(detail?.definition?.name ?? integrationKey)} Integration`}
+        title={`${String(detail?.connection?.name ?? detail?.definition?.name ?? integrationKey)} Integration`}
         subtitle="Connection configuration, sync settings, history, and error queue"
       />
       {loadError ? (
