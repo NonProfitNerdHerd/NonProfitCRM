@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireSessionContext } from "@/lib/auth/guards";
+import { createClient } from "@/lib/supabase/server";
 import {
   IntegrationDashboardItem,
   IntegrationErrorQueueItem,
@@ -28,12 +29,21 @@ function isMissingIntegrationsSchemaError(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { code?: string; message?: string; details?: string };
   const text = `${candidate.message ?? ""} ${candidate.details ?? ""}`.toLowerCase();
-  if (candidate.code === "42P01" || candidate.code === "42703") return true;
+  if (
+    candidate.code === "42P01" ||
+    candidate.code === "42703" ||
+    candidate.code === "PGRST205" ||
+    candidate.code === "PGRST204"
+  ) {
+    return true;
+  }
   return (
-    text.includes("does not exist") &&
+    (text.includes("does not exist") || text.includes("could not find")) &&
     (text.includes("integration_") ||
       text.includes("contact_external_references") ||
-      text.includes("donation_external_references"))
+      text.includes("donation_external_references") ||
+      text.includes("integration connections") ||
+      text.includes("integration definitions"))
   );
 }
 
@@ -119,7 +129,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
 
 async function requireIntegrationsAdmin() {
   const context = await requireSessionContext();
-  const supabase = await createIntegrationClient();
+  const supabase = await createClient();
 
   const permissionChecks = await Promise.all(
     [
@@ -140,12 +150,16 @@ async function requireIntegrationsAdmin() {
     return context;
   }
 
-  const { data: roleKey } = await supabase.rpc("user_role_key", {
-    org_id: context.organizationId
-  });
-  const normalizedRole = String(roleKey ?? "").toLowerCase();
-  if (["administrator", "executive_leader", "executive_staff"].includes(normalizedRole)) {
-    return context;
+  try {
+    const { data: roleKey } = await supabase.rpc("user_role_key", {
+      org_id: context.organizationId
+    });
+    const normalizedRole = String(roleKey ?? "").toLowerCase();
+    if (["administrator", "executive_leader", "executive_staff"].includes(normalizedRole)) {
+      return context;
+    }
+  } catch {
+    // Keep permission checks as primary guard; ignore role RPC failures.
   }
 
   redirect("/unauthorized");
@@ -296,8 +310,13 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
       }
     };
   } catch (error) {
-    if (!isMissingIntegrationsSchemaError(error)) throw error;
-    return createFallbackDetail(integrationKey, context.organizationId);
+    if (isMissingIntegrationsSchemaError(error)) {
+      return createFallbackDetail(integrationKey, context.organizationId);
+    }
+    if (error instanceof Error && error.message.includes("Integration")) {
+      return createFallbackDetail(integrationKey, context.organizationId);
+    }
+    throw error;
   }
 }
 
