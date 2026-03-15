@@ -21,28 +21,20 @@ const menu: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/dashboard")
   },
   {
-    id: "donors",
-    href: "/staff/donors",
-    label: "Donors",
-    matches: (pathname) => pathname.startsWith("/staff/donors")
-  },
-  {
-    id: "contacts",
+    id: "all-contacts",
     href: "/staff/contacts",
-    label: "Contacts",
-    matches: (pathname) => pathname === "/staff/contacts" || pathname.startsWith("/staff/contacts/")
-  },
-  {
-    id: "donor-organizations",
-    href: "/staff/donor-organizations",
-    label: "Donor Organizations",
-    matches: (pathname) => pathname.startsWith("/staff/donor-organizations")
-  },
-  {
-    id: "organizations",
-    href: "/staff/organizations",
-    label: "Organizations",
-    matches: (pathname) => pathname.startsWith("/staff/organizations")
+    label: "All Contacts",
+    matches: (pathname) =>
+      pathname.startsWith("/staff/contacts") ||
+      pathname.startsWith("/staff/donors") ||
+      pathname.startsWith("/staff/donor-organizations") ||
+      pathname.startsWith("/staff/organizations"),
+    children: [
+      { href: "/staff/donors", label: "Donors" },
+      { href: "/staff/contacts/personal", label: "Contacts" },
+      { href: "/staff/donor-organizations", label: "Donor Organizations" },
+      { href: "/staff/organizations", label: "Organizations" }
+    ]
   },
   {
     id: "financial",

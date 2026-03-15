@@ -5,17 +5,17 @@ import { ContactsList } from "@/components/contacts/contacts-list";
 
 export default async function ContactsPage() {
   await requireStaffPermission("can_view_contacts");
-  const contacts = await listContacts("contacts");
+  const contacts = await listContacts("all");
 
   return (
     <Card>
       <CardHeader
-        title="Contacts"
-        subtitle="People with tracking status Lead or Non-Lead"
+        title="All Contacts"
+        subtitle="All person and organization records"
       />
       <ContactsList
-        title="Contacts"
-        subtitle="Entity Type: Person • Tracking Status: Lead/Non-Lead"
+        title="All Contacts"
+        subtitle="Unfiltered directory of contacts"
         contacts={contacts as Array<Record<string, unknown>>}
       />
     </Card>

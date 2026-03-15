@@ -47,6 +47,48 @@ function buildOrganizationFormalLetterName(input: ContactInput) {
   return `${org}\nc/o ${primaryName}`;
 }
 
+function isClassificationSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("entity_type") ||
+    message.includes("tracking_status") ||
+    message.includes("webconnex_id")
+  );
+}
+
+function normalizeLegacyClassification(row: Record<string, unknown>) {
+  const organizationName = String(row.organization_name ?? "").trim();
+  const donorStatus = String(row.donor_status ?? "").toLowerCase();
+  const externalSource = String(row.external_source ?? "").toLowerCase();
+  const externalSourceId = String(row.external_source_id ?? "").trim();
+  const webconnexId = String(row.webconnex_id ?? "").trim();
+  const hasOrganization = organizationName.length > 0;
+  const hasWebconnexLink =
+    webconnexId.length > 0 ||
+    (externalSourceId.length > 0 && (externalSource === "webconnex" || externalSource === "givingfuel"));
+  const isDonorStatus = donorStatus === "active" || donorStatus === "lapsed";
+  const trackingStatus = hasWebconnexLink
+    ? "donor"
+    : isDonorStatus
+      ? "donor"
+      : donorStatus === "inactive"
+        ? "non_lead"
+        : "lead";
+  const entityType = hasOrganization ? "organization" : "person";
+
+  return {
+    ...row,
+    entity_type: entityType,
+    tracking_status: trackingStatus,
+    webconnex_id: webconnexId || null
+  };
+}
+
 export async function listContacts(
   mode:
     | "all"
@@ -59,34 +101,70 @@ export async function listContacts(
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
 
-  let query = supabase
+  let modernQuery = supabase
     .from("contacts_safe_view")
     .select("*")
     .eq("organization_id", context.organizationId)
     .order("last_name", { ascending: true })
     .limit(200);
-
   if (mode === "donors") {
-    query = query.eq("entity_type", "person").eq("tracking_status", "donor");
+    modernQuery = modernQuery.eq("entity_type", "person").eq("tracking_status", "donor");
   }
   if (mode === "contacts" || mode === "personal") {
-    query = query
-      .eq("entity_type", "person")
-      .in("tracking_status", ["lead", "non_lead"]);
+    modernQuery = modernQuery.eq("entity_type", "person").in("tracking_status", ["lead", "non_lead"]);
   }
   if (mode === "donor_organizations") {
-    query = query.eq("entity_type", "organization").eq("tracking_status", "donor");
+    modernQuery = modernQuery.eq("entity_type", "organization").eq("tracking_status", "donor");
   }
   if (mode === "organizations") {
-    query = query
-      .eq("entity_type", "organization")
-      .in("tracking_status", ["lead", "non_lead"]);
+    modernQuery = modernQuery.eq("entity_type", "organization").in("tracking_status", ["lead", "non_lead"]);
   }
 
-  const { data, error } = await query;
+  const modernResult = await modernQuery;
+  if (!modernResult.error) {
+    return modernResult.data ?? [];
+  }
+  if (!isClassificationSchemaMissingError(modernResult.error)) {
+    throw modernResult.error;
+  }
 
-  if (error) throw error;
-  return data ?? [];
+  let fallbackQuery = supabase
+    .from("contacts_safe_view")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .order("last_name", { ascending: true })
+    .limit(400);
+  if (mode === "donors" || mode === "contacts" || mode === "personal") {
+    fallbackQuery = fallbackQuery.or("organization_name.is.null,organization_name.eq.");
+  }
+  if (mode === "donor_organizations" || mode === "organizations") {
+    fallbackQuery = fallbackQuery.not("organization_name", "is", null).neq("organization_name", "");
+  }
+
+  const fallbackResult = await fallbackQuery;
+  if (fallbackResult.error) throw fallbackResult.error;
+
+  const normalized = (fallbackResult.data ?? []).map((row) =>
+    normalizeLegacyClassification(row as Record<string, unknown>)
+  );
+  return normalized.filter((row) => {
+    const entityType = String(row.entity_type ?? "");
+    const trackingStatus = String(row.tracking_status ?? "");
+    if (mode === "donors") return entityType === "person" && trackingStatus === "donor";
+    if (mode === "contacts" || mode === "personal") {
+      return entityType === "person" && (trackingStatus === "lead" || trackingStatus === "non_lead");
+    }
+    if (mode === "donor_organizations") {
+      return entityType === "organization" && trackingStatus === "donor";
+    }
+    if (mode === "organizations") {
+      return (
+        entityType === "organization" &&
+        (trackingStatus === "lead" || trackingStatus === "non_lead")
+      );
+    }
+    return true;
+  });
 }
 
 export async function getContact(contactId: string) {
