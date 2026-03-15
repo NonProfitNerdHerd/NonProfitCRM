@@ -117,84 +117,103 @@ export function ContactForm() {
 
   return (
     <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div>
-          <label className="mb-1 block text-sm font-medium">Record Type</label>
-          <select
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            {...register("entity_type")}
-          >
-            {entityTypeOptions.map((option) => (
-              <option key={option} value={option}>
-                {option === "person" ? "Person" : "Organization"}
-              </option>
-            ))}
-          </select>
-          {errors.entity_type ? (
-            <p className="mt-1 text-xs text-red-700">{errors.entity_type.message}</p>
-          ) : null}
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">Tracking Status</label>
-          <select
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            {...register("tracking_status")}
-            disabled={Boolean(webconnexId?.trim())}
-          >
-            {trackingStatusOptions.map((option) => (
-              <option key={option} value={option}>
-                {option === "non_lead" ? "Non-Lead" : option.charAt(0).toUpperCase() + option.slice(1)}
-              </option>
-            ))}
-          </select>
-          {errors.tracking_status ? (
-            <p className="mt-1 text-xs text-red-700">{errors.tracking_status.message}</p>
-          ) : null}
-        </div>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {entityType === "organization" ? (
-          <div className="md:col-span-2">
-            <label className="mb-1 block text-sm font-medium">Organization Name</label>
-            <Input {...register("organization_name")} />
-            {errors.organization_name ? (
-              <p className="mt-1 text-xs text-red-700">{errors.organization_name.message}</p>
+      <section className="rounded-md border border-slate-200 p-3">
+        <p className="mb-2 text-sm font-semibold text-slate-900">Contact Type</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Record Type *</label>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              {...register("entity_type")}
+            >
+              {entityTypeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option === "person" ? "Person" : "Organization"}
+                </option>
+              ))}
+            </select>
+            {errors.entity_type ? (
+              <p className="mt-1 text-xs text-red-700">{errors.entity_type.message}</p>
             ) : null}
           </div>
-        ) : null}
-        <div>
-          <label className="mb-1 block text-sm font-medium">
-            {entityType === "organization" ? "Primary Contact First Name" : "First Name"}
-          </label>
-          <Input {...register("first_name")} />
-          {errors.first_name ? (
-            <p className="mt-1 text-xs text-red-700">{errors.first_name.message}</p>
-          ) : null}
+          <div>
+            <label className="mb-1 block text-sm font-medium">Tracking Status *</label>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              {...register("tracking_status")}
+              disabled={Boolean(webconnexId?.trim())}
+            >
+              {trackingStatusOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option === "non_lead"
+                    ? "Non-Lead"
+                    : option.charAt(0).toUpperCase() + option.slice(1)}
+                </option>
+              ))}
+            </select>
+            {errors.tracking_status ? (
+              <p className="mt-1 text-xs text-red-700">{errors.tracking_status.message}</p>
+            ) : null}
+          </div>
         </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">
-            {entityType === "organization" ? "Primary Contact Last Name" : "Last Name"}
-          </label>
-          <Input {...register("last_name")} />
-          {errors.last_name ? (
-            <p className="mt-1 text-xs text-red-700">{errors.last_name.message}</p>
-          ) : null}
-        </div>
-        <div className="md:col-span-2">
-          <label className="mb-1 block text-sm font-medium">Formal Letter Name</label>
-          <Input {...register("formal_letter_name")} placeholder="e.g. Mr. and Mrs. Jordan Smith" />
+      </section>
+
+      <section className="rounded-md border border-slate-200 p-3">
+        <p className="mb-2 text-sm font-semibold text-slate-900">Name</p>
+        <div className="grid gap-4 md:grid-cols-2">
           {entityType === "organization" ? (
-            <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
-              <input
-                type="checkbox"
-                checked={formalLetterManualOverride}
-                onChange={(event) => setFormalLetterManualOverride(event.target.checked)}
-              />
-              Manually override organization formal letter name
-            </label>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm font-medium">Organization Name *</label>
+              <Input {...register("organization_name")} />
+              {errors.organization_name ? (
+                <p className="mt-1 text-xs text-red-700">{errors.organization_name.message}</p>
+              ) : null}
+            </div>
           ) : null}
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              {entityType === "organization"
+                ? "Primary Contact First Name *"
+                : "First Name *"}
+            </label>
+            <Input {...register("first_name")} />
+            {errors.first_name ? (
+              <p className="mt-1 text-xs text-red-700">{errors.first_name.message}</p>
+            ) : null}
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              {entityType === "organization" ? "Primary Contact Last Name *" : "Last Name *"}
+            </label>
+            <Input {...register("last_name")} />
+            {errors.last_name ? (
+              <p className="mt-1 text-xs text-red-700">{errors.last_name.message}</p>
+            ) : null}
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Display / Preferred Name</label>
+            <Input {...register("preferred_name")} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Formal Letter Name</label>
+            <Input
+              {...register("formal_letter_name")}
+              placeholder="e.g. Mr. and Mrs. Jordan Smith"
+            />
+            {entityType === "organization" ? (
+              <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={formalLetterManualOverride}
+                  onChange={(event) => setFormalLetterManualOverride(event.target.checked)}
+                />
+                Manually override organization formal letter name
+              </label>
+            ) : null}
+          </div>
         </div>
-      </div>
+      </section>
+
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="mb-1 block text-sm font-medium">Email</label>
@@ -311,13 +330,6 @@ export function ContactForm() {
             ))}
           </select>
         </div>
-        <div className="md:col-span-2">
-          <label className="mb-1 block text-sm font-medium">WebConnex ID (optional)</label>
-          <Input
-            {...register("webconnex_id")}
-            placeholder="If provided, Tracking Status will be forced to Donor"
-          />
-        </div>
         {entityType === "person" ? (
           <div className="md:col-span-2">
             <label className="mb-1 block text-sm font-medium">Preferences - Communication</label>
@@ -343,6 +355,17 @@ export function ContactForm() {
             </div>
           </div>
         ) : null}
+      </div>
+
+      <section className="rounded-md border border-slate-200 p-3">
+        <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
+        <div>
+          <label className="mb-1 block text-sm font-medium">WebConnex ID</label>
+          <Input
+            {...register("webconnex_id")}
+            placeholder="If provided, Tracking Status will be forced to Donor"
+          />
+        </div>
         {errors.webconnex_id ? (
           <p className="text-xs text-red-700">{errors.webconnex_id.message}</p>
         ) : null}
@@ -355,7 +378,7 @@ export function ContactForm() {
         {errors.root ? (
           <p className="text-xs text-red-700">{errors.root.message}</p>
         ) : null}
-      </div>
+      </section>
 
       <div className="rounded-md border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600">
         {entityType === "person"

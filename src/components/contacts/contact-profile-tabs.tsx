@@ -248,6 +248,14 @@ export function ContactProfileTabs({
 
   async function submitContactInfo(event: React.FormEvent) {
     event.preventDefault();
+    if (!contactInfoDraft.firstName.trim()) {
+      setError("First Name is required.");
+      return;
+    }
+    if (!contactInfoDraft.lastName.trim()) {
+      setError("Last Name is required.");
+      return;
+    }
     if (
       contactInfoDraft.recordType === "organization" &&
       !contactInfoDraft.organizationName.trim()
@@ -670,9 +678,9 @@ export function ContactProfileTabs({
             </div>
             <form className="space-y-4" onSubmit={submitContactInfo}>
               <section className="rounded-md border border-slate-200 p-3">
-                <p className="mb-2 text-sm font-semibold text-slate-900">Core Contact</p>
+                <p className="mb-2 text-sm font-semibold text-slate-900">Contact Type</p>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label="Record Type">
+                  <FormField label="Record Type *">
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                       value={contactInfoDraft.recordType}
@@ -690,7 +698,7 @@ export function ContactProfileTabs({
                       ))}
                     </select>
                   </FormField>
-                  <FormField label="Tracking Status">
+                  <FormField label="Tracking Status *">
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                       value={contactInfoDraft.trackingStatus}
@@ -711,19 +719,14 @@ export function ContactProfileTabs({
                       ))}
                     </select>
                   </FormField>
-                  <FormField label="WebConnex ID">
-                    <Input
-                      value={contactInfoDraft.webconnexId}
-                      onChange={(event) =>
-                        setContactInfoDraft((prev) => ({
-                          ...prev,
-                          webconnexId: event.target.value
-                        }))
-                      }
-                    />
-                  </FormField>
+                </div>
+              </section>
+
+              <section className="rounded-md border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-900">Name</p>
+                <div className="grid gap-3 md:grid-cols-2">
                   {contactInfoDraft.recordType === "organization" ? (
-                    <FormField label="Organization Name (required)">
+                    <FormField label="Organization Name *">
                       <Input
                         value={contactInfoDraft.organizationName}
                         onChange={(event) =>
@@ -738,8 +741,8 @@ export function ContactProfileTabs({
                   <FormField
                     label={
                       contactInfoDraft.recordType === "organization"
-                        ? "Primary Contact First Name"
-                        : "First Name"
+                        ? "Primary Contact First Name *"
+                        : "First Name *"
                     }
                   >
                     <Input
@@ -752,8 +755,8 @@ export function ContactProfileTabs({
                   <FormField
                     label={
                       contactInfoDraft.recordType === "organization"
-                        ? "Primary Contact Last Name"
-                        : "Last Name"
+                        ? "Primary Contact Last Name *"
+                        : "Last Name *"
                     }
                   >
                     <Input
@@ -789,9 +792,7 @@ export function ContactProfileTabs({
                         <input
                           type="checkbox"
                           checked={formalLetterManualOverride}
-                          onChange={(event) =>
-                            setFormalLetterManualOverride(event.target.checked)
-                          }
+                          onChange={(event) => setFormalLetterManualOverride(event.target.checked)}
                         />
                         Manually override organization formal letter name
                       </label>
@@ -1031,6 +1032,23 @@ export function ContactProfileTabs({
                         setContactInfoDraft((prev) => ({
                           ...prev,
                           mailingPostalCode: event.target.value
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+              </section>
+
+              <section className="rounded-md border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="WebConnex ID">
+                    <Input
+                      value={contactInfoDraft.webconnexId}
+                      onChange={(event) =>
+                        setContactInfoDraft((prev) => ({
+                          ...prev,
+                          webconnexId: event.target.value
                         }))
                       }
                     />
