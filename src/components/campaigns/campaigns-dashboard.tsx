@@ -30,6 +30,7 @@ export function CampaignsDashboard({
   const [rows, setRows] = useState<Campaign[]>(initialCampaigns);
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [collapsedByParentId, setCollapsedByParentId] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setRows(initialCampaigns);
@@ -57,6 +58,40 @@ export function CampaignsDashboard({
     const inactive = rows.filter((campaign) => campaign.status === "Inactive").length;
     return { active, inactive };
   }, [rows]);
+
+  const campaignTree = useMemo(() => {
+    const parents = rows.filter((row) => !row.is_child);
+    const children = rows.filter((row) => row.is_child);
+    const childrenByParent = new Map<string, Campaign[]>();
+    for (const child of children) {
+      const parentId = String(child.parent_campaign_id ?? "");
+      if (!parentId) continue;
+      const existing = childrenByParent.get(parentId) ?? [];
+      existing.push(child);
+      childrenByParent.set(parentId, existing);
+    }
+    return parents.map((parent) => ({
+      parent,
+      children: childrenByParent.get(parent.id) ?? []
+    }));
+  }, [rows]);
+
+  useEffect(() => {
+    setCollapsedByParentId((previous) => {
+      const next: Record<string, boolean> = {};
+      for (const node of campaignTree) {
+        next[node.parent.id] = previous[node.parent.id] ?? true;
+      }
+      return next;
+    });
+  }, [campaignTree]);
+
+  function toggleParent(parentId: string) {
+    setCollapsedByParentId((previous) => ({
+      ...previous,
+      [parentId]: !previous[parentId]
+    }));
+  }
 
   return (
     <div className="space-y-4">
@@ -108,35 +143,83 @@ export function CampaignsDashboard({
       </div>
 
       <div className="space-y-2">
-        {rows.length === 0 ? (
+        {campaignTree.length === 0 ? (
           <p className="text-sm text-slate-500">No campaigns found.</p>
         ) : (
-          rows.map((campaign) => (
-            <Link
-              key={campaign.id}
-              href={`/staff/financial/campaigns/${campaign.is_child ? campaign.parent_campaign_id : campaign.id}`}
-              className="block rounded-md border border-slate-200 px-4 py-3 hover:bg-slate-50"
-            >
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-900">
-                  {campaign.is_child ? `--${campaign.name}` : campaign.name}
-                </p>
-                <span
-                  className={`rounded-full px-2 py-1 text-xs ${
-                    campaign.status === "Active"
-                      ? "bg-green-100 text-green-800"
-                      : "bg-slate-100 text-slate-700"
-                  }`}
-                >
-                  {campaign.status}
-                </span>
+          campaignTree.map((node) => {
+            const isCollapsed = collapsedByParentId[node.parent.id] ?? true;
+            return (
+              <div key={node.parent.id} className="rounded-md border border-slate-200">
+                <div className="flex items-start justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      {node.children.length > 0 ? (
+                        <button
+                          type="button"
+                          className="rounded px-1 text-sm text-slate-600 hover:bg-slate-100"
+                          onClick={() => toggleParent(node.parent.id)}
+                          aria-label={isCollapsed ? "Expand child campaigns" : "Collapse child campaigns"}
+                        >
+                          {isCollapsed ? "▸" : "▾"}
+                        </button>
+                      ) : (
+                        <span className="w-4 text-center text-slate-300">•</span>
+                      )}
+                      <Link
+                        href={`/staff/financial/campaigns/${node.parent.id}`}
+                        className="text-sm font-semibold text-slate-900 hover:underline"
+                      >
+                        {node.parent.name}
+                      </Link>
+                      {node.children.length > 0 ? (
+                        <span className="text-xs text-slate-500">
+                          ({node.children.length} child{node.children.length === 1 ? "" : "ren"})
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-600">{node.parent.description ?? "-"}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2 py-1 text-xs ${
+                      node.parent.status === "Active"
+                        ? "bg-green-100 text-green-800"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {node.parent.status}
+                  </span>
+                </div>
+
+                {!isCollapsed && node.children.length > 0 ? (
+                  <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-2">
+                    <div className="space-y-2">
+                      {node.children.map((child) => (
+                        <Link
+                          key={child.id}
+                          href={`/staff/financial/campaigns/${node.parent.id}`}
+                          className="block rounded-md border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-medium text-slate-900">{`--${child.name}`}</p>
+                            <span
+                              className={`rounded-full px-2 py-1 text-xs ${
+                                child.status === "Active"
+                                  ? "bg-green-100 text-green-800"
+                                  : "bg-slate-100 text-slate-700"
+                              }`}
+                            >
+                              {child.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600">{child.description ?? "-"}</p>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              {campaign.is_child && campaign.parent_campaign_name ? (
-                <p className="text-xs text-slate-500">Parent: {campaign.parent_campaign_name}</p>
-              ) : null}
-              <p className="text-xs text-slate-600">{campaign.description ?? "-"}</p>
-            </Link>
-          ))
+            );
+          })
         )}
       </div>
 
