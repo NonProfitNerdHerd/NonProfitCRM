@@ -2,6 +2,21 @@ import { createClient } from "@/lib/supabase/server";
 import { ContactInput } from "@/lib/validation/contact";
 import { requireStaffPermission } from "@/lib/auth/guards";
 
+function isContactExtendedSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("formal_letter_name") ||
+    message.includes("mobile_number") ||
+    message.includes("emergency_contact") ||
+    message.includes("emergency_contact_phone")
+  );
+}
+
 export async function listContacts(mode: "all" | "personal" | "organizations" = "all") {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
@@ -45,9 +60,7 @@ export async function createContact(input: ContactInput) {
   const context = await requireStaffPermission("can_create_contacts");
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("contacts")
-    .insert({
+  const insertPayload = {
       organization_id: context.organizationId,
       first_name: input.first_name,
       last_name: input.last_name,
@@ -76,11 +89,33 @@ export async function createContact(input: ContactInput) {
       member_status: input.member_status,
       created_by: context.userId,
       updated_by: context.userId
-    })
+  };
+
+  let { data, error } = await supabase
+    .from("contacts")
+    .insert(insertPayload)
     .select("id")
     .single();
+  if (error && isContactExtendedSchemaError(error)) {
+    const {
+      formal_letter_name: removedFormalLetterName,
+      mobile_number: removedMobileNumber,
+      emergency_contact: removedEmergencyContact,
+      emergency_contact_phone: removedEmergencyContactPhone,
+      ...legacyPayload
+    } = insertPayload;
+    void removedFormalLetterName;
+    void removedMobileNumber;
+    void removedEmergencyContact;
+    void removedEmergencyContactPhone;
+
+    const retryResult = await supabase.from("contacts").insert(legacyPayload).select("id").single();
+    data = retryResult.data;
+    error = retryResult.error;
+  }
 
   if (error) throw error;
+  if (!data?.id) throw new Error("Contact insert did not return an id.");
   return data.id;
 }
 
@@ -88,9 +123,7 @@ export async function updateContact(contactId: string, input: ContactInput) {
   const context = await requireStaffPermission("can_edit_contacts");
   const supabase = await createClient();
 
-  const { error } = await supabase
-    .from("contacts")
-    .update({
+  const updatePayload = {
       first_name: input.first_name,
       last_name: input.last_name,
       preferred_name: input.preferred_name || null,
@@ -118,9 +151,33 @@ export async function updateContact(contactId: string, input: ContactInput) {
       member_status: input.member_status,
       updated_by: context.userId,
       updated_at: new Date().toISOString()
-    })
+  };
+
+  let { error } = await supabase
+    .from("contacts")
+    .update(updatePayload)
     .eq("organization_id", context.organizationId)
     .eq("id", contactId);
+  if (error && isContactExtendedSchemaError(error)) {
+    const {
+      formal_letter_name: removedFormalLetterName,
+      mobile_number: removedMobileNumber,
+      emergency_contact: removedEmergencyContact,
+      emergency_contact_phone: removedEmergencyContactPhone,
+      ...legacyPayload
+    } = updatePayload;
+    void removedFormalLetterName;
+    void removedMobileNumber;
+    void removedEmergencyContact;
+    void removedEmergencyContactPhone;
+
+    const retryResult = await supabase
+      .from("contacts")
+      .update(legacyPayload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", contactId);
+    error = retryResult.error;
+  }
 
   if (error) throw error;
 }

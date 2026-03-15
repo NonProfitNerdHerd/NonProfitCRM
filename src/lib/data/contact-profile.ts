@@ -28,6 +28,21 @@ function taskUrgencyColor(
   return "default";
 }
 
+function isContactExtendedSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("formal_letter_name") ||
+    message.includes("mobile_number") ||
+    message.includes("emergency_contact") ||
+    message.includes("emergency_contact_phone")
+  );
+}
+
 function isDonationOrgSchemaError(error: unknown) {
   const message = String(
     (error as { message?: string; details?: string; hint?: string })?.message ??
@@ -74,6 +89,48 @@ async function fetchContactDonations(
   return fullResult;
 }
 
+async function fetchContactRecord(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  contactId: string
+) {
+  const fullSelect =
+    "id, organization_id, first_name, last_name, preferred_name, formal_letter_name, organization_name, donor_status, member_status, email, alternate_email, phone, mobile_number, alternate_phone, emergency_contact, emergency_contact_phone, communication_preferences, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at";
+  const legacySelect =
+    "id, organization_id, first_name, last_name, preferred_name, organization_name, donor_status, member_status, email, alternate_email, phone, alternate_phone, communication_preferences, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at";
+
+  const fullResult = (await supabase
+    .from("contacts")
+    .select(fullSelect)
+    .eq("organization_id", organizationId)
+    .eq("id", contactId)
+    .maybeSingle()) as unknown as { data: Record<string, unknown> | null; error: unknown };
+
+  if (fullResult.error && isContactExtendedSchemaError(fullResult.error)) {
+    const legacyResult = (await supabase
+      .from("contacts")
+      .select(legacySelect)
+      .eq("organization_id", organizationId)
+      .eq("id", contactId)
+      .maybeSingle()) as unknown as { data: Record<string, unknown> | null; error: unknown };
+    if (legacyResult.error) return legacyResult;
+    return {
+      data: legacyResult.data
+        ? {
+            ...legacyResult.data,
+            formal_letter_name: null,
+            mobile_number: null,
+            emergency_contact: null,
+            emergency_contact_phone: null
+          }
+        : null,
+      error: null
+    };
+  }
+
+  return fullResult;
+}
+
 export async function getContactProfileData(contactId: string) {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
@@ -90,14 +147,7 @@ export async function getContactProfileData(contactId: string) {
     { data: campaigns, error: campaignsError },
     activity
   ] = await Promise.all([
-    supabase
-      .from("contacts")
-      .select(
-        "id, organization_id, first_name, last_name, preferred_name, formal_letter_name, organization_name, donor_status, member_status, email, alternate_email, phone, mobile_number, alternate_phone, emergency_contact, emergency_contact_phone, communication_preferences, address_line_1, address_line_2, city, state, postal_code, mailing_address_line_1, mailing_address_line_2, mailing_city, mailing_state, mailing_postal_code, created_at, updated_at"
-      )
-      .eq("organization_id", context.organizationId)
-      .eq("id", contactId)
-      .maybeSingle(),
+    fetchContactRecord(supabase, context.organizationId, contactId),
     supabase
       .from("contact_emails")
       .select("id, email, label, is_primary")
