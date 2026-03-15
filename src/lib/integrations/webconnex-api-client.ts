@@ -82,6 +82,32 @@ function normalizeRecords(payload: unknown): Array<Record<string, unknown>> {
       }
     }
   }
+
+  // Case-insensitive fallback: return first array-valued property.
+  for (const [key, value] of Object.entries(container)) {
+    if (!Array.isArray(value)) continue;
+    const normalized = key.toLowerCase();
+    if (
+      normalized.includes("record") ||
+      normalized.includes("item") ||
+      normalized.includes("result") ||
+      normalized.includes("transaction") ||
+      normalized.includes("form") ||
+      normalized.includes("customer") ||
+      normalized.includes("data")
+    ) {
+      return value as Array<Record<string, unknown>>;
+    }
+  }
+
+  // Last-resort fallback: any array of objects.
+  for (const value of Object.values(container)) {
+    if (!Array.isArray(value)) continue;
+    if (value.length === 0) return [] as Array<Record<string, unknown>>;
+    if (typeof value[0] === "object" && value[0] !== null) {
+      return value as Array<Record<string, unknown>>;
+    }
+  }
   return [];
 }
 

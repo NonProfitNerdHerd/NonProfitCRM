@@ -119,13 +119,26 @@ export class WebconnexSyncService {
       ? mappedPageField.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
       : typeof mappedPageField === "string" && mappedPageField.trim()
         ? [mappedPageField.trim()]
-        : ["formName", "form_name", "page", "page_name", "pageName", "formId", "formAccRef", "campaign"];
+        : [
+            "Page Name",
+            "page name",
+            "formName",
+            "form_name",
+            "page",
+            "page_name",
+            "pageName",
+            "PageName",
+            "formId",
+            "formAccRef",
+            "campaign"
+          ];
 
     // Preferred source: list all currently configured forms/pages in GivingFuel.
     try {
       const formRecords = await client.getForms({ limit: 500 });
       for (const record of formRecords) {
         const value = this.readRecordValue(record, [
+          "Page Name",
           "formName",
           "name",
           "title",
@@ -155,7 +168,7 @@ export class WebconnexSyncService {
       transactions += response.records.length;
 
       for (const record of response.records) {
-        const value = this.readRecordValue(record, pageKeys);
+        const value = this.readRecordValue(record, pageKeys) || this.findLikelyPageName(record);
         if (value) detectedPages.add(value);
       }
 
@@ -176,6 +189,20 @@ export class WebconnexSyncService {
       const value = this.readPath(record, key);
       if (typeof value === "string" && value.trim()) return value.trim();
       if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+    return "";
+  }
+
+  private findLikelyPageName(record: Record<string, unknown>) {
+    for (const [key, rawValue] of Object.entries(record)) {
+      if (typeof rawValue !== "string" || !rawValue.trim()) continue;
+      const normalizedKey = key.toLowerCase();
+      if (normalizedKey.includes("page") && normalizedKey.includes("name")) {
+        return rawValue.trim();
+      }
+      if (normalizedKey.includes("form") && normalizedKey.includes("name")) {
+        return rawValue.trim();
+      }
     }
     return "";
   }

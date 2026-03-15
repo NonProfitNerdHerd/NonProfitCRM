@@ -30,7 +30,7 @@ const DEFAULT_WEBCONNEX_FIELD_MAPPING = {
   donations: {
     externalTransactionId: "id",
     externalContactId: "customerId",
-    pageValue: "formName",
+    pageValue: ["Page Name", "formName", "pageName", "form_name", "page_name"],
     amount: "total",
     donationDate: "dateCreated",
     paymentMethod: "paymentMethod",

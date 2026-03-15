@@ -112,7 +112,16 @@ export function GivingFuelDonationsSetup({
       await refreshDetail();
       await loadMappings();
       if (action === "save") setApiKey("");
-      setMessage(payload?.message ?? successMessage);
+      if (action === "detect") {
+        const detectedCount = Array.isArray(payload?.detectedPages) ? payload.detectedPages.length : null;
+        if (typeof detectedCount === "number") {
+          setMessage(`Detected ${detectedCount} form name(s).`);
+        } else {
+          setMessage(payload?.message ?? successMessage);
+        }
+      } else {
+        setMessage(payload?.message ?? successMessage);
+      }
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Request failed.");
     } finally {

@@ -255,6 +255,8 @@ export class DonationSyncService {
         const externalPageValue = readString(
           record,
           toStringCandidates(mapping.pageValue, [
+            "Page Name",
+            "page name",
             "formName",
             "form_name",
             "formAccRef",
