@@ -85,6 +85,8 @@ export function ImportWizard() {
   >([]);
 
   const [jobId, setJobId] = useState<string | null>(null);
+  const [legacyMode, setLegacyMode] = useState(false);
+  const [legacyReason, setLegacyReason] = useState<string | null>(null);
   const [matchByInput, setMatchByInput] = useState("");
   const [importMode, setImportMode] = useState("upsert");
 
@@ -154,6 +156,8 @@ export function ImportWizard() {
     setError(null);
     setMessage(null);
     setJobId(null);
+    setLegacyMode(false);
+    setLegacyReason(null);
     setValidationSummary(null);
     setValidationRows([]);
     setCommitSummary(null);
@@ -205,7 +209,13 @@ export function ImportWizard() {
   }
 
   async function ensureStagedBatch() {
-    if (jobId) return jobId;
+    if (jobId) {
+      return {
+        jobId,
+        legacyFallback: legacyMode,
+        legacyReason: legacyReason ?? undefined
+      };
+    }
     const response = await fetch("/api/imports/wizard/stage", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -227,8 +237,64 @@ export function ImportWizard() {
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.message ?? "Unable to stage import batch.");
-    setJobId(payload.jobId as string);
-    return payload.jobId as string;
+    const nextJobId = String(payload?.jobId ?? "");
+    if (!nextJobId) throw new Error("Unable to stage import batch.");
+    const fallback = Boolean(payload?.legacyFallback);
+    setJobId(nextJobId);
+    setLegacyMode(fallback);
+    setLegacyReason((payload?.legacyReason as string | undefined) ?? null);
+    return {
+      jobId: nextJobId,
+      legacyFallback: fallback,
+      legacyReason: (payload?.legacyReason as string | undefined) ?? undefined
+    };
+  }
+
+  function runClientValidation() {
+    const mappedRequiredTargets = new Map(
+      mappings
+        .filter((mapping) => !mapping.ignore && mapping.targetField)
+        .map((mapping) => [mapping.targetField, mapping.sourceHeader])
+    );
+    const requiredFields = (activeConfig?.fields ?? []).filter((field) => field.required);
+
+    const rowResults = rows.map((row, index) => {
+      const validationErrors: string[] = [];
+      for (const field of requiredFields) {
+        const header = mappedRequiredTargets.get(field.key);
+        if (!header) {
+          validationErrors.push(`${field.label} is required and is not mapped.`);
+          continue;
+        }
+        const value = String(row[header] ?? "").trim();
+        if (!value) validationErrors.push(`${field.label} is required.`);
+      }
+      return {
+        id: `client-${index + 1}`,
+        row_index: index + 1,
+        row_status: validationErrors.length === 0 ? "valid" : "error",
+        validation_errors: validationErrors,
+        relationship_resolution: {}
+      };
+    });
+
+    const summary = rowResults.reduce(
+      (acc, row) => {
+        if (row.row_status === "valid") acc.valid += 1;
+        else acc.errors += 1;
+        return acc;
+      },
+      { valid: 0, errors: 0, unresolvedRelationships: 0 }
+    );
+
+    setValidationSummary(summary);
+    setValidationRows(rowResults as Array<Record<string, unknown>>);
+    setStep("validate");
+    setMessage(
+      legacyReason
+        ? `${legacyReason} Running lightweight validation in legacy mode.`
+        : "Running lightweight validation in legacy mode."
+    );
   }
 
   async function runValidation() {
@@ -236,12 +302,16 @@ export function ImportWizard() {
     setError(null);
     setMessage(null);
     try {
-      const currentJobId = await ensureStagedBatch();
+      const staged = await ensureStagedBatch();
+      if (staged.legacyFallback) {
+        runClientValidation();
+        return;
+      }
       const response = await fetch("/api/imports/wizard/validate", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          jobId: currentJobId,
+          jobId: staged.jobId,
           matchBy: matchByInput
             .split(",")
             .map((entry) => entry.trim())
@@ -267,6 +337,33 @@ export function ImportWizard() {
     setError(null);
     setMessage(null);
     try {
+      if (legacyMode) {
+        const response = await fetch("/api/imports/wizard/legacy-commit", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            entityType,
+            sourceSystem,
+            fileName,
+            rows,
+            mappings,
+            mode: importMode
+          })
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.message ?? "Legacy import commit failed.");
+        setCommitSummary({
+          inserted: Number(payload?.successCount ?? 0),
+          updated: 0,
+          skipped: 0,
+          failed: Number(payload?.failureCount ?? 0)
+        });
+        setResultRows([]);
+        setMessage("Legacy import commit finished.");
+        setStep("results");
+        return;
+      }
+
       const response = await fetch("/api/imports/wizard/commit", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -698,13 +795,28 @@ export function ImportWizard() {
       {step === "results" ? (
         <section className="space-y-3 rounded-md border border-slate-200 p-4">
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={() => (jobId ? void loadResults(jobId) : undefined)} disabled={!jobId}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => (jobId && !legacyMode ? void loadResults(jobId) : undefined)}
+              disabled={!jobId || legacyMode}
+            >
               Refresh Results
             </Button>
-            <Button type="button" onClick={() => void rollbackBatch()} disabled={!jobId || loading}>
+            <Button
+              type="button"
+              onClick={() => void rollbackBatch()}
+              disabled={!jobId || loading || legacyMode}
+            >
               {loading ? "Rolling Back..." : "Rollback Batch"}
             </Button>
           </div>
+          {legacyMode ? (
+            <p className="text-sm text-slate-600">
+              Legacy mode is active. Row-level staged results and rollback are unavailable until
+              import engine migrations are applied.
+            </p>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>

@@ -328,6 +328,16 @@ export async function stageImportBatch(input: {
     const { error: stagingError } = await supabase.from("import_staging_rows").insert(stagingRows);
     if (stagingError) {
       if (isMissingImportStagingSchema(stagingError)) {
+        const supportsLegacyFallback = input.entityType === "contact" || input.entityType === "donations";
+        if (supportsLegacyFallback) {
+          return {
+            jobId: job.id,
+            totalRows: input.rows.length,
+            legacyFallback: true,
+            legacyReason:
+              "Import staging tables are missing. Falling back to legacy import commit for contacts/donations."
+          };
+        }
         throw new Error(
           "Import engine tables are missing in this environment. Please run the latest Supabase migrations (202603130017 and newer), then retry."
         );
@@ -336,7 +346,7 @@ export async function stageImportBatch(input: {
     }
   }
 
-  return { jobId: job.id, totalRows: input.rows.length };
+  return { jobId: job.id, totalRows: input.rows.length, legacyFallback: false };
 }
 
 export async function validateImportBatch(input: {
