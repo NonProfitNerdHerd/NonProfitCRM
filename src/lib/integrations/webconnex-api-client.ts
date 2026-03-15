@@ -58,6 +58,7 @@ export class WebconnexApiClient {
   // Pull-only integration: Webconnex calls are always GET requests.
   private readonly requestMethod = "GET" as const;
   private baseUrl: string;
+  private authType: string;
   private timeoutMs: number;
   private maxRetries: number;
   private backoffMs: number;
@@ -70,6 +71,7 @@ export class WebconnexApiClient {
 
   constructor(config: WebconnexClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+    this.authType = (config.authType || "api_key_header").toLowerCase().trim();
     this.timeoutMs = config.timeoutMs ?? 30000;
     this.maxRetries = config.maxRetries ?? 3;
     this.backoffMs = config.backoffMs ?? 1000;
@@ -81,11 +83,21 @@ export class WebconnexApiClient {
     this.apiKeyReference = config.apiKeyReference ?? null;
   }
 
+  private authMode() {
+    if (["none", "no_auth", "noauth", "public", "unauthenticated"].includes(this.authType)) {
+      return "none";
+    }
+    if (["api_key_query", "query", "query_param"].includes(this.authType)) {
+      return "api_key_query";
+    }
+    return "api_key_header";
+  }
+
   private buildHeaders() {
     const headers: HeadersInit = {
       "content-type": "application/json"
     };
-    if (this.apiKey) {
+    if (this.authMode() === "api_key_header" && this.apiKey) {
       headers[this.authHeaderName] =
         this.authHeaderName.toLowerCase() === "authorization"
           ? `Bearer ${this.apiKey}`
@@ -96,9 +108,13 @@ export class WebconnexApiClient {
 
   private async request(path: string, params?: Record<string, string | number>) {
     const url = new URL(`${this.baseUrl}${path}`);
+    const authMode = this.authMode();
     for (const [key, value] of Object.entries(params ?? {})) {
       if (value === "" || value === null || value === undefined) continue;
       url.searchParams.set(key, String(value));
+    }
+    if (authMode === "api_key_query" && this.apiKey) {
+      url.searchParams.set("api_key", this.apiKey);
     }
 
     let lastError: Error | null = null;
@@ -131,7 +147,7 @@ export class WebconnexApiClient {
     if (!this.baseUrl) {
       return { ok: false, message: "Base API URL is required for test connection." };
     }
-    if (!this.apiKey) {
+    if (this.authMode() !== "none" && !this.apiKey) {
       return {
         ok: false,
         message:
