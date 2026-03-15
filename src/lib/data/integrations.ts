@@ -1,5 +1,5 @@
-import { requireStaffPermission } from "@/lib/auth/guards";
-import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import { requireSessionContext } from "@/lib/auth/guards";
 import {
   IntegrationDashboardItem,
   IntegrationErrorQueueItem,
@@ -12,6 +12,7 @@ import { IntegrationLogService } from "@/lib/integrations/integration-log-servic
 import { IntegrationJobRunner } from "@/lib/integrations/integration-job-runner";
 import { IntegrationRetryService } from "@/lib/integrations/integration-retry-service";
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
+import { createIntegrationClient } from "@/lib/integrations/db";
 import { logAuditEvent } from "@/lib/data/audit";
 
 const registryService = new IntegrationRegistryService();
@@ -22,7 +23,37 @@ const retryService = new IntegrationRetryService();
 const webconnexSyncService = new WebconnexSyncService();
 
 async function requireIntegrationsAdmin() {
-  return requireStaffPermission("can_manage_integrations");
+  const context = await requireSessionContext();
+  const supabase = await createIntegrationClient();
+
+  const permissionChecks = await Promise.all(
+    [
+      "can_manage_integrations",
+      "can_manage_users",
+      "can_manage_org_settings",
+      "can_manage_role_templates"
+    ].map(async (permission) => {
+      const { data, error } = await supabase.rpc("has_permission", {
+        org_id: context.organizationId,
+        permission_key: permission
+      });
+      return !error && Boolean(data);
+    })
+  );
+
+  if (permissionChecks.some(Boolean)) {
+    return context;
+  }
+
+  const { data: roleKey } = await supabase.rpc("user_role_key", {
+    org_id: context.organizationId
+  });
+  const normalizedRole = String(roleKey ?? "").toLowerCase();
+  if (["administrator", "executive_leader", "executive_staff"].includes(normalizedRole)) {
+    return context;
+  }
+
+  redirect("/unauthorized");
 }
 
 async function getDefinitionAndConnection(organizationId: string, userId: string, key: string) {
@@ -171,7 +202,7 @@ export async function testIntegrationConnection(integrationKey: string) {
     return { ok: false, message: `No test connector implemented for ${integrationKey}.` };
   }
   const result = await webconnexSyncService.testConnection(connection);
-  const supabase = await createClient();
+  const supabase = await createIntegrationClient();
   await supabase
     .from("integration_connections")
     .update({
@@ -275,7 +306,7 @@ export async function resolveIntegrationError(integrationKey: string, errorId: s
     context.userId,
     integrationKey
   );
-  const supabase = await createClient();
+  const supabase = await createIntegrationClient();
   const { error } = await supabase
     .from("integration_error_queue")
     .update({

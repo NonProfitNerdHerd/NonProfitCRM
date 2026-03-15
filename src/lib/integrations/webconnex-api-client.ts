@@ -55,6 +55,8 @@ function extractNextCursor(payload: unknown): string | null {
 }
 
 export class WebconnexApiClient {
+  // Pull-only integration: Webconnex calls are always GET requests.
+  private readonly requestMethod: "GET" = "GET";
   private baseUrl: string;
   private timeoutMs: number;
   private maxRetries: number;
@@ -105,7 +107,7 @@ export class WebconnexApiClient {
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
         const response = await fetch(url.toString(), {
-          method: "GET",
+          method: this.requestMethod,
           headers: this.buildHeaders(),
           signal: controller.signal
         });
