@@ -6,6 +6,7 @@ import {
   GIVINGFUEL_CUSTOMERS_PATH,
   GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
   GIVINGFUEL_DONATIONS_INTEGRATION_NAME,
+  GIVINGFUEL_FORMS_PATH,
   GIVINGFUEL_INTEGRATION_KEY,
   GIVINGFUEL_INTEGRATION_NAME,
   GIVINGFUEL_PRODUCT_VALUE,
@@ -121,6 +122,7 @@ export class IntegrationConfigurationService {
             ? {
                 contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
                 transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
+                formsPath: GIVINGFUEL_FORMS_PATH,
                 testPath: GIVINGFUEL_CUSTOMERS_PATH,
                 authHeaderName: GIVINGFUEL_API_HEADER_NAME,
                 staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },

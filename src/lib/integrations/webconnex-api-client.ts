@@ -10,6 +10,7 @@ type WebconnexClientConfig = {
   backoffMs?: number;
   contactsPath?: string;
   transactionsPath?: string;
+  formsPath?: string;
   testPath?: string;
   defaultLimit?: number;
 };
@@ -53,11 +54,32 @@ function normalizeRecords(payload: unknown): Array<Record<string, unknown>> {
     container.items,
     container.data,
     container.customers,
-    container.results
+    container.results,
+    container.transactions,
+    container.forms,
+    container.forms_list,
+    container.formList,
+    container.form_values
   ];
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) {
       return candidate as Array<Record<string, unknown>>;
+    }
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      const nested = candidate as Record<string, unknown>;
+      const nestedCandidates = [
+        nested.records,
+        nested.items,
+        nested.data,
+        nested.results,
+        nested.transactions,
+        nested.forms
+      ];
+      for (const nestedCandidate of nestedCandidates) {
+        if (Array.isArray(nestedCandidate)) {
+          return nestedCandidate as Array<Record<string, unknown>>;
+        }
+      }
     }
   }
   return [];
@@ -151,6 +173,7 @@ export class WebconnexApiClient {
   private staticQueryParams: Record<string, string | number | boolean>;
   private contactsPath: string;
   private transactionsPath: string;
+  private formsPath: string;
   private testPath: string;
   private defaultLimit: number;
   private apiKey?: string;
@@ -166,6 +189,7 @@ export class WebconnexApiClient {
     this.staticQueryParams = config.staticQueryParams ?? {};
     this.contactsPath = config.contactsPath ?? "/contacts";
     this.transactionsPath = config.transactionsPath ?? "/transactions";
+    this.formsPath = config.formsPath ?? "/search/forms";
     this.testPath = config.testPath ?? "/health";
     this.defaultLimit = config.defaultLimit ?? 100;
     this.apiKey = config.apiKey;
@@ -319,6 +343,17 @@ export class WebconnexApiClient {
       nextCursor: extractedCursor || (hasMore ? fallbackCursor : null),
       hasMore
     };
+  }
+
+  async getForms(params?: { limit?: number }): Promise<Array<Record<string, unknown>>> {
+    const queryParams: Record<string, string | number> = {};
+    const limit =
+      typeof params?.limit === "number" && params.limit > 0 ? Math.min(params.limit, 500) : 500;
+    queryParams.limit = limit;
+    const payload = await this.request(this.formsPath, {
+      ...queryParams
+    });
+    return normalizeRecords(payload);
   }
 
   async getContactById(id: string): Promise<Record<string, unknown>> {

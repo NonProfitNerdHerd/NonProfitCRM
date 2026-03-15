@@ -23,6 +23,7 @@ import {
   GIVINGFUEL_CUSTOMERS_PATH,
   GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
   GIVINGFUEL_DONATIONS_INTEGRATION_NAME,
+  GIVINGFUEL_FORMS_PATH,
   GIVINGFUEL_INTEGRATION_KEY,
   GIVINGFUEL_INTEGRATION_NAME,
   GIVINGFUEL_PRODUCT_VALUE,
@@ -146,6 +147,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       configuration_json: {
         contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
         transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
+        formsPath: GIVINGFUEL_FORMS_PATH,
         testPath: GIVINGFUEL_CUSTOMERS_PATH,
         authHeaderName: GIVINGFUEL_API_HEADER_NAME,
         staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
@@ -219,6 +221,7 @@ function buildSchemaFreeWebconnexConnection(
     configuration_json: {
       contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
       transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
+      formsPath: GIVINGFUEL_FORMS_PATH,
       testPath: GIVINGFUEL_CUSTOMERS_PATH,
       authHeaderName: GIVINGFUEL_API_HEADER_NAME,
       staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
@@ -614,6 +617,7 @@ export async function updateIntegrationConfiguration(
             ...(payload.configuration ?? {}),
             contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
             transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
+            formsPath: GIVINGFUEL_FORMS_PATH,
             testPath: GIVINGFUEL_CUSTOMERS_PATH,
             authHeaderName: GIVINGFUEL_API_HEADER_NAME,
             staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },

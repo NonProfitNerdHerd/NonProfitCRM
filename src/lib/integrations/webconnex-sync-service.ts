@@ -8,6 +8,7 @@ import {
   GIVINGFUEL_API_HEADER_NAME,
   GIVINGFUEL_CUSTOMERS_PATH,
   GIVINGFUEL_DEFAULT_PAGE_LIMIT,
+  GIVINGFUEL_FORMS_PATH,
   GIVINGFUEL_PRODUCT_VALUE,
   GIVINGFUEL_TRANSACTIONS_PATH
 } from "@/lib/integrations/givingfuel-contacts-config";
@@ -64,6 +65,7 @@ export class WebconnexSyncService {
       backoffMs: Number(retry.backoffMs ?? 1000),
       contactsPath: String(config.contactsPath ?? GIVINGFUEL_CUSTOMERS_PATH),
       transactionsPath: String(config.transactionsPath ?? GIVINGFUEL_TRANSACTIONS_PATH),
+      formsPath: String(config.formsPath ?? GIVINGFUEL_FORMS_PATH),
       testPath: String(config.testPath ?? GIVINGFUEL_CUSTOMERS_PATH),
       defaultLimit: Number(config.defaultLimit ?? GIVINGFUEL_DEFAULT_PAGE_LIMIT)
     });
@@ -118,6 +120,31 @@ export class WebconnexSyncService {
       : typeof mappedPageField === "string" && mappedPageField.trim()
         ? [mappedPageField.trim()]
         : ["formName", "form_name", "page", "page_name", "pageName", "formId", "formAccRef", "campaign"];
+
+    // Preferred source: list all currently configured forms/pages in GivingFuel.
+    try {
+      const formRecords = await client.getForms({ limit: 500 });
+      for (const record of formRecords) {
+        const value = this.readRecordValue(record, [
+          "formName",
+          "name",
+          "title",
+          "displayName",
+          "form_name",
+          ...pageKeys
+        ]);
+        if (value) detectedPages.add(value);
+      }
+      if (detectedPages.size > 0) {
+        return {
+          detectedPages: Array.from(detectedPages).sort((a, b) => a.localeCompare(b)),
+          pagesScanned: 1,
+          transactionsScanned: 0
+        };
+      }
+    } catch {
+      // Fallback to transactions scan when forms endpoint is unavailable in tenant/environment.
+    }
 
     while (hasMore && pages < maxPages) {
       pages += 1;
