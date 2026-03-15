@@ -46,6 +46,12 @@ export function GivingFuelContactsSetup({
   const [syncedContacts, setSyncedContacts] = useState<SyncedContact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
+  const [resolvingErrorId, setResolvingErrorId] = useState<string | null>(null);
+  const [payloadViewer, setPayloadViewer] = useState<Record<string, unknown> | null>(null);
+  const [jobViewer, setJobViewer] = useState<{
+    job: Record<string, unknown> | null;
+    logs: Array<Record<string, unknown>>;
+  } | null>(null);
 
   const apiPaused = Boolean(data.apiPaused);
   const config = (data.connection.configuration_json as Record<string, unknown>) ?? {};
@@ -99,6 +105,43 @@ export function GivingFuelContactsSetup({
       setError(actionError instanceof Error ? actionError.message : "Request failed.");
     } finally {
       setLoading(null);
+    }
+  }
+
+  async function resolveError(errorId: string) {
+    setResolvingErrorId(errorId);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(
+        `/api/admin/integrations/${encodeURIComponent(integrationKey)}/errors/${encodeURIComponent(errorId)}/resolve`,
+        { method: "POST" }
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.message ?? "Unable to resolve error.");
+      await refresh();
+      setMessage("Error marked resolved.");
+    } catch (resolveErrorValue) {
+      setError(resolveErrorValue instanceof Error ? resolveErrorValue.message : "Unable to resolve error.");
+    } finally {
+      setResolvingErrorId(null);
+    }
+  }
+
+  async function openJob(jobId: string) {
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/admin/integrations/${encodeURIComponent(integrationKey)}/jobs/${encodeURIComponent(jobId)}`
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.message ?? "Unable to load job detail.");
+      setJobViewer({
+        job: (payload?.job ?? null) as Record<string, unknown> | null,
+        logs: (payload?.logs ?? []) as Array<Record<string, unknown>>
+      });
+    } catch (jobError) {
+      setError(jobError instanceof Error ? jobError.message : "Unable to load job detail.");
     }
   }
 
@@ -241,6 +284,116 @@ export function GivingFuelContactsSetup({
       </section>
 
       <section className="rounded-md border border-slate-200 p-4">
+        <h4 className="mb-2 text-sm font-semibold text-slate-900">Sync History</h4>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-600">
+                <th className="py-2">Job ID</th>
+                <th className="py-2">Scope</th>
+                <th className="py-2">Started</th>
+                <th className="py-2">Completed</th>
+                <th className="py-2">Status</th>
+                <th className="py-2">Processed</th>
+                <th className="py-2">Failed</th>
+                <th className="py-2">Error Summary</th>
+                <th className="py-2">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.jobs.map((job) => (
+                <tr key={String(job.id)} className="border-b border-slate-100">
+                  <td className="py-2">{String(job.id ?? "-")}</td>
+                  <td className="py-2">{String(job.sync_scope ?? "-")}</td>
+                  <td className="py-2">{formatDate(job.started_date as string | null)}</td>
+                  <td className="py-2">{formatDate(job.completed_date as string | null)}</td>
+                  <td className="py-2">{String(job.status ?? "-")}</td>
+                  <td className="py-2">{String(job.records_processed ?? 0)}</td>
+                  <td className="py-2">{String(job.records_failed ?? 0)}</td>
+                  <td className="py-2">{String(job.error_summary ?? "-")}</td>
+                  <td className="py-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void openJob(String(job.id))}
+                    >
+                      Open
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {data.jobs.length === 0 ? (
+                <tr>
+                  <td className="py-3 text-slate-500" colSpan={9}>
+                    No sync jobs found yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-slate-200 p-4">
+        <h4 className="mb-2 text-sm font-semibold text-slate-900">Error Queue</h4>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-600">
+                <th className="py-2">Error ID</th>
+                <th className="py-2">Job ID</th>
+                <th className="py-2">Source Record</th>
+                <th className="py-2">Error</th>
+                <th className="py-2">Retry Count</th>
+                <th className="py-2">Status</th>
+                <th className="py-2">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.errors.map((row) => (
+                <tr key={String(row.id)} className="border-b border-slate-100">
+                  <td className="py-2">{String(row.id ?? "-")}</td>
+                  <td className="py-2">{String(row.sync_job_id ?? "-")}</td>
+                  <td className="py-2">{String(row.source_record_id ?? "-")}</td>
+                  <td className="py-2">{String(row.error_message ?? "-")}</td>
+                  <td className="py-2">{String(row.retry_count ?? 0)}</td>
+                  <td className="py-2">{String(row.status ?? "-")}</td>
+                  <td className="py-2">
+                    <div className="flex flex-wrap gap-1">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          setPayloadViewer((row.payload_json as Record<string, unknown>) ?? {})
+                        }
+                      >
+                        Open Payload
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void resolveError(String(row.id))}
+                        disabled={resolvingErrorId === String(row.id)}
+                      >
+                        {resolvingErrorId === String(row.id) ? "Saving..." : "Mark Resolved"}
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {data.errors.length === 0 ? (
+                <tr>
+                  <td className="py-3 text-slate-500" colSpan={7}>
+                    No unresolved errors in queue.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-slate-200 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-sm font-semibold text-slate-900">Recently Synced Contacts</h4>
           <div className="flex items-center gap-2">
@@ -312,6 +465,46 @@ export function GivingFuelContactsSetup({
           </table>
         </div>
       </section>
+
+      {jobViewer ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="max-h-[80vh] w-full max-w-4xl overflow-auto rounded-md bg-white p-4 shadow-lg">
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-slate-900">Sync Job Detail</h4>
+              <Button type="button" variant="secondary" onClick={() => setJobViewer(null)}>
+                Close
+              </Button>
+            </div>
+            <p className="mb-2 text-xs text-slate-500">
+              Job: {String(jobViewer.job?.id ?? "-")} | Status:{" "}
+              {String(jobViewer.job?.status ?? "-")}
+            </p>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-slate-700">
+                {JSON.stringify(jobViewer.logs, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {payloadViewer ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="max-h-[80vh] w-full max-w-4xl overflow-auto rounded-md bg-white p-4 shadow-lg">
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-slate-900">Error Payload</h4>
+              <Button type="button" variant="secondary" onClick={() => setPayloadViewer(null)}>
+                Close
+              </Button>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-slate-700">
+                {JSON.stringify(payloadViewer, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
