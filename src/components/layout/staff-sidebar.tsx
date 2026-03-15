@@ -101,7 +101,7 @@ export function StaffSidebar() {
       <div className="mb-8">
         <Link href="/staff/dashboard" className="block">
           <Image
-            src="/herdcore-logo.png"
+            src="/HerdCoreLogo.png"
             alt="HerdCore"
             width={220}
             height={72}
