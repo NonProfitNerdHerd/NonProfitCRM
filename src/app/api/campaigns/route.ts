@@ -5,7 +5,7 @@ import { createCampaign, listCampaigns, canCreateCampaigns } from "@/lib/data/ca
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const status = url.searchParams.get("status") ?? undefined;
+    const status = url.searchParams.get("status") ?? "Active";
     const q = url.searchParams.get("q") ?? undefined;
 
     const [campaigns, canCreate] = await Promise.all([

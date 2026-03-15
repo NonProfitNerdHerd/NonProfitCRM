@@ -9,7 +9,7 @@ import {
 export default async function CampaignsPage() {
   await requireStaffPermission("can_view_donations");
   const [campaigns, canCreate] = await Promise.all([
-    listCampaigns({ status: "All" }),
+    listCampaigns({ status: "Active" }),
     canCreateCampaigns()
   ]);
 

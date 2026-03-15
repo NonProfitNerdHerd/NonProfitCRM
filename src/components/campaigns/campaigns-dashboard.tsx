@@ -25,7 +25,7 @@ export function CampaignsDashboard({
   initialCampaigns: Campaign[];
   canCreate: boolean;
 }) {
-  const [statusFilter, setStatusFilter] = useState<"All" | "Active" | "Inactive">("All");
+  const [statusFilter, setStatusFilter] = useState<"All" | "Active" | "Inactive">("Active");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<Campaign[]>(initialCampaigns);
   const [loading, setLoading] = useState(false);
@@ -93,6 +93,31 @@ export function CampaignsDashboard({
     }));
   }
 
+  const expandableParentIds = useMemo(
+    () => campaignTree.filter((node) => node.children.length > 0).map((node) => node.parent.id),
+    [campaignTree]
+  );
+
+  function expandAllParents() {
+    setCollapsedByParentId((previous) => {
+      const next = { ...previous };
+      for (const parentId of expandableParentIds) {
+        next[parentId] = false;
+      }
+      return next;
+    });
+  }
+
+  function collapseAllParents() {
+    setCollapsedByParentId((previous) => {
+      const next = { ...previous };
+      for (const parentId of expandableParentIds) {
+        next[parentId] = true;
+      }
+      return next;
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -138,6 +163,24 @@ export function CampaignsDashboard({
           />
           <Button type="button" variant="secondary" onClick={applyFilters}>
             {loading ? "Searching..." : "Apply"}
+          </Button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={expandAllParents}
+            disabled={expandableParentIds.length === 0}
+          >
+            Expand All
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={collapseAllParents}
+            disabled={expandableParentIds.length === 0}
+          >
+            Collapse All
           </Button>
         </div>
       </div>
