@@ -21,6 +21,101 @@ const logService = new IntegrationLogService();
 const jobRunner = new IntegrationJobRunner();
 const retryService = new IntegrationRetryService();
 const webconnexSyncService = new WebconnexSyncService();
+const INTEGRATIONS_SCHEMA_ERROR_MESSAGE =
+  "Integrations schema is not available in this environment yet. Run Supabase migration 202603130021 (and newer) and retry.";
+
+function isMissingIntegrationsSchemaError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: string; message?: string; details?: string };
+  const text = `${candidate.message ?? ""} ${candidate.details ?? ""}`.toLowerCase();
+  if (candidate.code === "42P01" || candidate.code === "42703") return true;
+  return (
+    text.includes("does not exist") &&
+    (text.includes("integration_") ||
+      text.includes("contact_external_references") ||
+      text.includes("donation_external_references"))
+  );
+}
+
+function createFallbackDetail(integrationKey: string, organizationId: string) {
+  const now = new Date().toISOString();
+  const name = integrationKey === "webconnex" ? "Webconnex" : integrationKey;
+  return {
+    definition: {
+      id: `fallback-${integrationKey}`,
+      name,
+      provider_key: integrationKey,
+      description:
+        integrationKey === "webconnex"
+          ? "Webconnex API synchronization for contacts and donations/transactions."
+          : "Integration metadata unavailable until migrations are applied.",
+      category: "donations",
+      is_active: true,
+      supports_manual_sync: true,
+      supports_scheduled_sync: true,
+      supports_test_connection: true,
+      created_at: now,
+      updated_at: now
+    },
+    connection: {
+      id: `fallback-${integrationKey}-connection`,
+      organization_id: organizationId,
+      integration_definition_id: `fallback-${integrationKey}`,
+      name,
+      base_url: "",
+      auth_type: "api_key_header",
+      api_key_reference: null,
+      is_enabled: false,
+      connection_status: "not_tested",
+      last_connection_test_date: null,
+      last_connection_test_result: INTEGRATIONS_SCHEMA_ERROR_MESSAGE,
+      timeout_ms: 30000,
+      retry_settings: { maxRetries: 3, backoffMs: 1000 },
+      debug_logging_enabled: false,
+      configuration_json: {
+        contactsPath: "/contacts",
+        transactionsPath: "/transactions",
+        testPath: "/health",
+        authHeaderName: "Authorization"
+      },
+      sync_settings_json: {
+        syncMode: "manual_and_scheduled",
+        scheduleFrequency: "daily",
+        contactSyncEnabled: true,
+        donationSyncEnabled: true,
+        fullSyncEnabled: true,
+        incrementalSyncEnabled: true,
+        fallbackContactMatch: "email_if_configured",
+        initialImportStartDate: null,
+        lastSuccessfulSyncDate: null
+      },
+      field_mapping_json: {
+        contacts: {},
+        donations: {}
+      },
+      created_by: null,
+      updated_by: null,
+      created_at: now,
+      updated_at: now
+    },
+    jobs: [],
+    errors: [],
+    overview: {
+      integrationName: name,
+      description:
+        "Integration framework is installed in code, but database migration is pending in this environment.",
+      currentStatus: "Disabled",
+      connectionStatus: "Not Tested",
+      lastSuccessfulSync: null,
+      lastFailedSync: null,
+      lastSyncDurationMs: null,
+      totalContactsSynced: 0,
+      totalDonationsSynced: 0,
+      failedRecordsCount: 0
+    },
+    schemaWarning: INTEGRATIONS_SCHEMA_ERROR_MESSAGE
+  };
+}
 
 async function requireIntegrationsAdmin() {
   const context = await requireSessionContext();
@@ -77,82 +172,133 @@ function summarizeLastResult(job: IntegrationSyncJob | null) {
 
 export async function listIntegrationsForAdmin() {
   const context = await requireIntegrationsAdmin();
-  const definitions = await registryService.listDefinitions();
-  const rows: IntegrationDashboardItem[] = [];
-  for (const definition of definitions) {
-    const connection = await configurationService.ensureConnection(
-      context.organizationId,
-      context.userId,
-      definition
-    );
-    const jobs = await logService.listJobs(context.organizationId, connection.id);
-    rows.push({
-      definition,
-      connection,
-      lastJob: jobs[0] ?? null
-    });
-  }
-
-  const failedJobs = rows.filter((row) => row.lastJob?.status === "failed").length;
-  const enabled = rows.filter((row) => row.connection?.is_enabled).length;
-  const last24hActivity = rows.reduce((acc, row) => {
-    const started = row.lastJob?.started_date;
-    if (!started) return acc;
-    return new Date(started).getTime() > Date.now() - 24 * 60 * 60 * 1000 ? acc + 1 : acc;
-  }, 0);
-
-  return {
-    integrations: rows.map((row) => ({
-      integrationKey: row.definition.provider_key,
-      name: row.definition.name,
-      providerType: row.definition.category,
-      description: row.definition.description,
-      status: row.connection?.is_enabled ? "Enabled" : "Disabled",
-      connectionStatus: row.connection?.connection_status ?? "Not Tested",
-      lastSyncDate: row.lastJob?.completed_date ?? null,
-      lastSyncResult: summarizeLastResult(row.lastJob),
-      isEnabled: Boolean(row.connection?.is_enabled)
-    })),
-    summary: {
-      totalIntegrations: rows.length,
-      enabledIntegrations: enabled,
-      failedJobs,
-      last24hSyncActivity: last24hActivity
+  try {
+    const definitions = await registryService.listDefinitions();
+    const rows: IntegrationDashboardItem[] = [];
+    for (const definition of definitions) {
+      const connection = await configurationService.ensureConnection(
+        context.organizationId,
+        context.userId,
+        definition
+      );
+      const jobs = await logService.listJobs(context.organizationId, connection.id);
+      rows.push({
+        definition,
+        connection,
+        lastJob: jobs[0] ?? null
+      });
     }
-  };
+
+    const failedJobs = rows.filter((row) => row.lastJob?.status === "failed").length;
+    const enabled = rows.filter((row) => row.connection?.is_enabled).length;
+    const last24hActivity = rows.reduce((acc, row) => {
+      const started = row.lastJob?.started_date;
+      if (!started) return acc;
+      return new Date(started).getTime() > Date.now() - 24 * 60 * 60 * 1000 ? acc + 1 : acc;
+    }, 0);
+
+    return {
+      integrations: rows.map((row) => ({
+        integrationKey: row.definition.provider_key,
+        name: row.definition.name,
+        providerType: row.definition.category,
+        description: row.definition.description,
+        status: row.connection?.is_enabled ? "Enabled" : "Disabled",
+        connectionStatus: row.connection?.connection_status ?? "Not Tested",
+        lastSyncDate: row.lastJob?.completed_date ?? null,
+        lastSyncResult: summarizeLastResult(row.lastJob),
+        isEnabled: Boolean(row.connection?.is_enabled)
+      })),
+      summary: {
+        totalIntegrations: rows.length,
+        enabledIntegrations: enabled,
+        failedJobs,
+        last24hSyncActivity: last24hActivity
+      }
+    };
+  } catch (error) {
+    if (!isMissingIntegrationsSchemaError(error)) throw error;
+    return {
+      integrations: [
+        {
+          integrationKey: "webconnex",
+          name: "Webconnex",
+          providerType: "donations",
+          description:
+            "Webconnex API synchronization is available after migration 202603130021 is applied.",
+          status: "Disabled",
+          connectionStatus: "Not Tested",
+          lastSyncDate: null,
+          lastSyncResult: "Migration required",
+          isEnabled: false
+        }
+      ],
+      summary: {
+        totalIntegrations: 1,
+        enabledIntegrations: 0,
+        failedJobs: 0,
+        last24hSyncActivity: 0
+      },
+      schemaWarning: INTEGRATIONS_SCHEMA_ERROR_MESSAGE
+    };
+  }
 }
 
 export async function getIntegrationDetailForAdmin(integrationKey: string) {
   const context = await requireIntegrationsAdmin();
-  const { definition, connection } = await getDefinitionAndConnection(
-    context.organizationId,
-    context.userId,
-    integrationKey
-  );
-  const jobs = await logService.listJobs(context.organizationId, connection.id);
-  const errors = await logService.listErrors(context.organizationId, connection.id);
+  try {
+    const { definition, connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    const jobs = await logService.listJobs(context.organizationId, connection.id);
+    const errors = await logService.listErrors(context.organizationId, connection.id);
 
-  const lastSuccess = jobs.find((job) => job.status === "completed" || job.status === "completed_with_errors");
-  const lastFailure = jobs.find((job) => job.status === "failed");
+    const lastSuccess = jobs.find(
+      (job) => job.status === "completed" || job.status === "completed_with_errors"
+    );
+    const lastFailure = jobs.find((job) => job.status === "failed");
 
-  return {
-    definition,
-    connection,
-    jobs,
-    errors,
-    overview: {
-      integrationName: definition.name,
-      description: definition.description,
-      currentStatus: connection.is_enabled ? "Enabled" : "Disabled",
-      connectionStatus: connection.connection_status,
-      lastSuccessfulSync: lastSuccess?.completed_date ?? null,
-      lastFailedSync: lastFailure?.completed_date ?? null,
-      lastSyncDurationMs: jobs[0]?.duration_ms ?? null,
-      totalContactsSynced: jobs.reduce((sum, job) => sum + (job.sync_scope === "contacts" || job.sync_scope === "all" ? job.records_processed : 0), 0),
-      totalDonationsSynced: jobs.reduce((sum, job) => sum + (job.sync_scope === "donations" || job.sync_scope === "all" ? job.records_processed : 0), 0),
-      failedRecordsCount: jobs.reduce((sum, job) => sum + Number(job.records_failed ?? 0), 0)
-    }
-  };
+    return {
+      definition,
+      connection,
+      jobs,
+      errors,
+      overview: {
+        integrationName: definition.name,
+        description: definition.description,
+        currentStatus: connection.is_enabled ? "Enabled" : "Disabled",
+        connectionStatus: connection.connection_status,
+        lastSuccessfulSync: lastSuccess?.completed_date ?? null,
+        lastFailedSync: lastFailure?.completed_date ?? null,
+        lastSyncDurationMs: jobs[0]?.duration_ms ?? null,
+        totalContactsSynced: jobs.reduce(
+          (sum, job) =>
+            sum +
+            (job.sync_scope === "contacts" || job.sync_scope === "all"
+              ? job.records_processed
+              : 0),
+          0
+        ),
+        totalDonationsSynced: jobs.reduce(
+          (sum, job) =>
+            sum +
+            (job.sync_scope === "donations" || job.sync_scope === "all"
+              ? job.records_processed
+              : 0),
+          0
+        ),
+        failedRecordsCount: jobs.reduce(
+          (sum, job) => sum + Number(job.records_failed ?? 0),
+          0
+        )
+      }
+    };
+  } catch (error) {
+    if (!isMissingIntegrationsSchemaError(error)) throw error;
+    return createFallbackDetail(integrationKey, context.organizationId);
+  }
 }
 
 export async function updateIntegrationConfiguration(
@@ -172,108 +318,143 @@ export async function updateIntegrationConfiguration(
   }
 ) {
   const context = await requireIntegrationsAdmin();
-  const definition = await registryService.getDefinition(integrationKey);
-  if (!definition) throw new Error("Integration not found.");
-  const connection = await configurationService.upsertConfiguration({
-    organizationId: context.organizationId,
-    userId: context.userId,
-    definition,
-    payload
-  });
-  await logAuditEvent({
-    organizationId: context.organizationId,
-    actorUserId: context.userId,
-    actionType: "integration_configuration_updated",
-    targetEntityType: "integration_connections",
-    targetEntityId: connection.id,
-    metadata: { integrationKey }
-  });
-  return connection;
+  try {
+    const definition = await registryService.getDefinition(integrationKey);
+    if (!definition) throw new Error("Integration not found.");
+    const connection = await configurationService.upsertConfiguration({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      definition,
+      payload
+    });
+    await logAuditEvent({
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      actionType: "integration_configuration_updated",
+      targetEntityType: "integration_connections",
+      targetEntityId: connection.id,
+      metadata: { integrationKey }
+    });
+    return connection;
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
+    }
+    throw error;
+  }
 }
 
 export async function testIntegrationConnection(integrationKey: string) {
   const context = await requireIntegrationsAdmin();
-  const { connection } = await getDefinitionAndConnection(
-    context.organizationId,
-    context.userId,
-    integrationKey
-  );
-  if (integrationKey !== "webconnex") {
-    return { ok: false, message: `No test connector implemented for ${integrationKey}.` };
+  try {
+    const { connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    if (integrationKey !== "webconnex") {
+      return { ok: false, message: `No test connector implemented for ${integrationKey}.` };
+    }
+    const result = await webconnexSyncService.testConnection(connection);
+    const supabase = await createIntegrationClient();
+    await supabase
+      .from("integration_connections")
+      .update({
+        connection_status: result.ok ? "connected" : "failed",
+        last_connection_test_date: new Date().toISOString(),
+        last_connection_test_result: result.message,
+        updated_by: context.userId
+      })
+      .eq("organization_id", context.organizationId)
+      .eq("id", connection.id);
+    return result;
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
+    }
+    throw error;
   }
-  const result = await webconnexSyncService.testConnection(connection);
-  const supabase = await createIntegrationClient();
-  await supabase
-    .from("integration_connections")
-    .update({
-      connection_status: result.ok ? "connected" : "failed",
-      last_connection_test_date: new Date().toISOString(),
-      last_connection_test_result: result.message,
-      updated_by: context.userId
-    })
-    .eq("organization_id", context.organizationId)
-    .eq("id", connection.id);
-  return result;
 }
 
 export async function runIntegrationSync(integrationKey: string, scope: SyncScope) {
   const context = await requireIntegrationsAdmin();
-  const { definition, connection } = await getDefinitionAndConnection(
-    context.organizationId,
-    context.userId,
-    integrationKey
-  );
-  const result = await jobRunner.run({
-    organizationId: context.organizationId,
-    userId: context.userId,
-    definition,
-    connection,
-    scope,
-    jobType: "manual"
-  });
-  await logAuditEvent({
-    organizationId: context.organizationId,
-    actorUserId: context.userId,
-    actionType: "integration_manual_sync_run",
-    targetEntityType: "integration_connections",
-    targetEntityId: connection.id,
-    metadata: { integrationKey, scope, ...result }
-  });
-  return result;
+  try {
+    const { definition, connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    const result = await jobRunner.run({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      definition,
+      connection,
+      scope,
+      jobType: "manual"
+    });
+    await logAuditEvent({
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      actionType: "integration_manual_sync_run",
+      targetEntityType: "integration_connections",
+      targetEntityId: connection.id,
+      metadata: { integrationKey, scope, ...result }
+    });
+    return result;
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
+    }
+    throw error;
+  }
 }
 
 export async function retryFailedIntegrationSync(integrationKey: string) {
   const context = await requireIntegrationsAdmin();
-  const { connection } = await getDefinitionAndConnection(
-    context.organizationId,
-    context.userId,
-    integrationKey
-  );
-  const result = await retryService.retryFailed({
-    organizationId: context.organizationId,
-    userId: context.userId,
-    integrationKey,
-    connection
-  });
-  await logAuditEvent({
-    organizationId: context.organizationId,
-    actorUserId: context.userId,
-    actionType: "integration_retry_failed_run",
-    targetEntityType: "integration_connections",
-    targetEntityId: connection.id,
-    metadata: { integrationKey, result }
-  });
-  return result;
+  try {
+    const { connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    const result = await retryService.retryFailed({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      integrationKey,
+      connection
+    });
+    await logAuditEvent({
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      actionType: "integration_retry_failed_run",
+      targetEntityType: "integration_connections",
+      targetEntityId: connection.id,
+      metadata: { integrationKey, result }
+    });
+    return result;
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
+    }
+    throw error;
+  }
 }
 
 export async function listIntegrationJobs(integrationKey: string): Promise<IntegrationSyncJob[]> {
   const context = await requireIntegrationsAdmin();
-  const { connection } = await getDefinitionAndConnection(
-    context.organizationId,
-    context.userId,
-    integrationKey
-  );
-  return logService.listJobs(context.organizationId, connection.id);
+  try {
+    const { connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    return logService.listJobs(context.organizationId, connection.id);
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function getIntegrationJob(
@@ -281,50 +462,71 @@ export async function getIntegrationJob(
   jobId: string
 ): Promise<{ job: IntegrationSyncJob | null; logs: Array<Record<string, unknown>> }> {
   const context = await requireIntegrationsAdmin();
-  await getDefinitionAndConnection(context.organizationId, context.userId, integrationKey);
-  const job = await logService.getJob(context.organizationId, jobId);
-  const logs = await logService.listJobLogs(context.organizationId, jobId);
-  return { job, logs };
+  try {
+    await getDefinitionAndConnection(context.organizationId, context.userId, integrationKey);
+    const job = await logService.getJob(context.organizationId, jobId);
+    const logs = await logService.listJobLogs(context.organizationId, jobId);
+    return { job, logs };
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      return { job: null, logs: [] };
+    }
+    throw error;
+  }
 }
 
 export async function listIntegrationErrors(
   integrationKey: string
 ): Promise<IntegrationErrorQueueItem[]> {
   const context = await requireIntegrationsAdmin();
-  const { connection } = await getDefinitionAndConnection(
-    context.organizationId,
-    context.userId,
-    integrationKey
-  );
-  return logService.listErrors(context.organizationId, connection.id);
+  try {
+    const { connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    return logService.listErrors(context.organizationId, connection.id);
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function resolveIntegrationError(integrationKey: string, errorId: string) {
   const context = await requireIntegrationsAdmin();
-  const { connection } = await getDefinitionAndConnection(
-    context.organizationId,
-    context.userId,
-    integrationKey
-  );
-  const supabase = await createIntegrationClient();
-  const { error } = await supabase
-    .from("integration_error_queue")
-    .update({
-      status: "resolved",
-      next_retry_date: null,
-      last_retry_date: new Date().toISOString()
-    })
-    .eq("organization_id", context.organizationId)
-    .eq("integration_connection_id", connection.id)
-    .eq("id", errorId);
-  if (error) throw error;
-  await logAuditEvent({
-    organizationId: context.organizationId,
-    actorUserId: context.userId,
-    actionType: "integration_error_resolved",
-    targetEntityType: "integration_error_queue",
-    targetEntityId: errorId,
-    metadata: { integrationKey }
-  });
-  return { ok: true };
+  try {
+    const { connection } = await getDefinitionAndConnection(
+      context.organizationId,
+      context.userId,
+      integrationKey
+    );
+    const supabase = await createIntegrationClient();
+    const { error } = await supabase
+      .from("integration_error_queue")
+      .update({
+        status: "resolved",
+        next_retry_date: null,
+        last_retry_date: new Date().toISOString()
+      })
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", connection.id)
+      .eq("id", errorId);
+    if (error) throw error;
+    await logAuditEvent({
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      actionType: "integration_error_resolved",
+      targetEntityType: "integration_error_queue",
+      targetEntityId: errorId,
+      metadata: { integrationKey }
+    });
+    return { ok: true };
+  } catch (error) {
+    if (isMissingIntegrationsSchemaError(error)) {
+      throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
+    }
+    throw error;
+  }
 }
