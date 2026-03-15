@@ -1,9 +1,7 @@
 import { requireStaffPermission } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 import {
-  IntegrationConnection,
   IntegrationDashboardItem,
-  IntegrationDefinition,
   IntegrationErrorQueueItem,
   IntegrationSyncJob,
   SyncScope
