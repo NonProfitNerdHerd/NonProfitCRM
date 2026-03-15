@@ -121,7 +121,7 @@ export function GivingFuelContactsSetup({
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.message ?? "Unable to resolve error.");
       await refresh();
-      setMessage("Error marked resolved.");
+      setMessage(payload?.message ?? "Retry succeeded and error resolved.");
     } catch (resolveErrorValue) {
       setError(resolveErrorValue instanceof Error ? resolveErrorValue.message : "Unable to resolve error.");
     } finally {
@@ -402,6 +402,9 @@ export function GivingFuelContactsSetup({
         {activeTab === "errors" ? (
           <div>
             <h4 className="mb-2 text-sm font-semibold text-slate-900">Error Queue</h4>
+            <p className="mb-2 text-xs text-slate-500">
+              Retry + Resolve attempts this specific record again and only resolves it when retry succeeds.
+            </p>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -441,7 +444,9 @@ export function GivingFuelContactsSetup({
                             onClick={() => void resolveError(String(row.id))}
                             disabled={resolvingErrorId === String(row.id)}
                           >
-                            {resolvingErrorId === String(row.id) ? "Saving..." : "Mark Resolved"}
+                            {resolvingErrorId === String(row.id)
+                              ? "Retrying..."
+                              : "Retry + Resolve"}
                           </Button>
                         </div>
                       </td>

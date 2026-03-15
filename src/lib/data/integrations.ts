@@ -14,6 +14,7 @@ import { IntegrationLogService } from "@/lib/integrations/integration-log-servic
 import { IntegrationJobRunner } from "@/lib/integrations/integration-job-runner";
 import { IntegrationRetryService } from "@/lib/integrations/integration-retry-service";
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
+import { ContactSyncService } from "@/lib/integrations/contact-sync-service";
 import { createIntegrationClient } from "@/lib/integrations/db";
 import { logAuditEvent } from "@/lib/data/audit";
 import {
@@ -31,6 +32,7 @@ const logService = new IntegrationLogService();
 const jobRunner = new IntegrationJobRunner();
 const retryService = new IntegrationRetryService();
 const webconnexSyncService = new WebconnexSyncService();
+const contactSyncService = new ContactSyncService();
 const INTEGRATIONS_API_PAUSED = process.env.INTEGRATIONS_API_PAUSED === "true";
 const INTEGRATIONS_API_PAUSED_MESSAGE =
   "Integrations API is temporarily disabled. We will restart this integration implementation from scratch.";
@@ -678,6 +680,125 @@ export async function resolveIntegrationError(integrationKey: string, errorId: s
       integrationKey
     );
     const supabase = await createIntegrationClient();
+    const { data: queuedError, error: loadError } = await supabase
+      .from("integration_error_queue")
+      .select("*")
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", connection.id)
+      .eq("id", errorId)
+      .maybeSingle();
+    if (loadError) throw loadError;
+    if (!queuedError) {
+      throw new Error("Error queue item not found.");
+    }
+
+    if (
+      integrationKey === GIVINGFUEL_INTEGRATION_KEY &&
+      String(queuedError.entity_type ?? "") === "contact"
+    ) {
+      const payload = queuedError.payload_json;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("Retry payload is missing or invalid.");
+      }
+
+      const retryJob = await logService.createJob({
+        organizationId: context.organizationId,
+        integrationConnectionId: connection.id,
+        jobType: "retry_failed",
+        syncScope: "contacts",
+        triggeredBy: context.userId,
+        triggeredByType: "manual"
+      });
+
+      try {
+        const retried = await contactSyncService.retrySingleRecord({
+          organizationId: context.organizationId,
+          connection,
+          job: retryJob,
+          record: payload as Record<string, unknown>,
+          logService
+        });
+
+        await logService.completeJob({
+          organizationId: context.organizationId,
+          jobId: retryJob.id,
+          status: "completed",
+          recordsProcessed: 1,
+          recordsCreated: retried.created,
+          recordsUpdated: retried.updated,
+          recordsFailed: 0,
+          cursor: null,
+          lastSuccessfulSyncDate: new Date().toISOString(),
+          errorSummary: null,
+          startedDate: retryJob.started_date
+        });
+
+        const { error: resolveError } = await supabase
+          .from("integration_error_queue")
+          .update({
+            status: "resolved",
+            next_retry_date: null,
+            last_retry_date: new Date().toISOString(),
+            retry_count: Number(queuedError.retry_count ?? 0) + 1
+          })
+          .eq("organization_id", context.organizationId)
+          .eq("integration_connection_id", connection.id)
+          .eq("id", errorId);
+        if (resolveError) throw resolveError;
+
+        await logAuditEvent({
+          organizationId: context.organizationId,
+          actorUserId: context.userId,
+          actionType: "integration_error_resolved",
+          targetEntityType: "integration_error_queue",
+          targetEntityId: errorId,
+          metadata: {
+            integrationKey,
+            retryMode: "single_payload",
+            sourceRecordId: retried.externalId
+          }
+        });
+
+        return {
+          ok: true,
+          retried: true,
+          message: "Retry succeeded and the contact was synchronized."
+        };
+      } catch (retryError) {
+        const retryMessage =
+          retryError instanceof Error ? retryError.message : "Retry failed for this error item.";
+
+        await logService.completeJob({
+          organizationId: context.organizationId,
+          jobId: retryJob.id,
+          status: "failed",
+          recordsProcessed: 1,
+          recordsCreated: 0,
+          recordsUpdated: 0,
+          recordsFailed: 1,
+          cursor: null,
+          lastSuccessfulSyncDate: null,
+          errorSummary: retryMessage,
+          startedDate: retryJob.started_date
+        });
+
+        await supabase
+          .from("integration_error_queue")
+          .update({
+            status: "open",
+            next_retry_date: null,
+            last_retry_date: new Date().toISOString(),
+            retry_count: Number(queuedError.retry_count ?? 0) + 1,
+            error_message: retryMessage
+          })
+          .eq("organization_id", context.organizationId)
+          .eq("integration_connection_id", connection.id)
+          .eq("id", errorId);
+
+        throw new Error(`Retry failed: ${retryMessage}`);
+      }
+    }
+
     const { error } = await supabase
       .from("integration_error_queue")
       .update({
@@ -695,9 +816,9 @@ export async function resolveIntegrationError(integrationKey: string, errorId: s
       actionType: "integration_error_resolved",
       targetEntityType: "integration_error_queue",
       targetEntityId: errorId,
-      metadata: { integrationKey }
+      metadata: { integrationKey, retryMode: "mark_only" }
     });
-    return { ok: true };
+    return { ok: true, retried: false, message: "Error marked as resolved." };
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
       throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);

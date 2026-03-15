@@ -45,6 +45,183 @@ function readDateTime(record: Record<string, unknown>, keys: string[]) {
 }
 
 export class ContactSyncService {
+  private async upsertContactFromRecord(input: {
+    supabase: Awaited<ReturnType<typeof createIntegrationClient>>;
+    organizationId: string;
+    syncSettings: Record<string, unknown>;
+    record: Record<string, unknown>;
+  }) {
+    const externalId = readString(input.record, [
+      "id",
+      "displayId",
+      "customer_id",
+      "customerId",
+      "external_id",
+      "contact_id",
+      "donor_id"
+    ]);
+    if (!externalId) {
+      throw new Error("Missing external contact id in source payload.");
+    }
+
+    const firstName = readString(input.record, [
+      "first_name",
+      "firstName",
+      "firstNameOrgName",
+      "billing.firstName"
+    ]);
+    const lastName = readString(input.record, ["last_name", "lastName", "billing.lastName"]);
+    const email = readString(input.record, ["email", "primary_email"]);
+    const phone = readString(input.record, [
+      "phone",
+      "mobile_phone",
+      "mobile",
+      "primary_phone",
+      "billing.phone"
+    ]);
+    const organizationName = readString(input.record, ["organization_name", "organization"]);
+    const addressLine1 = readString(input.record, ["address_line_1", "billing.address.street1"]);
+    const city = readString(input.record, ["city", "billing.address.city"]);
+    const state = readString(input.record, ["state", "billing.address.state"]);
+    const postalCode = readString(input.record, ["postal_code", "billing.address.postalCode"]);
+    const country = readString(input.record, ["country", "billing.address.country"]);
+    const sourceModifiedAt = readDateTime(input.record, [
+      "updated_at",
+      "last_modified_at",
+      "modified_at",
+      "dateUpdated",
+      "dateCreated"
+    ]);
+
+    const { data: existingRef } = await input.supabase
+      .from("contact_external_references")
+      .select("id, contact_id")
+      .eq("organization_id", input.organizationId)
+      .in("source_system", ["givingfuel", "webconnex"])
+      .eq("external_record_id", externalId)
+      .maybeSingle();
+
+    let contactId = (existingRef?.contact_id as string | undefined) ?? null;
+    let actionTaken = "updated";
+
+    if (!contactId) {
+      const allowEmailFallback = Boolean(
+        input.syncSettings.fallbackContactMatch === "email_if_configured"
+      );
+      if (allowEmailFallback && email) {
+        const { data: emailMatch } = await input.supabase
+          .from("contacts")
+          .select("id")
+          .eq("organization_id", input.organizationId)
+          .eq("email", email)
+          .maybeSingle();
+        contactId = (emailMatch?.id as string | undefined) ?? null;
+      }
+    }
+
+    if (contactId) {
+      const { error: updateError } = await input.supabase
+        .from("contacts")
+        .update({
+          first_name: firstName || "Unknown",
+          last_name: lastName || "Unknown",
+          email: email || null,
+          phone: phone || null,
+          organization_name: organizationName || null,
+          address_line_1: addressLine1 || null,
+          city: city || null,
+          state: state || null,
+          postal_code: postalCode || null,
+          country: country || null,
+          donor_status: "active",
+          updated_at: new Date().toISOString()
+        })
+        .eq("organization_id", input.organizationId)
+        .eq("id", contactId);
+      if (updateError) throw updateError;
+    } else {
+      const { data: createdContact, error: createError } = await input.supabase
+        .from("contacts")
+        .insert({
+          organization_id: input.organizationId,
+          first_name: firstName || "Unknown",
+          last_name: lastName || "Unknown",
+          email: email || null,
+          phone: phone || null,
+          organization_name: organizationName || null,
+          address_line_1: addressLine1 || null,
+          city: city || null,
+          state: state || null,
+          postal_code: postalCode || null,
+          country: country || null,
+          donor_status: "active",
+          member_status: "none",
+          external_source: "givingfuel",
+          external_source_id: externalId
+        })
+        .select("id")
+        .single();
+      if (createError) throw createError;
+      contactId = createdContact.id as string;
+      actionTaken = "created";
+    }
+
+    const { error: refError } = await input.supabase.from("contact_external_references").upsert(
+      {
+        organization_id: input.organizationId,
+        contact_id: contactId,
+        source_system: "givingfuel",
+        external_record_id: externalId,
+        external_record_type: "contact",
+        last_source_modified_date: sourceModifiedAt,
+        last_synced_date: new Date().toISOString()
+      },
+      { onConflict: "organization_id,source_system,external_record_id" }
+    );
+    if (refError) throw refError;
+
+    return {
+      externalId,
+      contactId,
+      actionTaken: actionTaken as "created" | "updated"
+    };
+  }
+
+  async retrySingleRecord(input: {
+    organizationId: string;
+    connection: IntegrationConnection;
+    job: IntegrationSyncJob;
+    record: Record<string, unknown>;
+    logService: IntegrationLogService;
+  }) {
+    const supabase = await createIntegrationClient();
+    const syncSettings = input.connection.sync_settings_json ?? {};
+    const synced = await this.upsertContactFromRecord({
+      supabase,
+      organizationId: input.organizationId,
+      syncSettings,
+      record: input.record
+    });
+
+    await input.logService.addSyncLog({
+      organizationId: input.organizationId,
+      integrationConnectionId: input.connection.id,
+      jobId: input.job.id,
+      entityType: "contact",
+      sourceRecordId: synced.externalId,
+      crmRecordId: synced.contactId,
+      actionTaken: synced.actionTaken,
+      status: "processed",
+      message: "Contact synchronized."
+    });
+
+    return {
+      externalId: synced.externalId,
+      created: synced.actionTaken === "created" ? 1 : 0,
+      updated: synced.actionTaken === "updated" ? 1 : 0
+    };
+  }
+
   async run(input: {
     organizationId: string;
     connection: IntegrationConnection;
@@ -72,153 +249,38 @@ export class ContactSyncService {
 
       for (const record of page.records) {
         processed += 1;
-        const externalId = readString(record, [
-          "id",
-          "displayId",
-          "customer_id",
-          "customerId",
-          "external_id",
-          "contact_id",
-          "donor_id"
-        ]);
-        if (!externalId) {
-          failed += 1;
-          await input.logService.enqueueError({
-            organizationId: input.organizationId,
-            integrationConnectionId: input.connection.id,
-            jobId: input.job.id,
-            entityType: "contact",
-            payload: record,
-            errorMessage: "Missing external contact id in source payload."
-          });
-          continue;
-        }
+        const externalId =
+          readString(record, [
+            "id",
+            "displayId",
+            "customer_id",
+            "customerId",
+            "external_id",
+            "contact_id",
+            "donor_id"
+          ]) || null;
 
         try {
-          const firstName = readString(record, [
-            "first_name",
-            "firstName",
-            "firstNameOrgName",
-            "billing.firstName"
-          ]);
-          const lastName = readString(record, ["last_name", "lastName", "billing.lastName"]);
-          const email = readString(record, ["email", "primary_email"]);
-          const phone = readString(record, [
-            "phone",
-            "mobile_phone",
-            "mobile",
-            "primary_phone",
-            "billing.phone"
-          ]);
-          const organizationName = readString(record, ["organization_name", "organization"]);
-          const addressLine1 = readString(record, ["address_line_1", "billing.address.street1"]);
-          const city = readString(record, ["city", "billing.address.city"]);
-          const state = readString(record, ["state", "billing.address.state"]);
-          const postalCode = readString(record, ["postal_code", "billing.address.postalCode"]);
-          const country = readString(record, ["country", "billing.address.country"]);
-          const sourceModifiedAt = readDateTime(record, [
-            "updated_at",
-            "last_modified_at",
-            "modified_at",
-            "dateUpdated",
-            "dateCreated"
-          ]);
-
-          const { data: existingRef } = await supabase
-            .from("contact_external_references")
-            .select("id, contact_id")
-            .eq("organization_id", input.organizationId)
-            .in("source_system", ["givingfuel", "webconnex"])
-            .eq("external_record_id", externalId)
-            .maybeSingle();
-
-          let contactId = (existingRef?.contact_id as string | undefined) ?? null;
-          let actionTaken = "updated";
-
-          if (!contactId) {
-            const allowEmailFallback = Boolean(syncSettings.fallbackContactMatch === "email_if_configured");
-            if (allowEmailFallback && email) {
-              const { data: emailMatch } = await supabase
-                .from("contacts")
-                .select("id")
-                .eq("organization_id", input.organizationId)
-                .eq("email", email)
-                .maybeSingle();
-              contactId = (emailMatch?.id as string | undefined) ?? null;
-            }
-          }
-
-          if (contactId) {
-            const { error: updateError } = await supabase
-              .from("contacts")
-              .update({
-                first_name: firstName || "Unknown",
-                last_name: lastName || "Unknown",
-                email: email || null,
-                phone: phone || null,
-                organization_name: organizationName || null,
-                address_line_1: addressLine1 || null,
-                city: city || null,
-                state: state || null,
-                postal_code: postalCode || null,
-                country: country || null,
-                donor_status: "active",
-                updated_at: new Date().toISOString()
-              })
-              .eq("organization_id", input.organizationId)
-              .eq("id", contactId);
-            if (updateError) throw updateError;
-            updated += 1;
-          } else {
-            const { data: createdContact, error: createError } = await supabase
-              .from("contacts")
-              .insert({
-                organization_id: input.organizationId,
-                first_name: firstName || "Unknown",
-                last_name: lastName || "Unknown",
-                email: email || null,
-                phone: phone || null,
-                organization_name: organizationName || null,
-                address_line_1: addressLine1 || null,
-                city: city || null,
-                state: state || null,
-                postal_code: postalCode || null,
-                country: country || null,
-                donor_status: "active",
-                member_status: "none",
-                external_source: "givingfuel",
-                external_source_id: externalId
-              })
-              .select("id")
-              .single();
-            if (createError) throw createError;
-            contactId = createdContact.id as string;
+          const synced = await this.upsertContactFromRecord({
+            supabase,
+            organizationId: input.organizationId,
+            syncSettings,
+            record
+          });
+          if (synced.actionTaken === "created") {
             created += 1;
-            actionTaken = "created";
+          } else {
+            updated += 1;
           }
-
-          const { error: refError } = await supabase.from("contact_external_references").upsert(
-            {
-              organization_id: input.organizationId,
-              contact_id: contactId,
-              source_system: "givingfuel",
-              external_record_id: externalId,
-              external_record_type: "contact",
-              last_source_modified_date: sourceModifiedAt,
-              last_synced_date: new Date().toISOString()
-            },
-            { onConflict: "organization_id,source_system,external_record_id" }
-          );
-          if (refError) throw refError;
 
           await input.logService.addSyncLog({
             organizationId: input.organizationId,
             integrationConnectionId: input.connection.id,
             jobId: input.job.id,
             entityType: "contact",
-            sourceRecordId: externalId,
-            crmRecordId: contactId,
-            actionTaken,
+            sourceRecordId: synced.externalId,
+            crmRecordId: synced.contactId,
+            actionTaken: synced.actionTaken,
             status: "processed",
             message: "Contact synchronized."
           });
