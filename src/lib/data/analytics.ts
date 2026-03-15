@@ -87,7 +87,14 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   const context = await requireStaffPermission("can_view_contacts");
   const supabase = await createClient();
 
-  const [personal, organizations, activityRowsResult] = await Promise.all([
+  const [
+    personal,
+    organizations,
+    activityRowsResult,
+    allContactsCountResult,
+    personalContactsCountResult,
+    organizationContactsCountResult
+  ] = await Promise.all([
     supabase.rpc("contact_trend_series", {
       org_id: context.organizationId,
       range_key: range,
@@ -106,12 +113,30 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
       .eq("organization_id", context.organizationId)
       .not("related_contact_id", "is", null)
       .order("created_at", { ascending: false })
-      .limit(500)
+      .limit(500),
+    supabase
+      .from("contacts")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId),
+    supabase
+      .from("contacts")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .or("organization_name.is.null,organization_name.eq."),
+    supabase
+      .from("contacts")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .not("organization_name", "is", null)
+      .neq("organization_name", "")
   ]);
 
   if (personal.error) throw personal.error;
   if (organizations.error) throw organizations.error;
   if (activityRowsResult.error) throw activityRowsResult.error;
+  if (allContactsCountResult.error) throw allContactsCountResult.error;
+  if (personalContactsCountResult.error) throw personalContactsCountResult.error;
+  if (organizationContactsCountResult.error) throw organizationContactsCountResult.error;
 
   const mode = contactsGranularity(range);
   const activityRows = (activityRowsResult.data as LatestActivityRow[] | null | undefined) ?? [];
@@ -211,6 +236,11 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
         label: formatShortDate(row.bucket_start, mode),
         y: Number(row.total)
       })) ?? [],
+    totals: {
+      allContacts: allContactsCountResult.count ?? 0,
+      personalContacts: personalContactsCountResult.count ?? 0,
+      organizationContacts: organizationContactsCountResult.count ?? 0
+    },
     latestModifiedContacts
   };
 }

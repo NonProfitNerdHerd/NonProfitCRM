@@ -127,6 +127,15 @@ export class WebconnexSyncService {
         recordsUpdated += contactsResult.updated;
         recordsFailed += contactsResult.failed;
         syncSettings.contactsCursor = contactsResult.cursor;
+        syncSettings.lastContactsSyncSummary = {
+          pagesProcessed: contactsResult.pagesProcessed,
+          processed: contactsResult.processed,
+          created: contactsResult.created,
+          updated: contactsResult.updated,
+          failed: contactsResult.failed,
+          skipped: contactsResult.skipped,
+          finishedAt: new Date().toISOString()
+        };
       }
 
       if (input.scope === "donations" || input.scope === "all") {
@@ -158,6 +167,9 @@ export class WebconnexSyncService {
         .eq("id", input.connection.id);
 
       status = recordsFailed > 0 ? "completed_with_errors" : "completed";
+      if (status === "completed_with_errors") {
+        errorSummary = `${recordsFailed} record(s) failed during sync. Check Error Queue for details.`;
+      }
     } catch (error) {
       status = "failed";
       errorSummary = error instanceof Error ? error.message : "Webconnex sync failed.";

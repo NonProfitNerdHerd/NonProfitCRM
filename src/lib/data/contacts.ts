@@ -29,7 +29,7 @@ export async function listContacts(mode: "all" | "personal" | "organizations" = 
     .limit(200);
 
   if (mode === "personal") {
-    query = query.is("organization_name", null);
+    query = query.or("organization_name.is.null,organization_name.eq.");
   }
   if (mode === "organizations") {
     query = query.not("organization_name", "is", null).neq("organization_name", "");

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { runIntegrationSync } from "@/lib/data/integrations";
 
+export const maxDuration = 300;
+
 type RouteProps = {
   params: Promise<{ integrationKey: string }>;
 };

@@ -10,6 +10,11 @@ type ContactAnalyticsPayload = {
   granularity: "day" | "week" | "month" | "year";
   personal: Array<{ x: string; label: string; y: number }>;
   organizations: Array<{ x: string; label: string; y: number }>;
+  totals: {
+    allContacts: number;
+    personalContacts: number;
+    organizationContacts: number;
+  };
   latestModifiedContacts: Array<{
     contactId: string;
     contactName: string;
@@ -64,10 +69,25 @@ export function ContactsAnalyticsDashboard({
 
       {loading ? <p className="text-sm text-slate-500">Updating trends...</p> : null}
 
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Total Contacts (CRM)</p>
+          <p className="text-xl font-semibold text-slate-900">{payload.totals.allContacts}</p>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Personal Contacts</p>
+          <p className="text-xl font-semibold text-slate-900">{payload.totals.personalContacts}</p>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Organizational Contacts</p>
+          <p className="text-xl font-semibold text-slate-900">{payload.totals.organizationContacts}</p>
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <LineChart
-          title="Personal Contacts Trend"
-          yAxisLabel="Contacts"
+          title="New Personal Contacts Trend"
+          yAxisLabel="New Contacts"
           xAxisLabel="Time"
           size="compact"
           onExpand={() => setExpandedChart("personal")}
@@ -81,8 +101,8 @@ export function ContactsAnalyticsDashboard({
         />
 
         <LineChart
-          title="Organizational Contacts Trend"
-          yAxisLabel="Contacts"
+          title="New Organizational Contacts Trend"
+          yAxisLabel="New Contacts"
           xAxisLabel="Time"
           size="compact"
           onExpand={() => setExpandedChart("organizations")}
@@ -142,7 +162,10 @@ export function ContactsAnalyticsDashboard({
           <div className="w-[96vw] max-w-[1400px] rounded-xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h4 className="text-base font-semibold text-slate-900">
-                {expandedChart === "personal" ? "Personal Contacts Trend" : "Organizational Contacts Trend"} (Expanded)
+                {expandedChart === "personal"
+                  ? "New Personal Contacts Trend"
+                  : "New Organizational Contacts Trend"}{" "}
+                (Expanded)
               </h4>
               <button
                 type="button"
@@ -153,8 +176,12 @@ export function ContactsAnalyticsDashboard({
               </button>
             </div>
             <LineChart
-              title={expandedChart === "personal" ? "Personal Contacts Trend" : "Organizational Contacts Trend"}
-              yAxisLabel="Contacts"
+              title={
+                expandedChart === "personal"
+                  ? "New Personal Contacts Trend"
+                  : "New Organizational Contacts Trend"
+              }
+              yAxisLabel="New Contacts"
               xAxisLabel="Time"
               size="expanded"
               series={[

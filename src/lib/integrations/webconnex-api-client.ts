@@ -69,33 +69,67 @@ function extractNextCursor(payload: unknown): string | null {
   const direct =
     container.next_cursor ??
     container.nextCursor ??
+    container.next ??
+    container.next_id ??
+    container.nextId ??
     container.cursor ??
+    container.next_starting_after ??
+    container.starting_after ??
     container.startingAfter ??
     container.nextStartingAfter;
-  if (typeof direct === "string" && direct.trim()) return direct;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (typeof direct === "number" && Number.isFinite(direct)) return String(direct);
   const pagination = container.pagination as Record<string, unknown> | undefined;
   const nested =
     pagination?.next_cursor ??
     pagination?.nextCursor ??
+    pagination?.next ??
+    pagination?.next_id ??
+    pagination?.nextId ??
+    pagination?.next_starting_after ??
+    pagination?.starting_after ??
     pagination?.startingAfter ??
     pagination?.nextStartingAfter;
-  return typeof nested === "string" && nested.trim() ? nested : null;
+  if (typeof nested === "string" && nested.trim()) return nested.trim();
+  if (typeof nested === "number" && Number.isFinite(nested)) return String(nested);
+  return null;
 }
 
-function extractHasMore(payload: unknown) {
-  if (!payload || typeof payload !== "object") return false;
+function normalizeBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y"].includes(normalized)) return true;
+    if (["false", "0", "no", "n"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function extractHasMore(payload: unknown, nextCursor: string | null, recordCount: number, limit: number) {
+  if (!payload || typeof payload !== "object") {
+    if (nextCursor) return true;
+    return recordCount >= limit && recordCount > 0;
+  }
   const container = payload as Record<string, unknown>;
   const direct = container.hasMore ?? container.has_more;
-  if (typeof direct === "boolean") return direct;
+  const parsedDirect = normalizeBoolean(direct);
+  if (parsedDirect !== null) return parsedDirect;
   const pagination = container.pagination as Record<string, unknown> | undefined;
-  if (typeof pagination?.hasMore === "boolean") return pagination.hasMore;
-  if (typeof pagination?.has_more === "boolean") return Boolean(pagination.has_more);
-  return false;
+  const parsedNested = normalizeBoolean(pagination?.hasMore ?? pagination?.has_more);
+  if (parsedNested !== null) return parsedNested;
+  if (nextCursor) return true;
+  return recordCount >= limit && recordCount > 0;
 }
 
 function recordStableId(record: Record<string, unknown>) {
-  const candidate = record.id ?? record.customerId ?? record.customer_id;
-  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : "";
+  const candidate = record.id ?? record.displayId ?? record.customerId ?? record.customer_id;
+  if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  if (typeof candidate === "number" && Number.isFinite(candidate)) return String(candidate);
+  return "";
 }
 
 export class WebconnexApiClient {
@@ -236,13 +270,17 @@ export class WebconnexApiClient {
     const limit =
       typeof params?.limit === "number" && params.limit > 0 ? params.limit : this.defaultLimit;
     queryParams.limit = limit;
-    if (params?.startingAfter) queryParams.startingAfter = params.startingAfter;
+    if (params?.startingAfter) {
+      queryParams.startingAfter = params.startingAfter;
+      // Some APIs expect snake_case cursor names.
+      queryParams.starting_after = params.startingAfter;
+    }
     const payload = await this.request(this.contactsPath, {
       ...queryParams
     });
     const records = normalizeRecords(payload);
     const extractedCursor = extractNextCursor(payload);
-    const hasMore = extractHasMore(payload);
+    const hasMore = extractHasMore(payload, extractedCursor, records.length, limit);
     const fallbackCursor =
       records.length > 0 ? recordStableId(records[records.length - 1] as Record<string, unknown>) : "";
     return {
@@ -257,13 +295,16 @@ export class WebconnexApiClient {
     const limit =
       typeof params?.limit === "number" && params.limit > 0 ? params.limit : this.defaultLimit;
     queryParams.limit = limit;
-    if (params?.startingAfter) queryParams.startingAfter = params.startingAfter;
+    if (params?.startingAfter) {
+      queryParams.startingAfter = params.startingAfter;
+      queryParams.starting_after = params.startingAfter;
+    }
     const payload = await this.request(this.transactionsPath, {
       ...queryParams
     });
     const records = normalizeRecords(payload);
     const extractedCursor = extractNextCursor(payload);
-    const hasMore = extractHasMore(payload);
+    const hasMore = extractHasMore(payload, extractedCursor, records.length, limit);
     const fallbackCursor =
       records.length > 0 ? recordStableId(records[records.length - 1] as Record<string, unknown>) : "";
     return {

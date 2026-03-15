@@ -353,8 +353,24 @@ export function GivingFuelContactsSetup({
             value={formatDate(data.overview.lastFailedSync as string | null)}
           />
           <Info
-            label="Total Contacts Synced"
+            label="Total CRM Contacts Linked (GivingFuel)"
             value={String(data.overview.totalContactsSynced ?? "0")}
+          />
+          <Info
+            label="Total Source Records Processed"
+            value={String(data.overview.totalContactsProcessed ?? "0")}
+          />
+          <Info
+            label="Total Contact Upserts (Created + Updated)"
+            value={String(data.overview.totalContactUpsertsSuccessful ?? "0")}
+          />
+          <Info
+            label="Total CRM Contacts"
+            value={String(data.overview.totalCrmContacts ?? "0")}
+          />
+          <Info
+            label="Total CRM Personal Contacts"
+            value={String(data.overview.totalCrmPersonalContacts ?? "0")}
           />
           <Info
             label="Last Contacts Job Status"

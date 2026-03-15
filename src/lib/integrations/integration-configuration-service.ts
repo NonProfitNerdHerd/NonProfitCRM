@@ -41,7 +41,7 @@ const DEFAULT_WEBCONNEX_SYNC_SETTINGS = {
   donationSyncEnabled: false,
   fullSyncEnabled: false,
   incrementalSyncEnabled: true,
-  fallbackContactMatch: "email_if_configured",
+  fallbackContactMatch: "external_id_only",
   initialImportStartDate: null,
   lastSuccessfulSyncDate: null,
   contactsCursor: null,

@@ -11,7 +11,7 @@ export default async function ContactsPage() {
     <Card>
       <CardHeader
         title="Contacts Analytics"
-        subtitle="Trend views for personal and organizational contact growth"
+        subtitle="CRM totals plus new-contact trends for personal and organizational records"
       />
       <ContactsAnalyticsDashboard initial={analytics} />
     </Card>

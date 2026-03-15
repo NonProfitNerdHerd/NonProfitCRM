@@ -128,7 +128,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
         donationSyncEnabled: false,
         fullSyncEnabled: false,
         incrementalSyncEnabled: true,
-        fallbackContactMatch: "email_if_configured",
+        fallbackContactMatch: "external_id_only",
         initialImportStartDate: null,
         lastSuccessfulSyncDate: null
       },
@@ -152,6 +152,10 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       lastFailedSync: null,
       lastSyncDurationMs: null,
       totalContactsSynced: 0,
+      totalContactsProcessed: 0,
+      totalContactUpsertsSuccessful: 0,
+      totalCrmContacts: 0,
+      totalCrmPersonalContacts: 0,
       totalDonationsSynced: 0,
       failedRecordsCount: 0
     },
@@ -191,7 +195,7 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
       donationSyncEnabled: false,
       fullSyncEnabled: false,
       incrementalSyncEnabled: true,
-      fallbackContactMatch: "email_if_configured"
+      fallbackContactMatch: "external_id_only"
     },
     field_mapping_json: { contacts: {} },
     created_by: null,
@@ -267,6 +271,39 @@ function summarizeLastResult(job: IntegrationSyncJob | null) {
   if (job.status === "completed_with_errors") return "Completed with errors";
   if (job.status === "completed") return "Success";
   return job.status;
+}
+
+async function countUniqueLinkedContacts(input: {
+  organizationId: string;
+  integrationKey: string;
+}) {
+  const supabase = await createIntegrationClient();
+  const sourceSystems =
+    input.integrationKey === GIVINGFUEL_INTEGRATION_KEY ? ["givingfuel", "webconnex"] : [input.integrationKey];
+  const uniqueContactIds = new Set<string>();
+  const pageSize = 1000;
+  let offset = 0;
+  let keepLoading = true;
+  let safetyGuard = 0;
+
+  while (keepLoading && safetyGuard < 200) {
+    safetyGuard += 1;
+    const { data, error } = await supabase
+      .from("contact_external_references")
+      .select("contact_id")
+      .eq("organization_id", input.organizationId)
+      .in("source_system", sourceSystems)
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as Array<{ contact_id?: string | null }>;
+    for (const row of rows) {
+      if (row.contact_id) uniqueContactIds.add(row.contact_id);
+    }
+    keepLoading = rows.length === pageSize;
+    offset += rows.length;
+  }
+
+  return uniqueContactIds.size;
 }
 
 export async function listIntegrationsForAdmin() {
@@ -360,11 +397,47 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
     const safeConnection = sanitizeConnectionForUi(connection);
     const jobs = await logService.listJobs(context.organizationId, connection.id);
     const errors = await logService.listErrors(context.organizationId, connection.id);
+    const [linkedContactsCount, crmContactsCountResult, crmPersonalContactsCountResult] = await Promise.all([
+      countUniqueLinkedContacts({
+        organizationId: context.organizationId,
+        integrationKey
+      }),
+      createIntegrationClient().then((supabase) =>
+        supabase
+          .from("contacts")
+          .select("*", { count: "exact", head: true })
+          .eq("organization_id", context.organizationId)
+      ),
+      createIntegrationClient().then((supabase) =>
+        supabase
+          .from("contacts")
+          .select("*", { count: "exact", head: true })
+          .eq("organization_id", context.organizationId)
+          .or("organization_name.is.null,organization_name.eq.")
+      )
+    ]);
+
+    if (crmContactsCountResult.error) throw crmContactsCountResult.error;
+    if (crmPersonalContactsCountResult.error) throw crmPersonalContactsCountResult.error;
 
     const lastSuccess = jobs.find(
       (job) => job.status === "completed" || job.status === "completed_with_errors"
     );
     const lastFailure = jobs.find((job) => job.status === "failed");
+    const totalProcessedContacts = jobs.reduce(
+      (sum, job) =>
+        sum +
+        (job.sync_scope === "contacts" || job.sync_scope === "all" ? Number(job.records_processed ?? 0) : 0),
+      0
+    );
+    const totalSuccessfulUpserts = jobs.reduce(
+      (sum, job) =>
+        sum +
+        (job.sync_scope === "contacts" || job.sync_scope === "all"
+          ? Number(job.records_created ?? 0) + Number(job.records_updated ?? 0)
+          : 0),
+      0
+    );
 
     return {
       definition,
@@ -379,14 +452,11 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
         lastSuccessfulSync: lastSuccess?.completed_date ?? null,
         lastFailedSync: lastFailure?.completed_date ?? null,
         lastSyncDurationMs: jobs[0]?.duration_ms ?? null,
-        totalContactsSynced: jobs.reduce(
-          (sum, job) =>
-            sum +
-            (job.sync_scope === "contacts" || job.sync_scope === "all"
-              ? job.records_processed
-              : 0),
-          0
-        ),
+        totalContactsSynced: linkedContactsCount,
+        totalContactsProcessed: totalProcessedContacts,
+        totalContactUpsertsSuccessful: totalSuccessfulUpserts,
+        totalCrmContacts: crmContactsCountResult.count ?? 0,
+        totalCrmPersonalContacts: crmPersonalContactsCountResult.count ?? 0,
         totalDonationsSynced: jobs.reduce(
           (sum, job) =>
             sum +
@@ -465,7 +535,8 @@ export async function updateIntegrationConfiguration(
               ...(payload.syncSettings ?? {}),
               contactSyncEnabled: true,
               donationSyncEnabled: false,
-              fullSyncEnabled: false
+              fullSyncEnabled: false,
+              fallbackContactMatch: "external_id_only"
             }
           }
         : payload;

@@ -9,6 +9,8 @@ type ContactSyncResult = {
   created: number;
   updated: number;
   failed: number;
+  skipped: number;
+  pagesProcessed: number;
   cursor: string | null;
 };
 
@@ -236,16 +238,53 @@ export class ContactSyncService {
     let created = 0;
     let updated = 0;
     let failed = 0;
+    let skipped = 0;
     let hasMore = true;
     let pageGuard = 0;
+    let pagesProcessed = 0;
 
     while (hasMore && pageGuard < 10000) {
       pageGuard += 1;
-      const page = await input.apiClient.getContacts({
-        startingAfter: cursor,
-        limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT
-      });
+      const startingCursor = cursor;
+      let page: Awaited<ReturnType<WebconnexApiClient["getContacts"]>>;
+      try {
+        page = await input.apiClient.getContacts({
+          startingAfter: cursor,
+          limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT
+        });
+      } catch (pageError) {
+        failed += 1;
+        await input.logService.enqueueError({
+          organizationId: input.organizationId,
+          integrationConnectionId: input.connection.id,
+          jobId: input.job.id,
+          entityType: "integration",
+          payload: { startingAfter: startingCursor, limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT },
+          errorMessage:
+            pageError instanceof Error ? pageError.message : "Contacts page request failed."
+        });
+        break;
+      }
+      pagesProcessed += 1;
       hasMore = page.hasMore;
+      await input.logService.addSyncLog({
+        organizationId: input.organizationId,
+        integrationConnectionId: input.connection.id,
+        jobId: input.job.id,
+        entityType: "contacts_page",
+        sourceRecordId: startingCursor,
+        status: "processed",
+        message: `Fetched page ${pagesProcessed}: ${page.records.length} record(s), hasMore=${String(page.hasMore)}, nextCursor=${page.nextCursor ?? "null"}`,
+        requestPayload: {
+          startingAfter: startingCursor,
+          limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT
+        },
+        responsePayload: {
+          recordCount: page.records.length,
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor
+        }
+      });
 
       for (const record of page.records) {
         processed += 1;
@@ -286,6 +325,9 @@ export class ContactSyncService {
           });
         } catch (error) {
           failed += 1;
+          if (error instanceof Error && error.message.includes("Missing external contact id")) {
+            skipped += 1;
+          }
           await input.logService.enqueueError({
             organizationId: input.organizationId,
             integrationConnectionId: input.connection.id,
@@ -298,19 +340,65 @@ export class ContactSyncService {
         }
       }
 
-      cursor = page.nextCursor;
+      const lastRecord = page.records.length
+        ? (page.records[page.records.length - 1] as Record<string, unknown>)
+        : null;
+      const fallbackCursor = lastRecord
+        ? readString(lastRecord, [
+            "id",
+            "displayId",
+            "customer_id",
+            "customerId",
+            "external_id",
+            "contact_id",
+            "donor_id"
+          ])
+        : "";
+      cursor = (page.nextCursor ?? fallbackCursor) || cursor;
       if (!hasMore) break;
       if (!cursor) {
         hasMore = false;
       }
+      if (startingCursor && cursor === startingCursor) {
+        hasMore = false;
+        await input.logService.enqueueError({
+          organizationId: input.organizationId,
+          integrationConnectionId: input.connection.id,
+          jobId: input.job.id,
+          entityType: "integration",
+          payload: { cursor: startingCursor, nextCursor: cursor },
+          errorMessage:
+            "Contacts pagination stopped because cursor did not advance. Check API pagination response fields."
+        });
+      }
     }
+
+    await input.logService.addSyncLog({
+      organizationId: input.organizationId,
+      integrationConnectionId: input.connection.id,
+      jobId: input.job.id,
+      entityType: "contacts_summary",
+      status: "processed",
+      message: `Contacts sync summary: pages=${pagesProcessed}, processed=${processed}, created=${created}, updated=${updated}, failed=${failed}, skipped=${skipped}, nextCursor=${cursor ?? "null"}`,
+      responsePayload: {
+        pagesProcessed,
+        processed,
+        created,
+        updated,
+        failed,
+        skipped,
+        nextCursor: cursor
+      }
+    });
 
     return {
       processed,
       created,
       updated,
       failed,
-      cursor: null
+      skipped,
+      pagesProcessed,
+      cursor
     };
   }
 }
