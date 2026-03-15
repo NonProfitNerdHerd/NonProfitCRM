@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
@@ -453,7 +454,16 @@ export function GivingFuelContactsSetup({
                       className="border-b border-slate-100"
                     >
                       <td className="py-2">
-                        {`${row.contact.firstName} ${row.contact.lastName}`.trim() || "-"}
+                        {row.contact.id ? (
+                          <Link
+                            href={`/staff/contacts/${encodeURIComponent(row.contact.id)}`}
+                            className="text-blue-700 underline hover:text-blue-900"
+                          >
+                            {`${row.contact.firstName} ${row.contact.lastName}`.trim() || row.contact.id}
+                          </Link>
+                        ) : (
+                          `${row.contact.firstName} ${row.contact.lastName}`.trim() || "-"
+                        )}
                       </td>
                       <td className="py-2">{row.contact.email || "-"}</td>
                       <td className="py-2">{row.contact.phone || "-"}</td>
