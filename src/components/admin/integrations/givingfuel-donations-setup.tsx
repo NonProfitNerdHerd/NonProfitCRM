@@ -256,21 +256,21 @@ export function GivingFuelDonationsSetup({
         <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
           <Button
             type="button"
-            variant={activeStep === 1 ? "default" : "secondary"}
+            variant={activeStep === 1 ? "primary" : "secondary"}
             onClick={() => handleStepChange(1)}
           >
             Step 1: Setup API
           </Button>
           <Button
             type="button"
-            variant={activeStep === 2 ? "default" : "secondary"}
+            variant={activeStep === 2 ? "primary" : "secondary"}
             onClick={() => handleStepChange(2)}
           >
             Step 2: Map Campaigns
           </Button>
           <Button
             type="button"
-            variant={activeStep === 3 ? "default" : "secondary"}
+            variant={activeStep === 3 ? "primary" : "secondary"}
             onClick={() => handleStepChange(3)}
             disabled={!allMapped}
             title={!allMapped ? "Map all detected forms first" : undefined}
