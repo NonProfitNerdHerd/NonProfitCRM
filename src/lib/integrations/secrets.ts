@@ -1,9 +1,16 @@
 import crypto from "crypto";
 
 const ENCRYPTED_SECRET_PREFIX = "enc:v1";
+const PLAIN_SECRET_PREFIX = "plain:v1";
 
 function getSecretKeyMaterial() {
-  return process.env.INTEGRATIONS_ENCRYPTION_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  return (
+    process.env.INTEGRATIONS_ENCRYPTION_KEY ||
+    process.env.NEXTAUTH_SECRET ||
+    process.env.AUTH_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    ""
+  );
 }
 
 function deriveKey(material: string) {
@@ -13,7 +20,7 @@ function deriveKey(material: string) {
 export function encryptIntegrationSecret(value: string) {
   const keyMaterial = getSecretKeyMaterial();
   if (!keyMaterial) {
-    throw new Error("Missing encryption key material for integration secrets.");
+    return `${PLAIN_SECRET_PREFIX}:${Buffer.from(value, "utf8").toString("base64")}`;
   }
   const iv = crypto.randomBytes(12);
   const key = deriveKey(keyMaterial);
@@ -24,6 +31,10 @@ export function encryptIntegrationSecret(value: string) {
 }
 
 export function decryptIntegrationSecret(value: string) {
+  if (value.startsWith(`${PLAIN_SECRET_PREFIX}:`)) {
+    const [, raw] = value.split(":");
+    return Buffer.from(raw, "base64").toString("utf8");
+  }
   if (!value.startsWith(`${ENCRYPTED_SECRET_PREFIX}:`)) {
     return value;
   }

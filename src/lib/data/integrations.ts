@@ -201,10 +201,7 @@ function buildSchemaFreeWebconnexConnection(organizationId: string): Integration
 
 function sanitizeConnectionForUi(connection: IntegrationConnection): IntegrationConnection {
   const config = { ...(connection.configuration_json ?? {}) } as Record<string, unknown>;
-  const hasApiKey =
-    Boolean(config.encryptedApiKey) ||
-    Boolean(connection.api_key_reference) ||
-    Boolean(config.apiKeyConfigured);
+  const hasApiKey = Boolean(config.encryptedApiKey) || Boolean(config.apiKeyConfigured);
   delete config.encryptedApiKey;
   config.apiKeyConfigured = hasApiKey;
   return {

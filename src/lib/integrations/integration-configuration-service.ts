@@ -150,15 +150,18 @@ export class IntegrationConfigurationService {
       ...(current.configuration_json ?? {}),
       ...(input.payload.configuration ?? {})
     } as Record<string, unknown>;
+    let nextApiKeyReference = input.payload.apiKeyReference ?? current.api_key_reference;
 
     if (typeof input.payload.apiKey === "string") {
       const trimmed = input.payload.apiKey.trim();
       if (trimmed) {
         mergedConfiguration.encryptedApiKey = encryptIntegrationSecret(trimmed);
         mergedConfiguration.apiKeyConfigured = true;
+        nextApiKeyReference = null;
       } else {
         delete mergedConfiguration.encryptedApiKey;
         mergedConfiguration.apiKeyConfigured = false;
+        nextApiKeyReference = null;
       }
     }
 
@@ -168,7 +171,7 @@ export class IntegrationConfigurationService {
         name: input.payload.name ?? current.name,
         base_url: input.payload.baseUrl ?? current.base_url,
         auth_type: input.payload.authType ?? current.auth_type,
-        api_key_reference: input.payload.apiKeyReference ?? current.api_key_reference,
+        api_key_reference: nextApiKeyReference,
         is_enabled: input.payload.isEnabled ?? current.is_enabled,
         timeout_ms: input.payload.timeoutMs ?? current.timeout_ms,
         retry_settings: input.payload.retrySettings ?? current.retry_settings,
