@@ -172,6 +172,16 @@ export function ImportCenterLanding({
                 Launch the 5-step contacts import workflow with templates, tags, and duplicate checks.
               </p>
             </Link>
+            <Link
+              href="/staff/import-center/transactions"
+              className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 transition hover:bg-emerald-100"
+            >
+              <p className="text-sm font-semibold text-emerald-800">Create Transactions Import</p>
+              <p className="mt-1 text-xs text-emerald-700">
+                Import donations/transactions, link records to contacts, auto-create missing contacts,
+                and map campaigns.
+              </p>
+            </Link>
             <div className="rounded-lg border border-dashed border-slate-300 p-4 text-xs text-slate-600">
               Future import types placeholder: Financial, Activities, Notes, Tags, and other modules
               will plug into this same engine.
@@ -274,8 +284,8 @@ export function ImportCenterLanding({
                   <th className="py-2">Failed</th>
                   <th className="py-2">Skipped</th>
                   <th className="py-2">New Tags</th>
-                  <th className="py-2">Re-Import Matching</th>
-                  <th className="py-2">Re-Import Results</th>
+                  <th className="py-2">Import Details</th>
+                  <th className="py-2">Result Counters</th>
                   <th className="py-2">Started</th>
                   <th className="py-2">Completed</th>
                 </tr>
@@ -292,20 +302,46 @@ export function ImportCenterLanding({
                     <td className="py-2">{toText(job.skipped_rows) || "0"}</td>
                     <td className="py-2">{toText(job.new_tags_created) || "0"}</td>
                     <td className="py-2">
-                      {Boolean(job.rerun_matching_enabled)
-                        ? `${toText(job.source_match_column) || "-"} -> ${
-                            toText(job.destination_match_field) || "-"
+                      {toText(job.import_type) === "transactions"
+                        ? `${toText(
+                            ((job.classification_snapshot as Record<string, unknown> | null)
+                              ?.transactionConfig as Record<string, unknown> | null)
+                              ?.contactMatchSourceColumn
+                          ) || "-"} -> ${
+                            toText(
+                              ((job.classification_snapshot as Record<string, unknown> | null)
+                                ?.transactionConfig as Record<string, unknown> | null)
+                                ?.contactMatchField
+                            ) || "-"
                           }`
-                        : "Disabled"}
+                        : Boolean(job.rerun_matching_enabled)
+                          ? `${toText(job.source_match_column) || "-"} -> ${
+                              toText(job.destination_match_field) || "-"
+                            }`
+                          : "Disabled"}
                     </td>
                     <td className="py-2 text-xs">
-                      Matched {toText(job.matched_record_count) || "0"} | Overwrite{" "}
-                      {toText(job.overwritten_record_count) || "0"} | Blank-only{" "}
-                      {toText(job.blank_only_update_count) || "0"} | New{" "}
-                      {toText(job.new_record_count) || "0"} | Skip-existing{" "}
-                      {toText(job.skipped_existing_count) || "0"} | Missing-key{" "}
-                      {toText(job.missing_key_skip_count) || "0"} | Ambiguous{" "}
-                      {toText(job.ambiguous_match_count) || "0"}
+                      {toText(job.import_type) === "transactions" ? (
+                        <>
+                          Contact matched {toText(job.matched_contact_count) || "0"} | Contact created{" "}
+                          {toText(job.created_contact_count) || "0"} | Transactions{" "}
+                          {toText(job.created_transaction_count) || "0"} | No-contact skips{" "}
+                          {toText(job.no_contact_match_skip_count) || "0"} | Campaign mapped{" "}
+                          {toText(job.campaign_mapped_count) || "0"} | Campaign unmapped skips{" "}
+                          {toText(job.campaign_unmapped_skip_count) || "0"} | Ambiguous contacts{" "}
+                          {toText(job.ambiguous_contact_match_count) || "0"}
+                        </>
+                      ) : (
+                        <>
+                          Matched {toText(job.matched_record_count) || "0"} | Overwrite{" "}
+                          {toText(job.overwritten_record_count) || "0"} | Blank-only{" "}
+                          {toText(job.blank_only_update_count) || "0"} | New{" "}
+                          {toText(job.new_record_count) || "0"} | Skip-existing{" "}
+                          {toText(job.skipped_existing_count) || "0"} | Missing-key{" "}
+                          {toText(job.missing_key_skip_count) || "0"} | Ambiguous{" "}
+                          {toText(job.ambiguous_match_count) || "0"}
+                        </>
+                      )}
                     </td>
                     <td className="py-2">{formatDate(job.started_at)}</td>
                     <td className="py-2">{formatDate(job.completed_at)}</td>

@@ -3,11 +3,14 @@ import {
   createImportCenterTemplate,
   listImportCenterTemplates
 } from "@/lib/import-center/template-service";
+import type { ImportCenterType } from "@/lib/import-center/types";
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const importType = (url.searchParams.get("importType") ?? "contacts") as "contacts";
+    const importTypeParam = url.searchParams.get("importType") ?? "all";
+    const importType: ImportCenterType | "all" =
+      importTypeParam === "contacts" || importTypeParam === "transactions" ? importTypeParam : "all";
     const templates = await listImportCenterTemplates(importType);
     return NextResponse.json({ templates });
   } catch (error) {
@@ -21,14 +24,19 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
+    const importType: ImportCenterType =
+      payload.importType === "transactions" ? "transactions" : "contacts";
+    const classificationDefaults =
+      payload.classification && typeof payload.classification === "object"
+        ? (payload.classification as Record<string, unknown>)
+        : importType === "contacts"
+          ? { contactType: "person", contactCategory: "lead" }
+          : {};
     const template = await createImportCenterTemplate({
-      importType: payload.importType ?? "contacts",
+      importType,
       name: payload.name ?? "Untitled Template",
       mappings: payload.mappings ?? [],
-      classification: payload.classification ?? {
-        contactType: "person",
-        contactCategory: "lead"
-      },
+      classification: classificationDefaults,
       tagDelimiter: payload.tagDelimiter ?? null,
       duplicateHandling: payload.duplicateHandling ?? "skip",
       rerunMatching: payload.rerunMatching ?? {

@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
-import { getImportCenterMetadata } from "@/lib/import-center/contact-import-service";
+import { getImportCenterMetadataByType } from "@/lib/import-center/contact-import-service";
+import type { ImportCenterType } from "@/lib/import-center/types";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const metadata = await getImportCenterMetadata();
+    const url = new URL(request.url);
+    const importTypeParam = url.searchParams.get("importType") ?? "all";
+    const importType: ImportCenterType | "all" =
+      importTypeParam === "contacts" || importTypeParam === "transactions" ? importTypeParam : "all";
+    const metadata = await getImportCenterMetadataByType(importType);
     return NextResponse.json(metadata);
   } catch (error) {
     return NextResponse.json(

@@ -218,7 +218,7 @@ export function ContactsImportWizard() {
   useEffect(() => {
     async function loadMetadata() {
       try {
-        const response = await fetch("/api/import-center/metadata");
+        const response = await fetch("/api/import-center/metadata?importType=contacts");
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
           throw new Error(payload?.message ?? "Unable to load Import Center metadata.");

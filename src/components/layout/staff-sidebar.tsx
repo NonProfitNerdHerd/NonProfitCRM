@@ -95,7 +95,10 @@ export function StaffSidebar({
             href: "/staff/import-center",
             label: "Import Center",
             matches: (path: string) => path.startsWith("/staff/import-center"),
-            children: [{ href: "/staff/import-center/contacts", label: "Contacts Import" }]
+            children: [
+              { href: "/staff/import-center/contacts", label: "Contacts Import" },
+              { href: "/staff/import-center/transactions", label: "Transactions Import" }
+            ]
           } satisfies MenuItem
         ] as MenuItem[])
       : [])

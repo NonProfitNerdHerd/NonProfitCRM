@@ -25,16 +25,19 @@ function toRerunSettings(
   };
 }
 
-export async function listImportCenterTemplates(importType: ImportCenterType = "contacts") {
+export async function listImportCenterTemplates(importType: ImportCenterType | "all" = "contacts") {
   const context = await requireImportCenterAccess();
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("import_center_templates")
     .select("*")
     .eq("organization_id", context.organizationId)
-    .eq("import_type", importType)
     .order("created_at", { ascending: false });
+  if (importType !== "all") {
+    query = query.eq("import_type", importType);
+  }
+  const { data, error } = await query;
   if (error) throw error;
   return data ?? [];
 }

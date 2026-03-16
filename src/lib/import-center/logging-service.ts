@@ -27,7 +27,8 @@ export async function logImportCenterAudit(input: {
     | "import_center_template_updated"
     | "import_center_template_deleted"
     | "import_center_template_cloned"
-    | "import_center_contacts_run";
+    | "import_center_contacts_run"
+    | "import_center_transactions_run";
   targetEntityType: string;
   targetEntityId: string | null;
   metadata?: Record<string, unknown>;

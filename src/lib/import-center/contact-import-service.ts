@@ -17,8 +17,12 @@ import {
 } from "@/lib/import-center/validation-engine";
 import {
   CONTACT_STANDARD_FIELDS,
+  TRANSACTION_CONTACT_CREATE_FIELDS,
+  TRANSACTION_CONTACT_MATCH_FIELDS,
+  TRANSACTION_STANDARD_FIELDS,
   type ContactClassificationInput,
   type ContactImportRunInput,
+  type ImportCenterType,
   type ImportCenterMapping,
   type ReimportMatchSettings
 } from "@/lib/import-center/types";
@@ -340,13 +344,15 @@ export async function getImportCenterMetadata() {
   let templates: Array<Record<string, unknown>> = [];
   let customFields: Array<Record<string, unknown>> = [];
   let jobs: Array<Record<string, unknown>> = [];
+  let campaigns: Array<Record<string, unknown>> = [];
   let schemaWarning: string | null = null;
 
   try {
-    [templates, customFields, jobs] = await Promise.all([
-      listImportCenterTemplates("contacts"),
+    [templates, customFields, jobs, campaigns] = await Promise.all([
+      listImportCenterTemplates("all"),
       listContactCustomFields(),
-      listImportCenterJobs(25)
+      listImportCenterJobs(25),
+      listActiveCampaignOptions()
     ]);
   } catch (error) {
     if (isImportCenterSchemaMissingError(error)) {
@@ -358,13 +364,44 @@ export async function getImportCenterMetadata() {
   }
 
   return {
-    importTypes: [{ key: "contacts", label: "Contacts Import" }],
+    importTypes: [
+      { key: "contacts", label: "Contacts Import" },
+      { key: "transactions", label: "Transactions Import" }
+    ],
     standardFields: CONTACT_STANDARD_FIELDS,
+    transactionStandardFields: TRANSACTION_STANDARD_FIELDS,
+    transactionContactCreateFields: TRANSACTION_CONTACT_CREATE_FIELDS,
+    transactionContactMatchFields: TRANSACTION_CONTACT_MATCH_FIELDS,
     customFields,
     templates,
     jobs,
+    campaigns,
     schemaWarning
   };
+}
+
+export async function getImportCenterMetadataByType(importType: ImportCenterType | "all" = "all") {
+  const metadata = await getImportCenterMetadata();
+  if (importType === "all") return metadata;
+  return {
+    ...metadata,
+    templates: (metadata.templates ?? []).filter(
+      (template) => toText((template as Record<string, unknown>).import_type) === importType
+    )
+  };
+}
+
+async function listActiveCampaignOptions() {
+  const context = await requireImportCenterAccess();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("id,name,status")
+    .eq("organization_id", context.organizationId)
+    .eq("status", "Active")
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Array<Record<string, unknown>>;
 }
 
 export async function runContactsImport(input: ContactImportRunInput) {
