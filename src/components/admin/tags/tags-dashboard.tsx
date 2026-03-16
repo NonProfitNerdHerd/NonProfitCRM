@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -120,6 +120,19 @@ export function TagsDashboard({
     mappingStatus: "mapped" as "mapped" | "pending" | "error",
     isActive: true
   });
+
+  const tagById = useMemo(() => {
+    const map = new Map<string, TagNode>();
+    for (const tag of tags) map.set(tag.id, tag);
+    return map;
+  }, [tags]);
+
+  const pathPreview = useMemo(() => {
+    const parentPath = form.parentTagId ? toText(tagById.get(form.parentTagId)?.path) : "";
+    const name = toText(form.name);
+    if (!name) return parentPath || "(enter name)";
+    return parentPath ? `${parentPath} > ${name}` : name;
+  }, [form.name, form.parentTagId, tagById]);
 
   async function loadTaxonomy() {
     setLoadingTaxonomy(true);
@@ -1003,6 +1016,10 @@ export function TagsDashboard({
                     setForm((prev) => ({ ...prev, description: event.target.value }))
                   }
                 />
+              </div>
+              <div className="md:col-span-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                <p className="font-semibold text-slate-600">Path Preview</p>
+                <p>{pathPreview}</p>
               </div>
               <div className="md:col-span-2">
                 <label className="flex items-center gap-2 text-sm text-slate-700">
