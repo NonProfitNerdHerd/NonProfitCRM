@@ -461,9 +461,9 @@ export async function getDuplicateCandidates(input: {
       .limit(1000);
     if (error) throw error;
 
-    const ranked = (pool ?? [])
-      .map((row) => {
-        const candidate = row as ContactRecord;
+    const candidateRows = ((pool ?? []) as unknown[]) as ContactRecord[];
+    const ranked = candidateRows
+      .map((candidate) => {
         const result = scorePotentialDuplicate(base, candidate);
         return {
           duplicateContact: {
