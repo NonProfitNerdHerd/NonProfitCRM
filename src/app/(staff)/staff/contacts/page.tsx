@@ -20,6 +20,7 @@ export default async function ContactsPage() {
         title="All Contacts"
         subtitle="Unfiltered directory of contacts"
         contacts={contacts as Array<Record<string, unknown>>}
+        mode="all"
       />
     </Card>
   );

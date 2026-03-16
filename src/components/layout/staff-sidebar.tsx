@@ -73,6 +73,7 @@ const menu: MenuItem[] = [
     children: [
       { href: "/staff/admin/users", label: "Users" },
       { href: "/staff/admin/roles", label: "Roles" },
+      { href: "/staff/admin/tags", label: "Tags" },
       { href: "/staff/admin/integrations", label: "Integrations" }
     ]
   }

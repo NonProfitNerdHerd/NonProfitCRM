@@ -61,6 +61,8 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
       { key: "lastActivityDate", label: "Last Activity Date", dataType: "date", sortable: true },
       { key: "membershipType", label: "Membership Type", sortable: true },
       { key: "membershipStatus", label: "Membership Status", sortable: true },
+      { key: "tagList", label: "Tags", defaultSelected: true, sortable: true },
+      { key: "tagPathList", label: "Tag Paths", sortable: true },
       { key: "totalDonations", label: "Total Donations", dataType: "currency", sortable: true },
       { key: "numberOfDonations", label: "Number of Donations", dataType: "number", sortable: true },
       { key: "createdDate", label: "Created Date", dataType: "date", sortable: true },
@@ -116,6 +118,13 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
           { label: "Has Phone", value: "yes" },
           { label: "Missing Phone", value: "no" }
         ]
+      },
+      { key: "tagContains", label: "Tag Contains", type: "text", placeholder: "Major Donor" },
+      {
+        key: "tagPathContains",
+        label: "Tag Path Contains",
+        type: "text",
+        placeholder: "Interest > Advocacy"
       },
       { key: "lastActivityDateFrom", label: "Last Activity Date From", type: "date" },
       { key: "lastActivityDateTo", label: "Last Activity Date To", type: "date" },
@@ -186,7 +195,8 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
       { key: "mailingZip", label: "Mailing Zip", sortable: true },
       { key: "city", label: "City", sortable: true },
       { key: "state", label: "State", sortable: true },
-      { key: "zip", label: "Zip", sortable: true }
+      { key: "zip", label: "Zip", sortable: true },
+      { key: "donorTags", label: "Donor Tags", sortable: true }
     ],
     filters: [
       { key: "freeText", label: "Free Text Search", type: "text" },
@@ -208,6 +218,7 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
         ]
       },
       { key: "acknowledgementStatus", label: "Acknowledgement Status", type: "select", options: ACK_OPTIONS },
+      { key: "donorTagContains", label: "Donor Tag Contains", type: "text" },
       { key: "state", label: "State", type: "text" },
       { key: "city", label: "City", type: "text" },
       { key: "zip", label: "Zip", type: "text" }

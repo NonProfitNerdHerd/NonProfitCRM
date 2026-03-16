@@ -15,6 +15,7 @@ export default async function DonorsPage() {
         title="Donors"
         subtitle="Entity Type: Person • Tracking Status: Donor"
         contacts={contacts as Array<Record<string, unknown>>}
+        mode="donors"
       />
     </Card>
   );

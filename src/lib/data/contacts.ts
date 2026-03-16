@@ -2,6 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { ContactInput } from "@/lib/validation/contact";
 import { requireStaffPermission } from "@/lib/auth/guards";
 
+function toText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 function isContactExtendedSchemaError(error: unknown) {
   const message = String(
     (error as { message?: string; details?: string; hint?: string })?.message ??
@@ -95,6 +99,81 @@ function ensureClassificationForUi(row: Record<string, unknown>) {
   return normalizeLegacyClassification(row);
 }
 
+async function attachAssignedTags(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  rows: Array<Record<string, unknown>>
+) {
+  const contactIds = rows.map((row) => toText(row.id)).filter(Boolean);
+  if (contactIds.length === 0) return rows;
+
+  const { data: assignments, error } = await supabase
+    .from("contact_tags")
+    .select(
+      "contact_id,tag_id,tags(id,name,slug,path,level,color,is_active,parent_tag_id),assignment_source,assigned_at"
+    )
+    .eq("organization_id", organizationId)
+    .in("contact_id", contactIds);
+  if (error) {
+    const message = String(
+      (error as { message?: string; details?: string })?.message ??
+        (error as { details?: string })?.details ??
+        ""
+    ).toLowerCase();
+    if (message.includes("permission") || message.includes("row-level security")) {
+      return rows.map((row) => ({ ...row, assigned_tags: [], tag_paths: [] }));
+    }
+    throw error;
+  }
+
+  const byContactId = new Map<
+    string,
+    Array<{
+      id: string;
+      name: string;
+      slug: string;
+      path: string;
+      level: number;
+      color: string | null;
+      isActive: boolean;
+      assignmentSource: string;
+      assignedAt: string;
+    }>
+  >();
+
+  for (const assignment of assignments ?? []) {
+    const contactId = toText(assignment.contact_id);
+    const tagData = Array.isArray(assignment.tags) ? assignment.tags[0] : assignment.tags;
+    const tag = tagData as Record<string, unknown> | null;
+    const tagId = toText(tag?.id);
+    if (!contactId || !tagId) continue;
+    if (!byContactId.has(contactId)) byContactId.set(contactId, []);
+    byContactId.get(contactId)?.push({
+      id: tagId,
+      name: toText(tag?.name),
+      slug: toText(tag?.slug),
+      path: toText(tag?.path),
+      level: Number(tag?.level ?? 1),
+      color: toText(tag?.color) || null,
+      isActive: Boolean(tag?.is_active),
+      assignmentSource: toText(assignment.assignment_source) || "manual",
+      assignedAt: toText(assignment.assigned_at)
+    });
+  }
+
+  return rows.map((row) => {
+    const contactId = toText(row.id);
+    const assigned = (byContactId.get(contactId) ?? []).sort((a, b) =>
+      a.path.localeCompare(b.path)
+    );
+    return {
+      ...row,
+      assigned_tags: assigned,
+      tag_paths: assigned.map((tag) => tag.path)
+    };
+  });
+}
+
 export async function listContacts(
   mode:
     | "all"
@@ -128,9 +207,10 @@ export async function listContacts(
 
   const modernResult = await modernQuery;
   if (!modernResult.error) {
-    return (modernResult.data ?? []).map((row) =>
+    const normalized = (modernResult.data ?? []).map((row) =>
       ensureClassificationForUi(row as Record<string, unknown>)
     );
+    return attachAssignedTags(supabase, context.organizationId, normalized);
   }
   if (!isClassificationSchemaMissingError(modernResult.error)) {
     throw modernResult.error;
@@ -155,7 +235,7 @@ export async function listContacts(
   const normalized = (fallbackResult.data ?? []).map((row) =>
     normalizeLegacyClassification(row as Record<string, unknown>)
   );
-  return normalized.filter((row) => {
+  const filtered = normalized.filter((row) => {
     const entityType = String(row.entity_type ?? "");
     const trackingStatus = String(row.tracking_status ?? "");
     if (mode === "donors") return entityType === "person" && trackingStatus === "donor";
@@ -173,6 +253,7 @@ export async function listContacts(
     }
     return true;
   });
+  return attachAssignedTags(supabase, context.organizationId, filtered);
 }
 
 export async function getContact(contactId: string) {

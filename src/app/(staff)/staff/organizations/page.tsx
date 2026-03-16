@@ -15,6 +15,7 @@ export default async function OrganizationsPage() {
         title="Organizations"
         subtitle="Entity Type: Organization • Tracking Status: Lead/Non-Lead"
         contacts={contacts as Array<Record<string, unknown>>}
+        mode="organizations"
       />
     </Card>
   );

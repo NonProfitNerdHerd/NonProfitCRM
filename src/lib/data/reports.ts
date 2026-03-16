@@ -119,7 +119,7 @@ function profileLabel(profile: Record<string, unknown> | null | undefined) {
 
 async function buildContactRows(orgId: string) {
   const supabase = await createClient();
-  const [contactsResult, donationsResult, membershipsResult, activityResult] =
+  const [contactsResult, donationsResult, membershipsResult, activityResult, contactTagsResult] =
     await Promise.all([
       supabase
         .from("contacts")
@@ -145,13 +145,19 @@ async function buildContactRows(orgId: string) {
         .eq("organization_id", orgId)
         .not("related_contact_id", "is", null)
         .order("created_at", { ascending: false })
-        .limit(20000)
+        .limit(20000),
+      supabase
+        .from("contact_tags")
+        .select("contact_id,tags(name,path)")
+        .eq("organization_id", orgId)
+        .limit(50000)
     ]);
 
   if (contactsResult.error) throw contactsResult.error;
   if (donationsResult.error) throw donationsResult.error;
   if (membershipsResult.error) throw membershipsResult.error;
   if (activityResult.error) throw activityResult.error;
+  if (contactTagsResult.error) throw contactTagsResult.error;
 
   const donationRollup = new Map<string, { total: number; count: number }>();
   for (const donation of donationsResult.data ?? []) {
@@ -189,6 +195,20 @@ async function buildContactRows(orgId: string) {
     lastActivity.set(contactId, text(activity.created_at));
   }
 
+  const tagsByContact = new Map<string, { names: Set<string>; paths: Set<string> }>();
+  for (const row of contactTagsResult.data ?? []) {
+    const contactId = text(row.contact_id);
+    const tag = relatedSingle<Record<string, unknown>>(row.tags);
+    const name = text(tag?.name);
+    const path = text(tag?.path);
+    if (!contactId) continue;
+    if (!tagsByContact.has(contactId)) {
+      tagsByContact.set(contactId, { names: new Set<string>(), paths: new Set<string>() });
+    }
+    if (name) tagsByContact.get(contactId)?.names.add(name);
+    if (path) tagsByContact.get(contactId)?.paths.add(path);
+  }
+
   return (contactsResult.data ?? []).map((contact) => {
     const contactId = text(contact.id);
     const donation = donationRollup.get(contactId) ?? { total: 0, count: 0 };
@@ -199,6 +219,7 @@ async function buildContactRows(orgId: string) {
     const lastActivityDate = lastActivity.get(contactId) ?? "";
     const entityType = lower(contact.entity_type) === "organization" ? "Organization" : "Person";
     const trackingStatus = lower(contact.tracking_status) || "lead";
+    const tags = tagsByContact.get(contactId) ?? { names: new Set<string>(), paths: new Set<string>() };
 
     return {
       id: contactId,
@@ -215,6 +236,8 @@ async function buildContactRows(orgId: string) {
       lastActivityDate: isoDate(lastActivityDate),
       membershipType: membership?.membershipType ?? "",
       membershipStatus: membership?.membershipStatus ?? text(contact.member_status),
+      tagList: Array.from(tags.names).sort((a, b) => a.localeCompare(b)).join(", "),
+      tagPathList: Array.from(tags.paths).sort((a, b) => a.localeCompare(b)).join(" | "),
       totalDonations: donation.total,
       numberOfDonations: donation.count,
       donorKind: donation.count > 0 ? "donor" : "non-donor",
@@ -351,9 +374,29 @@ async function buildDonorRows(orgId: string, filters: ReportFilters) {
     : { data: [], error: null };
   if (contactsResult.error) throw contactsResult.error;
 
+  const contactTagsResult = contactIds.length
+    ? await supabase
+        .from("contact_tags")
+        .select("contact_id,tags(name,path)")
+        .eq("organization_id", orgId)
+        .in("contact_id", contactIds)
+        .limit(50000)
+    : { data: [], error: null };
+  if (contactTagsResult.error) throw contactTagsResult.error;
+
   const contactMap = new Map<string, Record<string, unknown>>();
   for (const contact of contactsResult.data ?? []) {
     contactMap.set(text(contact.id), contact);
+  }
+
+  const tagsByContact = new Map<string, Set<string>>();
+  for (const row of contactTagsResult.data ?? []) {
+    const contactId = text(row.contact_id);
+    const tag = relatedSingle<Record<string, unknown>>(row.tags);
+    const path = text(tag?.path);
+    if (!contactId || !path) continue;
+    if (!tagsByContact.has(contactId)) tagsByContact.set(contactId, new Set());
+    tagsByContact.get(contactId)?.add(path);
   }
 
   const periodFrom = filters.donationDateFrom;
@@ -451,7 +494,8 @@ async function buildDonorRows(orgId: string, filters: ReportFilters) {
       city: text(contact.city),
       state: text(contact.state),
       zip: text(contact.postal_code),
-      paymentTypes: Array.from(stats.paymentTypes).join(", ")
+      paymentTypes: Array.from(stats.paymentTypes).join(", "),
+      donorTags: Array.from(tagsByContact.get(contactId) ?? []).sort((a, b) => a.localeCompare(b)).join(" | ")
     };
   });
 }
@@ -712,6 +756,8 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
         if (key === "donorKind" && lower(row.donorKind) !== lower(value)) return false;
         if (key === "hasEmail" && lower(row.hasEmail) !== lower(value)) return false;
         if (key === "hasPhone" && lower(row.hasPhone) !== lower(value)) return false;
+        if (key === "tagContains" && !containsValue(row.tagList, value)) return false;
+        if (key === "tagPathContains" && !containsValue(row.tagPathList, value)) return false;
         if (key === "lastActivityDateFrom" && !inDateRange(row.lastActivityDate, value, undefined)) return false;
         if (key === "lastActivityDateTo" && !inDateRange(row.lastActivityDate, undefined, value)) return false;
       }
@@ -738,6 +784,7 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
         if (key === "minNumberOfGifts" && toNumber(row.numberOfGifts) < toNumber(value)) return false;
         if (key === "maxNumberOfGifts" && toNumber(row.numberOfGifts) > toNumber(value)) return false;
         if (key === "donorSegment" && text(row.donorSegment) !== text(value)) return false;
+        if (key === "donorTagContains" && !containsValue(row.donorTags, value)) return false;
         if (key === "acknowledgementStatus") {
           if (text(value) === "Pending" && toNumber(row.pendingAcknowledgements) <= 0) return false;
           if (text(value) === "Sent" && toNumber(row.sentAcknowledgements) <= 0) return false;
@@ -981,6 +1028,23 @@ export async function exportReport(input: {
     contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     data: buffer
   };
+}
+
+export async function getContactTagRollupSummary() {
+  const context = await requireStaffPermission("can_run_reports");
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("contact_tag_rollup_counts", {
+    org_id: context.organizationId
+  });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    tagId: text(row.tag_id),
+    tagName: text(row.tag_name),
+    tagPath: text(row.tag_path),
+    level: toNumber(row.level),
+    directContactCount: toNumber(row.direct_contact_count),
+    rollupContactCount: toNumber(row.rollup_contact_count)
+  }));
 }
 
 export async function listSavedReports(reportType?: ReportType) {

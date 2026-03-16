@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
 import { DonationsManagement } from "@/components/donations/donations-management";
+import { ContactTagManager } from "@/components/contacts/contact-tag-manager";
 
 const recordTypeOptions = ["person", "organization"] as const;
 const trackingStatusOptions = ["donor", "lead", "non_lead"] as const;
@@ -78,7 +79,7 @@ export function ContactProfileTabs({
       ? String(contactDetails.external_source_id ?? "")
       : "") || String(contactDetails.webconnex_id ?? "");
   const [activeTab, setActiveTab] = useState<
-    "activity" | "contactInfo" | "donations" | "notes" | "tasks" | "memberships"
+    "activity" | "contactInfo" | "tags" | "donations" | "notes" | "tasks" | "memberships"
   >("activity");
   const [noteBody, setNoteBody] = useState("");
   const [followUpRequired, setFollowUpRequired] = useState(false);
@@ -345,6 +346,9 @@ export function ContactProfileTabs({
         >
           Contact Information
         </TabButton>
+        <TabButton active={activeTab === "tags"} onClick={() => setActiveTab("tags")}>
+          Tags
+        </TabButton>
         <TabButton active={activeTab === "donations"} onClick={() => setActiveTab("donations")}>
           Donations
         </TabButton>
@@ -529,6 +533,8 @@ export function ContactProfileTabs({
           </section>
         </div>
       ) : null}
+
+      {activeTab === "tags" ? <ContactTagManager contactId={contactId} /> : null}
 
       {activeTab === "donations" ? (
         <DonationsManagement

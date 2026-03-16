@@ -4,6 +4,24 @@ values
   ('can_create_contacts', 'Create Contacts', 'Create contact records', 'contacts'),
   ('can_edit_contacts', 'Edit Contacts', 'Update contact records', 'contacts'),
   ('can_delete_contacts', 'Delete Contacts', 'Delete contact records', 'contacts'),
+  (
+    'can_manage_contact_tags',
+    'Manage Contact Tags',
+    'Create, update, move, activate, and deactivate contact tags and taxonomy structure',
+    'contacts'
+  ),
+  (
+    'can_assign_contact_tags',
+    'Assign Contact Tags',
+    'Assign and remove tags on contacts through profile and list workflows',
+    'contacts'
+  ),
+  (
+    'can_bulk_tag_contacts',
+    'Bulk Tag Contacts',
+    'Run bulk tag assignment and removal jobs',
+    'contacts'
+  ),
   ('can_view_pii', 'View PII', 'View protected PII fields and records', 'security'),
   ('can_view_sensitive_notes', 'View Sensitive Notes', 'Read restricted note records', 'notes'),
   ('can_view_sensitive_tasks', 'View Sensitive Tasks', 'Read restricted task records', 'tasks'),
@@ -484,6 +502,9 @@ with canonical_map as (
     'can_create_contacts',
     'can_edit_contacts',
     'can_delete_contacts',
+    'can_manage_contact_tags',
+    'can_assign_contact_tags',
+    'can_bulk_tag_contacts',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
@@ -524,6 +545,9 @@ with canonical_map as (
     'can_create_contacts',
     'can_edit_contacts',
     'can_delete_contacts',
+    'can_manage_contact_tags',
+    'can_assign_contact_tags',
+    'can_bulk_tag_contacts',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
@@ -561,6 +585,9 @@ with canonical_map as (
     'can_create_contacts',
     'can_edit_contacts',
     'can_delete_contacts',
+    'can_manage_contact_tags',
+    'can_assign_contact_tags',
+    'can_bulk_tag_contacts',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
@@ -595,6 +622,8 @@ with canonical_map as (
   select 'executive_staff', unnest(array[
     'can_view_dashboard',
     'can_view_contacts',
+    'can_assign_contact_tags',
+    'can_bulk_tag_contacts',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
@@ -616,6 +645,7 @@ with canonical_map as (
     'can_view_contacts',
     'can_create_contacts',
     'can_edit_contacts',
+    'can_assign_contact_tags',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
@@ -646,6 +676,7 @@ with canonical_map as (
     'can_view_contacts',
     'can_create_contacts',
     'can_edit_contacts',
+    'can_assign_contact_tags',
     'can_create_tasks',
     'can_view_donations',
     'can_create_donations',
@@ -666,6 +697,7 @@ with canonical_map as (
     'can_view_contacts',
     'can_create_contacts',
     'can_edit_contacts',
+    'can_assign_contact_tags',
     'can_view_donations',
     'can_create_donations'
   ])
