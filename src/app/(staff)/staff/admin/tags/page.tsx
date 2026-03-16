@@ -5,7 +5,21 @@ import { TagsDashboard, type TagsDashboardNode } from "@/components/admin/tags/t
 
 export default async function TagsAdminPage() {
   await requireAnyStaffPermission(["can_assign_contact_tags", "can_manage_contact_tags"]);
-  const initial = await listTagDefinitions({ active: "active" });
+  let initial: {
+    tags: Array<Record<string, unknown>>;
+    tree: Array<Record<string, unknown>>;
+    schemaWarning?: string | null;
+  } = {
+    tags: [],
+    tree: [],
+    schemaWarning: null
+  };
+  let loadError: string | null = null;
+  try {
+    initial = await listTagDefinitions({ active: "active" });
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : "Unable to load tags in this environment.";
+  }
 
   return (
     <Card>
@@ -16,6 +30,7 @@ export default async function TagsAdminPage() {
       <TagsDashboard
         initialTree={initial.tree as TagsDashboardNode[]}
         initialTags={initial.tags as TagsDashboardNode[]}
+        initialWarning={initial.schemaWarning ?? loadError}
       />
     </Card>
   );

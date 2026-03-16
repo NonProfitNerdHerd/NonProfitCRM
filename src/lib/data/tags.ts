@@ -46,6 +46,24 @@ function toText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function isTaggingSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("relation") ||
+    message.includes("does not exist") ||
+    message.includes("tags") ||
+    message.includes("contact_tags") ||
+    message.includes("tag_assignment_jobs") ||
+    message.includes("tag_sync_mappings") ||
+    message.includes("collect_descendant_tag_ids")
+  );
+}
+
 function toBool(value: unknown, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") return ["true", "1", "yes"].includes(value.toLowerCase());
@@ -217,7 +235,17 @@ export async function listTagDefinitions(input?: {
   }
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    if (isTaggingSchemaMissingError(error)) {
+      return {
+        tags: [] as Array<Record<string, unknown>>,
+        tree: [] as Array<Record<string, unknown>>,
+        schemaWarning:
+          "Tagging schema is not available in this environment yet. Run Supabase migration 202603171000 and retry."
+      };
+    }
+    throw error;
+  }
 
   const tags = (data ?? []) as TagRow[];
   const tagIds = tags.map((tag) => tag.id);
@@ -229,7 +257,17 @@ export async function listTagDefinitions(input?: {
       .select("tag_id")
       .eq("organization_id", context.organizationId)
       .in("tag_id", tagIds);
-    if (assignmentsError) throw assignmentsError;
+    if (assignmentsError) {
+      if (isTaggingSchemaMissingError(assignmentsError)) {
+        return {
+          tags: [] as Array<Record<string, unknown>>,
+          tree: [] as Array<Record<string, unknown>>,
+          schemaWarning:
+            "Tagging schema is not available in this environment yet. Run Supabase migration 202603171000 and retry."
+        };
+      }
+      throw assignmentsError;
+    }
     for (const row of assignments ?? []) {
       const tagId = toText(row.tag_id);
       if (!tagId) continue;
@@ -262,7 +300,8 @@ export async function listTagDefinitions(input?: {
       usageCount: usageMap.get(tag.id) ?? 0,
       childCount: (childrenByParent.get(tag.id) ?? []).length
     })),
-    tree: buildTree("")
+    tree: buildTree(""),
+    schemaWarning: null
   };
 }
 

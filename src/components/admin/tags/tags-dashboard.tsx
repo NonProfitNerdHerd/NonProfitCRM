@@ -63,10 +63,12 @@ function toText(value: unknown) {
 
 export function TagsDashboard({
   initialTree,
-  initialTags
+  initialTags,
+  initialWarning
 }: {
   initialTree: TagNode[];
   initialTags: Array<TagNode>;
+  initialWarning?: string | null;
 }) {
   const [activeTab, setActiveTab] = useState<"taxonomy" | "bulk" | "mappings">("taxonomy");
 
@@ -78,7 +80,7 @@ export function TagsDashboard({
   const [selectedUsage, setSelectedUsage] = useState<Record<string, unknown> | null>(null);
   const [loadingTaxonomy, setLoadingTaxonomy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialWarning ?? null);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
@@ -145,6 +147,9 @@ export function TagsDashboard({
       setError(payload?.message ?? "Unable to load tags.");
       setLoadingTaxonomy(false);
       return;
+    }
+    if (payload?.schemaWarning) {
+      setError(String(payload.schemaWarning));
     }
     setTags((payload?.tags ?? []) as TagNode[]);
     setTree((payload?.tree ?? []) as TagNode[]);
