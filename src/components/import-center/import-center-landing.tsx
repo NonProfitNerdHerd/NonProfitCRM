@@ -8,6 +8,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 type ImportCenterLandingProps = {
   initialTemplates: Array<Record<string, unknown>>;
   initialJobs: Array<Record<string, unknown>>;
+  schemaWarning?: string | null;
 };
 
 function toText(value: unknown) {
@@ -24,7 +25,8 @@ function formatDate(value: unknown) {
 
 export function ImportCenterLanding({
   initialTemplates,
-  initialJobs
+  initialJobs,
+  schemaWarning
 }: ImportCenterLandingProps) {
   const [templates, setTemplates] = useState(initialTemplates);
   const [jobs] = useState(initialJobs);
@@ -143,6 +145,11 @@ export function ImportCenterLanding({
       </Card>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {schemaWarning ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {schemaWarning}
+        </p>
+      ) : null}
 
       <Card>
         <CardHeader title="Import History" subtitle="Recent Import Center jobs and outcomes." />

@@ -21,6 +21,27 @@ function toText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function importCenterSchemaErrorMessage(error: unknown) {
+  const value = error as { message?: string; details?: string; hint?: string; code?: string };
+  return [value?.message, value?.details, value?.hint, value?.code]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isImportCenterSchemaMissingError(error: unknown) {
+  const message = importCenterSchemaErrorMessage(error);
+  return (
+    message.includes("import_center_templates") ||
+    message.includes("import_center_jobs") ||
+    message.includes("import_center_job_errors") ||
+    message.includes("contact_custom_fields") ||
+    message.includes("contact_custom_field_values") ||
+    message.includes("relation") ||
+    message.includes("does not exist")
+  );
+}
+
 function normalizePhone(value: unknown) {
   return toText(value).replace(/\D+/g, "");
 }
@@ -138,18 +159,33 @@ export async function listImportCenterJobs(limit = 25) {
 }
 
 export async function getImportCenterMetadata() {
-  const [templates, customFields, jobs] = await Promise.all([
-    listImportCenterTemplates("contacts"),
-    listContactCustomFields(),
-    listImportCenterJobs(25)
-  ]);
+  let templates: Array<Record<string, unknown>> = [];
+  let customFields: Array<Record<string, unknown>> = [];
+  let jobs: Array<Record<string, unknown>> = [];
+  let schemaWarning: string | null = null;
+
+  try {
+    [templates, customFields, jobs] = await Promise.all([
+      listImportCenterTemplates("contacts"),
+      listContactCustomFields(),
+      listImportCenterJobs(25)
+    ]);
+  } catch (error) {
+    if (isImportCenterSchemaMissingError(error)) {
+      schemaWarning =
+        "Import Center schema is not available in this environment yet. Run Supabase migration 202603171800 and retry.";
+    } else {
+      throw error;
+    }
+  }
 
   return {
     importTypes: [{ key: "contacts", label: "Contacts Import" }],
     standardFields: CONTACT_STANDARD_FIELDS,
     customFields,
     templates,
-    jobs
+    jobs,
+    schemaWarning
   };
 }
 

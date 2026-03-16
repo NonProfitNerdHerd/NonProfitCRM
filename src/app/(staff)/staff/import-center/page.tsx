@@ -12,6 +12,7 @@ export default async function ImportCenterPage() {
       <ImportCenterLanding
         initialTemplates={(metadata.templates ?? []) as Array<Record<string, unknown>>}
         initialJobs={(metadata.jobs ?? []) as Array<Record<string, unknown>>}
+        schemaWarning={(metadata.schemaWarning ?? null) as string | null}
       />
     </Card>
   );
