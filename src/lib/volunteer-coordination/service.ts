@@ -36,6 +36,81 @@ function normalizePhone(value: unknown) {
   return toText(value).replace(/\D+/g, "");
 }
 
+function volunteerSchemaErrorMessage(error: unknown) {
+  const value = error as { message?: string; details?: string; hint?: string; code?: string };
+  return [value?.message, value?.details, value?.hint, value?.code]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+export function isVolunteerSchemaMissingError(error: unknown) {
+  const message = volunteerSchemaErrorMessage(error);
+  return (
+    message.includes("volunteer_profiles") ||
+    message.includes("volunteer_event_series") ||
+    message.includes("volunteer_events") ||
+    message.includes("volunteer_event_roles") ||
+    message.includes("volunteer_assignments") ||
+    message.includes("volunteer_hours") ||
+    message.includes("volunteer_hour_imports") ||
+    message.includes("volunteer_concerns") ||
+    message.includes("volunteer_incidents") ||
+    message.includes("relation") ||
+    message.includes("does not exist") ||
+    message.includes("schema cache")
+  );
+}
+
+export function buildVolunteerCoordinationEmptyState(schemaWarning?: string | null) {
+  return {
+    schemaWarning:
+      schemaWarning ??
+      "Volunteer Coordination schema is not available in this environment yet. Run Supabase migration 202603181200 and retry.",
+    canViewSensitive: false,
+    summary: {
+      totalVolunteers: 0,
+      activeVolunteers: 0,
+      burnoutCount: 0,
+      cautionCount: 0,
+      totalEvents: 0,
+      openRoles: 0,
+      waitlistCount: 0,
+      substituteCount: 0,
+      noShowCount: 0,
+      incidentsCount: 0,
+      concernsCount: 0
+    },
+    volunteers: [],
+    events: [],
+    eventSeries: [],
+    eventRoles: [],
+    assignments: [],
+    waitlist: [],
+    substitutes: [],
+    families: [],
+    groups: [],
+    complianceItems: [],
+    concerns: [],
+    incidents: [],
+    burnoutFlags: [],
+    hourImports: [],
+    contacts: [],
+    tags: [],
+    reports: {
+      monthlyHours: [],
+      topVolunteers: [],
+      underfilledEvents: [],
+      noShowAssignments: []
+    },
+    options: {
+      eventOptions: [],
+      roleOptions: [],
+      volunteerOptions: []
+    }
+  };
+}
+
 type HourImportColumnMapping = {
   volunteerNameColumn?: string;
   contactIdentifierColumn?: string;
@@ -422,6 +497,223 @@ export async function getVolunteerCoordinationData(filters?: {
   };
 }
 
+export async function getVolunteerProfileDetail(profileId: string) {
+  const context = await requireVolunteerCoordinationAccess();
+  const canViewSensitive = await hasAnyStaffPermission(
+    ["can_view_volunteer_sensitive", "can_manage_volunteer_sensitive"],
+    context
+  );
+  const supabase = await createClient();
+
+  const { data: profile, error: profileError } = await supabase
+    .from("volunteer_profiles")
+    .select("*, contacts(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("id", profileId)
+    .single();
+  if (profileError) throw profileError;
+
+  const { data: guardians, error: guardianError } = await supabase
+    .from("volunteer_profile_guardians")
+    .select("*, contacts(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("volunteer_profile_id", profileId)
+    .order("created_at", { ascending: false });
+  if (guardianError) throw guardianError;
+
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from("volunteer_assignments")
+    .select("*, volunteer_events(*), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("volunteer_profile_id", profileId)
+    .order("assigned_at", { ascending: false })
+    .limit(300);
+  if (assignmentsError) throw assignmentsError;
+
+  const { data: hours, error: hoursError } = await supabase
+    .from("volunteer_hours")
+    .select("*, volunteer_events(*), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("volunteer_profile_id", profileId)
+    .order("service_date", { ascending: false })
+    .limit(300);
+  if (hoursError) throw hoursError;
+
+  const { data: waitlist, error: waitlistError } = await supabase
+    .from("volunteer_waitlist_entries")
+    .select("*, volunteer_events(*), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("volunteer_profile_id", profileId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (waitlistError) throw waitlistError;
+
+  const { data: substitutes, error: substitutesError } = await supabase
+    .from("volunteer_substitute_entries")
+    .select("*, volunteer_events(*), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("volunteer_profile_id", profileId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (substitutesError) throw substitutesError;
+
+  const sensitivePayload = canViewSensitive
+    ? await Promise.all([
+        supabase
+          .from("volunteer_compliance_items")
+          .select("*")
+          .eq("organization_id", context.organizationId)
+          .eq("volunteer_profile_id", profileId)
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("volunteer_concerns")
+          .select("*")
+          .eq("organization_id", context.organizationId)
+          .eq("volunteer_profile_id", profileId)
+          .order("concern_date", { ascending: false }),
+        supabase
+          .from("volunteer_burnout_flags")
+          .select("*")
+          .eq("organization_id", context.organizationId)
+          .eq("volunteer_profile_id", profileId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("volunteer_incident_people")
+          .select("incident_id,volunteer_incidents(*)")
+          .eq("organization_id", context.organizationId)
+          .eq("volunteer_profile_id", profileId)
+          .order("created_at", { ascending: false })
+      ])
+    : [];
+
+  return {
+    canViewSensitive,
+    profile,
+    guardians: guardians ?? [],
+    assignments: assignments ?? [],
+    hours: hours ?? [],
+    waitlist: waitlist ?? [],
+    substitutes: substitutes ?? [],
+    complianceItems: canViewSensitive ? (sensitivePayload[0] as { data: unknown[] | null }).data ?? [] : [],
+    concerns: canViewSensitive ? (sensitivePayload[1] as { data: unknown[] | null }).data ?? [] : [],
+    burnoutFlags: canViewSensitive ? (sensitivePayload[2] as { data: unknown[] | null }).data ?? [] : [],
+    incidents:
+      canViewSensitive
+        ? ((sensitivePayload[3] as { data: Array<Record<string, unknown>> | null }).data ?? []).map(
+            (row) =>
+              (Array.isArray(row.volunteer_incidents)
+                ? row.volunteer_incidents[0]
+                : row.volunteer_incidents) as Record<string, unknown>
+          )
+        : []
+  };
+}
+
+export async function getVolunteerEventDetail(eventId: string) {
+  const context = await requireVolunteerCoordinationAccess();
+  const canViewSensitive = await hasAnyStaffPermission(
+    ["can_view_volunteer_sensitive", "can_manage_volunteer_sensitive"],
+    context
+  );
+  const supabase = await createClient();
+
+  const { data: event, error: eventError } = await supabase
+    .from("volunteer_events")
+    .select("*, volunteer_event_series(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("id", eventId)
+    .single();
+  if (eventError) throw eventError;
+
+  const { data: roles, error: rolesError } = await supabase
+    .from("volunteer_event_roles")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", eventId)
+    .order("created_at", { ascending: true });
+  if (rolesError) throw rolesError;
+
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from("volunteer_assignments")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", eventId)
+    .order("assigned_at", { ascending: false })
+    .limit(600);
+  if (assignmentsError) throw assignmentsError;
+
+  const { data: waitlist, error: waitlistError } = await supabase
+    .from("volunteer_waitlist_entries")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", eventId)
+    .order("waitlist_order", { ascending: true })
+    .limit(600);
+  if (waitlistError) throw waitlistError;
+
+  const { data: substitutes, error: substitutesError } = await supabase
+    .from("volunteer_substitute_entries")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", eventId)
+    .order("priority_order", { ascending: true })
+    .limit(600);
+  if (substitutesError) throw substitutesError;
+
+  const { data: hours, error: hoursError } = await supabase
+    .from("volunteer_hours")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", eventId)
+    .order("service_date", { ascending: false })
+    .limit(600);
+  if (hoursError) throw hoursError;
+
+  const { data: imports, error: importsError } = await supabase
+    .from("volunteer_hour_imports")
+    .select("*, volunteer_hour_import_rows(*)")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", eventId)
+    .order("imported_at", { ascending: false })
+    .limit(100);
+  if (importsError) throw importsError;
+
+  const incidents = canViewSensitive
+    ? await supabase
+        .from("volunteer_incidents")
+        .select("*, volunteer_event_roles(*)")
+        .eq("organization_id", context.organizationId)
+        .eq("event_id", eventId)
+        .order("incident_at", { ascending: false })
+    : { data: [] as unknown[], error: null };
+  if (incidents.error) throw incidents.error;
+
+  const hoursByRole = new Map<string, number>();
+  for (const row of hours ?? []) {
+    const roleId = toText(row.role_id) || "unassigned";
+    const actualHours = toNumber(row.actual_hours);
+    hoursByRole.set(roleId, (hoursByRole.get(roleId) ?? 0) + actualHours);
+  }
+
+  return {
+    canViewSensitive,
+    event,
+    roles: roles ?? [],
+    assignments: assignments ?? [],
+    waitlist: waitlist ?? [],
+    substitutes: substitutes ?? [],
+    hours: hours ?? [],
+    imports: imports ?? [],
+    incidents: incidents.data ?? [],
+    reporting: {
+      roleHours: Array.from(hoursByRole.entries()).map(([roleId, hoursTotal]) => ({
+        roleId,
+        hoursTotal: Math.round(hoursTotal * 100) / 100
+      }))
+    }
+  };
+}
+
 export async function upsertVolunteerProfile(input: {
   id?: string;
   contactId: string;
@@ -671,6 +963,341 @@ export async function createVolunteerEventSeries(input: {
   });
 
   return data as Record<string, unknown>;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
+function dateOnly(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function isRecurrenceMatch(input: {
+  date: Date;
+  startsOn: Date;
+  recurrencePattern: string;
+  recurrenceInterval: number;
+  recurrenceDaysOfWeek: number[];
+  recurrenceDayOfMonth: number | null;
+}) {
+  const diffDays = Math.floor((input.date.getTime() - input.startsOn.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return false;
+
+  if (input.recurrencePattern === "daily") {
+    return diffDays % Math.max(1, input.recurrenceInterval) === 0;
+  }
+
+  if (input.recurrencePattern === "monthly") {
+    const startsYear = input.startsOn.getUTCFullYear();
+    const startsMonth = input.startsOn.getUTCMonth();
+    const year = input.date.getUTCFullYear();
+    const month = input.date.getUTCMonth();
+    const monthDiff = (year - startsYear) * 12 + (month - startsMonth);
+    if (monthDiff < 0 || monthDiff % Math.max(1, input.recurrenceInterval) !== 0) return false;
+    const targetDay = input.recurrenceDayOfMonth ?? input.startsOn.getUTCDate();
+    return input.date.getUTCDate() === targetDay;
+  }
+
+  const intervalWeeks =
+    input.recurrencePattern === "biweekly"
+      ? Math.max(1, input.recurrenceInterval) * 2
+      : Math.max(1, input.recurrenceInterval);
+  const weekIndex = Math.floor(diffDays / 7);
+  if (weekIndex % intervalWeeks !== 0) return false;
+  const weekday = input.date.getUTCDay();
+  const days = input.recurrenceDaysOfWeek.length > 0
+    ? input.recurrenceDaysOfWeek
+    : [input.startsOn.getUTCDay()];
+  return days.includes(weekday);
+}
+
+export async function generateVolunteerEventInstances(input: {
+  seriesId: string;
+  throughDate?: string | null;
+  maxOccurrences?: number | null;
+}) {
+  const context = await requireVolunteerCoordinationManager();
+  const supabase = await createClient();
+
+  const { data: series, error: seriesError } = await supabase
+    .from("volunteer_event_series")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.seriesId)
+    .single();
+  if (seriesError) throw seriesError;
+  if (!series || !Boolean(series.is_active)) {
+    throw new Error("Recurring series is not active.");
+  }
+
+  const { data: existingEvents, error: eventsError } = await supabase
+    .from("volunteer_events")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("series_id", input.seriesId)
+    .order("event_date", { ascending: true });
+  if (eventsError) throw eventsError;
+  if (!existingEvents || existingEvents.length === 0) {
+    throw new Error("Series requires at least one seed event before generating future instances.");
+  }
+
+  const templateEvent = existingEvents.find((event) => !Boolean(event.is_series_override)) ?? existingEvents[0];
+  const { data: templateRoles, error: templateRolesError } = await supabase
+    .from("volunteer_event_roles")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", String(templateEvent.id))
+    .order("created_at", { ascending: true });
+  if (templateRolesError) throw templateRolesError;
+
+  const existingDateSet = new Set(existingEvents.map((event) => String(event.event_date)));
+  const startsOnText = toText(series.starts_on) || toText(templateEvent.event_date);
+  const startsOn = new Date(`${startsOnText}T00:00:00.000Z`);
+  if (Number.isNaN(startsOn.getTime())) throw new Error("Series start date is invalid.");
+
+  const today = new Date();
+  const defaultThrough = addMonths(today, 6);
+  const inputThrough = parseDate(input.throughDate);
+  const seriesEndsOn = parseDate(series.ends_on);
+  const throughDate = new Date(
+    `${inputThrough || seriesEndsOn || dateOnly(defaultThrough)}T00:00:00.000Z`
+  );
+  const maxOccurrences = Math.max(
+    1,
+    input.maxOccurrences !== null && input.maxOccurrences !== undefined
+      ? toNumber(input.maxOccurrences, 24)
+      : toNumber(series.ends_after_occurrences, 24)
+  );
+
+  const recurrencePattern = toText(series.recurrence_pattern) || "weekly";
+  const recurrenceInterval = Math.max(1, toNumber(series.recurrence_interval, 1));
+  const recurrenceDays = Array.isArray(series.recurrence_days_of_week)
+    ? series.recurrence_days_of_week
+        .map((value: unknown) => Number(value))
+        .filter((value: number) => Number.isInteger(value) && value >= 0 && value <= 6)
+    : [];
+  const recurrenceDayOfMonth =
+    series.recurrence_day_of_month === null || series.recurrence_day_of_month === undefined
+      ? null
+      : toNumber(series.recurrence_day_of_month);
+
+  const candidateDates: string[] = [];
+  let cursor = new Date(startsOn);
+  const safetyLimit = 4000;
+  let safetyCounter = 0;
+  while (cursor <= throughDate && candidateDates.length < maxOccurrences && safetyCounter < safetyLimit) {
+    safetyCounter += 1;
+    if (
+      isRecurrenceMatch({
+        date: cursor,
+        startsOn,
+        recurrencePattern,
+        recurrenceInterval,
+        recurrenceDaysOfWeek: recurrenceDays,
+        recurrenceDayOfMonth
+      })
+    ) {
+      const isoDate = dateOnly(cursor);
+      if (!existingDateSet.has(isoDate)) {
+        candidateDates.push(isoDate);
+      }
+    }
+    cursor = addDays(cursor, 1);
+  }
+
+  if (candidateDates.length === 0) {
+    return {
+      seriesId: input.seriesId,
+      createdEvents: 0,
+      createdRoles: 0
+    };
+  }
+
+  let createdEvents = 0;
+  let createdRoles = 0;
+
+  for (const eventDate of candidateDates) {
+    const { data: createdEvent, error: createEventError } = await supabase
+      .from("volunteer_events")
+      .insert({
+        organization_id: context.organizationId,
+        series_id: input.seriesId,
+        event_name: templateEvent.event_name,
+        event_type: templateEvent.event_type,
+        program_department: templateEvent.program_department,
+        event_status: "recruiting",
+        event_description: templateEvent.event_description,
+        event_date: eventDate,
+        start_time: templateEvent.start_time,
+        end_time: templateEvent.end_time,
+        location: templateEvent.location,
+        coordinator_user_id: templateEvent.coordinator_user_id,
+        visibility: templateEvent.visibility,
+        capacity_total: templateEvent.capacity_total,
+        capacity_filled: 0,
+        notes: templateEvent.notes,
+        attachment_urls: templateEvent.attachment_urls ?? [],
+        meal_options: templateEvent.meal_options ?? [],
+        tshirt_options: templateEvent.tshirt_options ?? [],
+        family_friendly: templateEvent.family_friendly,
+        group_allowed: templateEvent.group_allowed,
+        minor_allowed: templateEvent.minor_allowed,
+        is_series_override: false,
+        created_by: context.userId,
+        updated_by: context.userId
+      })
+      .select("*")
+      .single();
+    if (createEventError) throw createEventError;
+    createdEvents += 1;
+
+    const oldToNewRoleId = new Map<string, string>();
+    for (const role of templateRoles ?? []) {
+      const { data: createdRole, error: createRoleError } = await supabase
+        .from("volunteer_event_roles")
+        .insert({
+          organization_id: context.organizationId,
+          event_id: String(createdEvent.id),
+          parent_role_id: null,
+          role_name: role.role_name,
+          role_description: role.role_description,
+          shift_start: role.shift_start,
+          shift_end: role.shift_end,
+          number_needed: role.number_needed,
+          number_filled: 0,
+          waitlist_enabled: role.waitlist_enabled,
+          substitute_enabled: role.substitute_enabled,
+          is_lead_role: role.is_lead_role,
+          required_skills: role.required_skills ?? [],
+          required_tags: role.required_tags ?? [],
+          required_certifications: role.required_certifications ?? [],
+          required_training: role.required_training ?? [],
+          background_check_required: role.background_check_required,
+          driver_eligibility_required: role.driver_eligibility_required,
+          minor_allowed: role.minor_allowed,
+          family_member_allowed: role.family_member_allowed,
+          group_participant_allowed: role.group_participant_allowed,
+          physical_requirements: role.physical_requirements,
+          meal_eligible: role.meal_eligible,
+          tshirt_eligible: role.tshirt_eligible,
+          check_in_location: role.check_in_location,
+          supervisor_contact_id: role.supervisor_contact_id,
+          notes: role.notes,
+          created_by: context.userId,
+          updated_by: context.userId
+        })
+        .select("id")
+        .single();
+      if (createRoleError) throw createRoleError;
+      oldToNewRoleId.set(String(role.id), String(createdRole.id));
+      createdRoles += 1;
+    }
+
+    for (const role of templateRoles ?? []) {
+      if (!role.parent_role_id) continue;
+      const newRoleId = oldToNewRoleId.get(String(role.id));
+      const newParentRoleId = oldToNewRoleId.get(String(role.parent_role_id));
+      if (!newRoleId || !newParentRoleId) continue;
+      const { error: patchParentError } = await supabase
+        .from("volunteer_event_roles")
+        .update({ parent_role_id: newParentRoleId })
+        .eq("organization_id", context.organizationId)
+        .eq("id", newRoleId);
+      if (patchParentError) throw patchParentError;
+    }
+  }
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "volunteer_event_series_instances_generated",
+    targetEntityType: "volunteer_event_series",
+    targetEntityId: input.seriesId,
+    metadata: {
+      createdEvents,
+      createdRoles,
+      throughDate: dateOnly(throughDate),
+      maxOccurrences
+    }
+  });
+
+  return {
+    seriesId: input.seriesId,
+    createdEvents,
+    createdRoles
+  };
+}
+
+export async function runVolunteerSeriesGenerationJob(input?: {
+  throughDate?: string | null;
+  maxOccurrencesPerSeries?: number | null;
+  limitSeries?: number | null;
+}) {
+  const context = await requireVolunteerCoordinationManager();
+  const supabase = await createClient();
+  const limitSeries = Math.max(1, toNumber(input?.limitSeries ?? 20, 20));
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: activeSeries, error } = await supabase
+    .from("volunteer_event_series")
+    .select("id,series_name,starts_on,ends_on,is_active")
+    .eq("organization_id", context.organizationId)
+    .eq("is_active", true)
+    .lte("starts_on", today)
+    .order("starts_on", { ascending: true })
+    .limit(limitSeries);
+  if (error) throw error;
+
+  const results: Array<Record<string, unknown>> = [];
+  for (const series of activeSeries ?? []) {
+    try {
+      const generated = await generateVolunteerEventInstances({
+        seriesId: String(series.id),
+        throughDate: input?.throughDate ?? null,
+        maxOccurrences: input?.maxOccurrencesPerSeries ?? null
+      });
+      results.push({
+        seriesId: String(series.id),
+        seriesName: toText(series.series_name),
+        createdEvents: generated.createdEvents,
+        createdRoles: generated.createdRoles
+      });
+    } catch (jobError) {
+      const value = jobError as { message?: string };
+      results.push({
+        seriesId: String(series.id),
+        seriesName: toText(series.series_name),
+        error: value?.message ?? "Generation failed."
+      });
+    }
+  }
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "volunteer_event_series_job_run",
+    targetEntityType: "volunteer_event_series",
+    metadata: {
+      limitSeries,
+      throughDate: input?.throughDate ?? null,
+      maxOccurrencesPerSeries: input?.maxOccurrencesPerSeries ?? null,
+      results
+    }
+  });
+
+  return {
+    processedSeries: results.length,
+    results
+  };
 }
 
 export async function upsertVolunteerRole(input: {

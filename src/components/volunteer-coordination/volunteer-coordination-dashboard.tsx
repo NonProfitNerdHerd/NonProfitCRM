@@ -69,6 +69,7 @@ export function VolunteerCoordinationDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [schemaWarning, setSchemaWarning] = useState<string | null>(null);
 
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
@@ -119,6 +120,16 @@ export function VolunteerCoordinationDashboard() {
     endsAfterOccurrences: "",
     timezone: "UTC",
     notes: ""
+  });
+  const [seriesGenerateForm, setSeriesGenerateForm] = useState({
+    seriesId: "",
+    throughDate: "",
+    maxOccurrences: "24"
+  });
+  const [seriesJobForm, setSeriesJobForm] = useState({
+    throughDate: "",
+    maxOccurrencesPerSeries: "24",
+    limitSeries: "20"
   });
 
   const [eventForm, setEventForm] = useState({
@@ -327,6 +338,10 @@ export function VolunteerCoordinationDashboard() {
     [data]
   );
   const events = useMemo(() => ((data?.events as Array<Record<string, unknown>> | undefined) ?? []), [data]);
+  const eventSeries = useMemo(
+    () => ((data?.eventSeries as Array<Record<string, unknown>> | undefined) ?? []),
+    [data]
+  );
   const eventRoles = useMemo(
     () => ((data?.eventRoles as Array<Record<string, unknown>> | undefined) ?? []),
     [data]
@@ -385,6 +400,7 @@ export function VolunteerCoordinationDashboard() {
   async function loadData() {
     setLoading(true);
     setError(null);
+    setSchemaWarning(null);
     try {
       const params = new URLSearchParams();
       if (volunteerStatusFilter) params.set("volunteerStatus", volunteerStatusFilter);
@@ -394,10 +410,13 @@ export function VolunteerCoordinationDashboard() {
       if (cautionOnlyFilter) params.set("cautionOnly", "true");
       for (const tagId of selectedTagIds) params.append("tagId", tagId);
 
-      const response = await fetch(`/api/volunteer-coordination?${params.toString()}`);
+      const response = await fetch(`/api/volunteer-coordination/overview?${params.toString()}`);
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
       if (!response.ok) {
         throw new Error(toText(payload?.message) || "Unable to load Volunteer Coordination data.");
+      }
+      if (toText(payload?.schemaWarning)) {
+        setSchemaWarning(toText(payload?.schemaWarning));
       }
       setData(payload);
     } catch (loadError) {
@@ -407,21 +426,26 @@ export function VolunteerCoordinationDashboard() {
     }
   }
 
-  async function runAction(actionPayload: Record<string, unknown>, successMessage: string) {
+  async function runAction(input: {
+    endpoint: string;
+    method?: "POST" | "PATCH";
+    payload: Record<string, unknown>;
+    successMessage: string;
+  }) {
     setLoading(true);
     setError(null);
     setMessage(null);
     try {
-      const response = await fetch("/api/volunteer-coordination", {
-        method: "POST",
+      const response = await fetch(input.endpoint, {
+        method: input.method ?? "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(actionPayload)
+        body: JSON.stringify(input.payload)
       });
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
       if (!response.ok) {
         throw new Error(toText(payload?.message) || "Action failed.");
       }
-      setMessage(successMessage);
+      setMessage(input.successMessage);
       await loadData();
       return payload?.result ?? null;
     } catch (actionError) {
@@ -433,9 +457,9 @@ export function VolunteerCoordinationDashboard() {
   }
 
   async function saveVolunteerProfile() {
-    await runAction(
-      {
-        action: "upsert_volunteer_profile",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/volunteers",
+      payload: {
         ...volunteerForm,
         interests: splitList(volunteerForm.interests),
         skills: splitList(volunteerForm.skills),
@@ -444,167 +468,200 @@ export function VolunteerCoordinationDashboard() {
           ? { text: volunteerForm.availabilityPreferences }
           : {}
       },
-      "Volunteer profile saved."
-    );
+      successMessage: "Volunteer profile saved."
+    });
   }
 
   async function saveEvent() {
-    await runAction(
-      {
-        action: "upsert_event",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/events",
+      payload: {
         ...eventForm,
         mealOptions: splitList(eventForm.mealOptions),
         tshirtOptions: splitList(eventForm.tshirtOptions)
       },
-      "Volunteer event saved."
-    );
+      successMessage: "Volunteer event saved."
+    });
   }
 
   async function saveSeries() {
-    await runAction(
-      {
-        action: "create_event_series",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/event-series",
+      payload: {
         ...seriesForm,
         recurrenceDaysOfWeek: splitList(seriesForm.recurrenceDaysOfWeek).map((value) => Number(value))
       },
-      "Recurring series created."
-    );
+      successMessage: "Recurring series created."
+    });
+  }
+
+  async function generateSeriesInstances() {
+    if (!toText(seriesGenerateForm.seriesId)) {
+      setError("Select a series to generate future event instances.");
+      return;
+    }
+    await runAction({
+      endpoint: `/api/volunteer-coordination/event-series/${encodeURIComponent(
+        seriesGenerateForm.seriesId
+      )}/generate`,
+      payload: {
+        throughDate: seriesGenerateForm.throughDate || null,
+        maxOccurrences: seriesGenerateForm.maxOccurrences
+          ? Number(seriesGenerateForm.maxOccurrences)
+          : null
+      },
+      successMessage: "Recurring event instances generated."
+    });
+  }
+
+  async function runRecurringSeriesJob() {
+    await runAction({
+      endpoint: "/api/volunteer-coordination/recurrence/run",
+      payload: {
+        throughDate: seriesJobForm.throughDate || null,
+        maxOccurrencesPerSeries: seriesJobForm.maxOccurrencesPerSeries
+          ? Number(seriesJobForm.maxOccurrencesPerSeries)
+          : null,
+        limitSeries: seriesJobForm.limitSeries ? Number(seriesJobForm.limitSeries) : null
+      },
+      successMessage: "Recurring series generation job completed."
+    });
   }
 
   async function saveRole() {
-    await runAction(
-      {
-        action: "upsert_role",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/roles",
+      payload: {
         ...roleForm,
         requiredSkills: splitList(roleForm.requiredSkills),
         requiredTags: splitList(roleForm.requiredTags),
         requiredCertifications: splitList(roleForm.requiredCertifications),
         requiredTraining: splitList(roleForm.requiredTraining)
       },
-      "Event role saved."
-    );
+      successMessage: "Event role saved."
+    });
   }
 
   async function saveAssignment() {
-    await runAction(
-      {
-        action: "upsert_assignment",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/assignments",
+      payload: {
         ...assignmentForm,
         scheduledHours: assignmentForm.scheduledHours ? Number(assignmentForm.scheduledHours) : null,
         actualHours: assignmentForm.actualHours ? Number(assignmentForm.actualHours) : null
       },
-      "Assignment saved."
-    );
+      successMessage: "Assignment saved."
+    });
   }
 
   async function saveWaitlistEntry() {
-    await runAction(
-      {
-        action: "upsert_waitlist_entry",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/waitlist",
+      payload: {
         ...waitlistForm,
         waitlistOrder: Number(waitlistForm.waitlistOrder || "1")
       },
-      "Waitlist entry saved."
-    );
+      successMessage: "Waitlist entry saved."
+    });
   }
 
   async function saveSubstituteEntry() {
-    await runAction(
-      {
-        action: "upsert_substitute_entry",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/substitutes",
+      payload: {
         ...substituteForm,
         priorityOrder: Number(substituteForm.priorityOrder || "1")
       },
-      "Substitute entry saved."
-    );
+      successMessage: "Substitute entry saved."
+    });
   }
 
   async function saveFamily() {
-    await runAction(
-      {
-        action: "upsert_family",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/families",
+      payload: {
         ...familyForm
       },
-      "Volunteer family saved."
-    );
+      successMessage: "Volunteer family saved."
+    });
   }
 
   async function saveFamilyMember() {
-    await runAction(
-      {
-        action: "upsert_family_member",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/family-members",
+      payload: {
         ...familyMemberForm
       },
-      "Family member linked."
-    );
+      successMessage: "Family member linked."
+    });
   }
 
   async function saveGroup() {
-    await runAction(
-      {
-        action: "upsert_group",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/groups",
+      payload: {
         ...groupForm,
         estimatedAttendance: Number(groupForm.estimatedAttendance || "0"),
         confirmedAttendance: Number(groupForm.confirmedAttendance || "0")
       },
-      "Volunteer group saved."
-    );
+      successMessage: "Volunteer group saved."
+    });
   }
 
   async function saveGroupMember() {
-    await runAction(
-      {
-        action: "upsert_group_member",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/group-members",
+      payload: {
         ...groupMemberForm
       },
-      "Group member saved."
-    );
+      successMessage: "Group member saved."
+    });
   }
 
   async function saveComplianceItem() {
-    await runAction(
-      {
-        action: "upsert_compliance_item",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/compliance",
+      payload: {
         ...complianceForm,
         requiredForRoles: splitList(complianceForm.requiredForRoles)
       },
-      "Compliance item saved."
-    );
+      successMessage: "Compliance item saved."
+    });
   }
 
   async function saveConcern() {
-    await runAction(
-      {
-        action: "upsert_concern",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/concerns",
+      payload: {
         ...concernForm,
         roleRestrictions: splitList(concernForm.roleRestrictions),
         eventRestrictions: splitList(concernForm.eventRestrictions)
       },
-      "Concern saved."
-    );
+      successMessage: "Concern saved."
+    });
   }
 
   async function saveBurnoutFlag() {
-    await runAction(
-      {
-        action: "upsert_burnout_flag",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/burnout-flags",
+      payload: {
         ...burnoutForm,
         pauseDays: burnoutForm.pauseDays ? Number(burnoutForm.pauseDays) : null
       },
-      "Burnout flag saved."
-    );
+      successMessage: "Burnout flag saved."
+    });
   }
 
   async function saveIncident() {
-    await runAction(
-      {
-        action: "upsert_incident",
+    await runAction({
+      endpoint: "/api/volunteer-coordination/incidents",
+      payload: {
         ...incidentForm,
         attachmentUrls: splitList(incidentForm.attachmentUrls),
         incidentPeople: []
       },
-      "Incident saved."
-    );
+      successMessage: "Incident saved."
+    });
   }
 
   async function handleHoursFileUpload(file: File | null) {
@@ -693,16 +750,16 @@ export function VolunteerCoordinationDashboard() {
       setError("Upload a volunteer hour file before staging import.");
       return;
     }
-    const result = await runAction(
-      {
-        action: "stage_hour_import",
+    const result = await runAction({
+      endpoint: "/api/volunteer-coordination/hour-imports/stage",
+      payload: {
         eventId: hourImportEventId,
         sourceFilename: hourImportFileName || "uploaded.csv",
         columnMapping: hourImportMapping,
         rows: hourImportRows
       },
-      "Volunteer hour import staged."
-    );
+      successMessage: "Volunteer hour import staged."
+    });
     const typedResult = (result as Record<string, unknown> | null) ?? null;
     setStagedImport((typedResult?.import as Record<string, unknown> | undefined) ?? null);
     setStagedRows((typedResult?.rows as Array<Record<string, unknown>> | undefined) ?? []);
@@ -710,16 +767,16 @@ export function VolunteerCoordinationDashboard() {
 
   async function updateStagedRowMatch(rowId: string, contactId: string) {
     const matchedVolunteer = volunteerByContactId.get(contactId);
-    const result = await runAction(
-      {
-        action: "update_hour_import_row",
-        importRowId: rowId,
+    const result = await runAction({
+      endpoint: `/api/volunteer-coordination/hour-imports/rows/${encodeURIComponent(rowId)}`,
+      method: "PATCH",
+      payload: {
         matchedContactId: contactId || null,
         matchedVolunteerProfileId: matchedVolunteer ? String(matchedVolunteer.id) : null,
         stageStatus: contactId ? (matchedVolunteer ? "matched" : "unmatched") : "unmatched"
       },
-      "Staged row updated."
-    );
+      successMessage: "Staged row updated."
+    });
     if (!result) return;
     setStagedRows((prev) =>
       prev.map((row) => (String(row.id) === rowId ? ((result as Record<string, unknown>) ?? row) : row))
@@ -731,13 +788,13 @@ export function VolunteerCoordinationDashboard() {
       setError("No staged import to commit.");
       return;
     }
-    await runAction(
-      {
-        action: "commit_hour_import",
-        importId: String(stagedImport.id)
-      },
-      "Volunteer hour import committed."
-    );
+    await runAction({
+      endpoint: `/api/volunteer-coordination/hour-imports/${encodeURIComponent(
+        String(stagedImport.id)
+      )}/commit`,
+      payload: {},
+      successMessage: "Volunteer hour import committed."
+    });
     setStagedImport(null);
     setStagedRows([]);
   }
@@ -861,6 +918,11 @@ export function VolunteerCoordinationDashboard() {
 
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {schemaWarning ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {schemaWarning}
+        </p>
+      ) : null}
       {loadingIndicator}
 
       {tab === "overview" ? (
@@ -1178,6 +1240,7 @@ export function VolunteerCoordinationDashboard() {
             <TableView
               headers={[
                 "Volunteer",
+                "Profile URL",
                 "Status",
                 "Type",
                 "Reliability",
@@ -1194,6 +1257,7 @@ export function VolunteerCoordinationDashboard() {
                   : volunteer.contacts) as Record<string, unknown> | null;
                 return [
                   displayContactName(contact),
+                  `/staff/volunteer-coordination/volunteers/${toText(volunteer.id)}`,
                   toText(volunteer.volunteer_status),
                   toText(volunteer.volunteer_type),
                   `${toText(volunteer.reliability_indicator)} (${toText(volunteer.reliability_score)})`,
@@ -1286,6 +1350,69 @@ export function VolunteerCoordinationDashboard() {
                 <Button type="button" onClick={() => void saveSeries()}>
                   Create Series
                 </Button>
+              </div>
+              <div className="mt-4 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Generate From Series</label>
+                  <select
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    value={seriesGenerateForm.seriesId}
+                    onChange={(event) =>
+                      setSeriesGenerateForm((prev) => ({ ...prev, seriesId: event.target.value }))
+                    }
+                  >
+                    <option value="">Select series</option>
+                    {eventSeries.map((series) => (
+                      <option key={String(series.id)} value={String(series.id)}>
+                        {toText(series.series_name) || String(series.id)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <FormInput
+                  label="Generate Through Date"
+                  type="date"
+                  value={seriesGenerateForm.throughDate}
+                  onChange={(value) => setSeriesGenerateForm((prev) => ({ ...prev, throughDate: value }))}
+                />
+                <FormInput
+                  label="Max New Occurrences"
+                  type="number"
+                  value={seriesGenerateForm.maxOccurrences}
+                  onChange={(value) => setSeriesGenerateForm((prev) => ({ ...prev, maxOccurrences: value }))}
+                />
+                <div className="md:col-span-3">
+                  <Button type="button" variant="secondary" onClick={() => void generateSeriesInstances()}>
+                    Generate Future Event Instances
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-3 rounded-md border border-slate-200 p-3 md:grid-cols-3">
+                <FormInput
+                  label="Job Through Date"
+                  type="date"
+                  value={seriesJobForm.throughDate}
+                  onChange={(value) => setSeriesJobForm((prev) => ({ ...prev, throughDate: value }))}
+                />
+                <FormInput
+                  label="Max Occurrences / Series"
+                  type="number"
+                  value={seriesJobForm.maxOccurrencesPerSeries}
+                  onChange={(value) =>
+                    setSeriesJobForm((prev) => ({ ...prev, maxOccurrencesPerSeries: value }))
+                  }
+                />
+                <FormInput
+                  label="Series Limit per Run"
+                  type="number"
+                  value={seriesJobForm.limitSeries}
+                  onChange={(value) => setSeriesJobForm((prev) => ({ ...prev, limitSeries: value }))}
+                />
+                <div className="md:col-span-3">
+                  <Button type="button" variant="secondary" onClick={() => void runRecurringSeriesJob()}>
+                    Run Recurrence Generation Job
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -1601,6 +1728,7 @@ export function VolunteerCoordinationDashboard() {
             <TableView
               headers={[
                 "Event",
+                "Detail URL",
                 "Type",
                 "Program",
                 "Status",
@@ -1614,6 +1742,7 @@ export function VolunteerCoordinationDashboard() {
               ]}
               rows={events.map((event) => [
                 toText(event.event_name),
+                `/staff/volunteer-coordination/events/${toText(event.id)}`,
                 toText(event.event_type),
                 toText(event.program_department),
                 toText(event.event_status),
