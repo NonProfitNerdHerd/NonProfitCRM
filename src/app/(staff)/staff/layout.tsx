@@ -2,12 +2,16 @@ import { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { StaffSidebar } from "@/components/layout/staff-sidebar";
 import { StaffHeader } from "@/components/layout/staff-header";
-import { hasRoleKeys, requireStaffPermission } from "@/lib/auth/guards";
+import { hasAnyStaffPermission, hasRoleKeys, requireStaffPermission } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function StaffLayout({ children }: { children: ReactNode }) {
   const context = await requireStaffPermission("can_view_dashboard");
   const canAccessImportCenter = await hasRoleKeys(["administrator", "data_steward"], context);
+  const canAccessVolunteerCoordination = await hasAnyStaffPermission(
+    ["can_view_volunteer_coordination", "can_manage_volunteer_coordination"],
+    context
+  );
   const supabase = await createClient();
   const {
     data: { user }
@@ -27,7 +31,10 @@ export default async function StaffLayout({ children }: { children: ReactNode })
   return (
     <div className="flex min-h-screen print:block">
       <div className="print:hidden">
-        <StaffSidebar canAccessImportCenter={canAccessImportCenter} />
+        <StaffSidebar
+          canAccessImportCenter={canAccessImportCenter}
+          canAccessVolunteerCoordination={canAccessVolunteerCoordination}
+        />
       </div>
       <div className="flex-1 px-6 pb-6 pt-0 print:p-0">
         <div className="print:hidden">

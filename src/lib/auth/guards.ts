@@ -186,6 +186,28 @@ export async function requireImportCenterAccess(): Promise<SessionContext> {
   return requireRoleKeys(["administrator", "data_steward"]);
 }
 
+export async function requireVolunteerCoordinationAccess(): Promise<SessionContext> {
+  return requireAnyStaffPermission([
+    "can_view_volunteer_coordination",
+    "can_manage_volunteer_coordination"
+  ]);
+}
+
+export async function requireVolunteerCoordinationManager(): Promise<SessionContext> {
+  return requireStaffPermission("can_manage_volunteer_coordination");
+}
+
+export async function requireVolunteerSensitiveAccess(): Promise<SessionContext> {
+  return requireAnyStaffPermission([
+    "can_view_volunteer_sensitive",
+    "can_manage_volunteer_sensitive"
+  ]);
+}
+
+export async function requireVolunteerSensitiveManager(): Promise<SessionContext> {
+  return requireStaffPermission("can_manage_volunteer_sensitive");
+}
+
 export async function requirePortalIdentity(): Promise<SessionContext> {
   const context = await requireSessionContext();
   const supabase = await createClient();

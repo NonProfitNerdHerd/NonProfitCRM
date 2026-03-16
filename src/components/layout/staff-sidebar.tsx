@@ -81,13 +81,26 @@ const BASE_MENU: MenuItem[] = [
 ];
 
 export function StaffSidebar({
-  canAccessImportCenter
+  canAccessImportCenter,
+  canAccessVolunteerCoordination
 }: {
   canAccessImportCenter?: boolean;
+  canAccessVolunteerCoordination?: boolean;
 }) {
   const pathname = usePathname();
   const menu = [
     ...BASE_MENU,
+    ...(canAccessVolunteerCoordination
+      ? ([
+          {
+            id: "volunteer-coordination",
+            href: "/staff/volunteer-coordination",
+            label: "Volunteer Coordination",
+            matches: (path: string) => path.startsWith("/staff/volunteer-coordination"),
+            children: [{ href: "/staff/volunteer-coordination", label: "Dashboard" }]
+          } satisfies MenuItem
+        ] as MenuItem[])
+      : []),
     ...(canAccessImportCenter
       ? ([
           {
