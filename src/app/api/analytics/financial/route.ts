@@ -9,11 +9,20 @@ function resolveRange(raw: string | null): AnalyticsRangeKey {
   return "30d";
 }
 
+function resolveLimit(raw: string | null) {
+  const parsed = Number(raw);
+  if (parsed === 10 || parsed === 25 || parsed === 50 || parsed === 100) {
+    return parsed;
+  }
+  return 10;
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const range = resolveRange(url.searchParams.get("range"));
-    const analytics = await getFinancialAnalytics(range);
+    const recentTransactionsLimit = resolveLimit(url.searchParams.get("limit"));
+    const analytics = await getFinancialAnalytics(range, { recentTransactionsLimit });
     return NextResponse.json(analytics);
   } catch (error) {
     return NextResponse.json(

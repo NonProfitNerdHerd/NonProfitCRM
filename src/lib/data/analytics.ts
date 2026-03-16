@@ -410,15 +410,33 @@ export async function getContactAnalytics(range: AnalyticsRangeKey) {
   };
 }
 
-export async function getFinancialAnalytics(range: AnalyticsRangeKey) {
+export async function getFinancialAnalytics(
+  range: AnalyticsRangeKey,
+  options?: { recentTransactionsLimit?: number }
+) {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
+  const recentTransactionsLimit = Math.min(
+    100,
+    Math.max(10, Math.round(options?.recentTransactionsLimit ?? 10))
+  );
+  const rangeStart = new Date();
+  if (range === "30d") rangeStart.setDate(rangeStart.getDate() - 29);
+  else if (range === "60d") rangeStart.setDate(rangeStart.getDate() - 59);
+  else if (range === "90d") rangeStart.setDate(rangeStart.getDate() - 89);
+  else if (range === "120d") rangeStart.setDate(rangeStart.getDate() - 119);
+  else if (range === "1y") rangeStart.setFullYear(rangeStart.getFullYear() - 1);
+  else if (range === "3y") rangeStart.setFullYear(rangeStart.getFullYear() - 3);
+  else rangeStart.setFullYear(rangeStart.getFullYear() - 5);
+  rangeStart.setHours(0, 0, 0, 0);
+  const rangeStartIso = rangeStart.toISOString().slice(0, 10);
 
   const [
     { data: trend, error: trendError },
     { data: transactions, error: transactionsError },
     { data: campaignDistributionRaw, error: campaignDistributionError },
-    { data: paymentTypeDistributionRaw, error: paymentTypeDistributionError }
+    { data: paymentTypeDistributionRaw, error: paymentTypeDistributionError },
+    { data: donationDatesRaw, error: donationDatesError }
   ] = await Promise.all([
     supabase.rpc("donation_trend_series", {
       org_id: context.organizationId,
@@ -431,7 +449,7 @@ export async function getFinancialAnalytics(range: AnalyticsRangeKey) {
       )
       .eq("organization_id", context.organizationId)
       .order("donation_date", { ascending: false })
-      .limit(30),
+      .limit(recentTransactionsLimit),
     supabase.rpc("campaign_fund_distribution", {
       org_id: context.organizationId,
       range_key: range
@@ -439,19 +457,34 @@ export async function getFinancialAnalytics(range: AnalyticsRangeKey) {
     supabase.rpc("payment_type_distribution", {
       org_id: context.organizationId,
       range_key: range
-    })
+    }),
+    supabase
+      .from("donations")
+      .select("donation_date")
+      .eq("organization_id", context.organizationId)
+      .gte("donation_date", rangeStartIso)
+      .limit(100000)
   ]);
 
   if (trendError) throw trendError;
   if (transactionsError) throw transactionsError;
   if (campaignDistributionError) throw campaignDistributionError;
   if (paymentTypeDistributionError) throw paymentTypeDistributionError;
+  if (donationDatesError) throw donationDatesError;
 
   const mode = financialGranularity(range);
+  const trendPoints =
+    (trend as TrendPoint[] | null | undefined)?.map((row) => ({
+      x: row.bucket_start,
+      label: formatShortDate(row.bucket_start, mode),
+      y: Number(row.total)
+    })) ?? [];
   const campaignRows =
     (campaignDistributionRaw as CampaignDistributionRow[] | null | undefined) ?? [];
   const paymentRows =
     (paymentTypeDistributionRaw as PaymentDistributionRow[] | null | undefined) ?? [];
+  const donationDateRows =
+    (donationDatesRaw as Array<{ donation_date: string | null }> | null | undefined) ?? [];
   const totalFunds = campaignRows.reduce((sum, row) => sum + Number(row.total ?? 0), 0);
 
   const campaignDistribution: DistributionPoint[] = campaignRows.map((row) => ({
@@ -495,19 +528,33 @@ export async function getFinancialAnalytics(range: AnalyticsRangeKey) {
       percentage: paymentTotal > 0 ? (amount / paymentTotal) * 100 : 0
     }))
     .filter((entry) => entry.amount > 0 || ["Cash", "Credit", "Check"].includes(entry.label));
+  const donationCountByBucket = new Map<string, number>();
+  for (const row of donationDateRows) {
+    const donationDateRaw = String(row.donation_date ?? "").slice(0, 10);
+    if (!donationDateRaw) continue;
+    const bucket = startOfBucket(new Date(`${donationDateRaw}T00:00:00Z`), mode)
+      .toISOString()
+      .slice(0, 10);
+    donationCountByBucket.set(bucket, (donationCountByBucket.get(bucket) ?? 0) + 1);
+  }
+  const donationCountTrend = trendPoints.map((point) => ({
+    x: point.x,
+    label: point.label,
+    y: donationCountByBucket.get(point.x) ?? 0
+  }));
+  const totalDonationCount = donationCountTrend.reduce((sum, point) => sum + point.y, 0);
+  const averageDonationAmount = totalDonationCount > 0 ? totalFunds / totalDonationCount : 0;
 
   return {
     range,
     granularity: mode,
-    trend:
-      (trend as TrendPoint[] | null | undefined)?.map((row) => ({
-        x: row.bucket_start,
-        label: formatShortDate(row.bucket_start, mode),
-        y: Number(row.total)
-      })) ?? [],
+    trend: trendPoints,
+    donationCountTrend,
     campaignDistribution,
     transactionTypeDistribution,
     totalDonations: totalFunds,
+    totalDonationCount,
+    averageDonationAmount,
     recentTransactions: transactions ?? []
   };
 }

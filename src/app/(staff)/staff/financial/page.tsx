@@ -5,7 +5,7 @@ import { FinancialAnalyticsDashboard } from "@/components/financial/financial-an
 
 export default async function FinancialPage() {
   await requireStaffPermission("can_view_donations");
-  const analytics = await getFinancialAnalytics("30d");
+  const analytics = await getFinancialAnalytics("30d", { recentTransactionsLimit: 10 });
 
   return (
     <Card>

@@ -11,9 +11,12 @@ type FinancialAnalyticsPayload = {
   range: AnalyticsRangeKey;
   granularity: "day" | "week" | "month" | "year";
   trend: Array<{ x: string; label: string; y: number }>;
+  donationCountTrend: Array<{ x: string; label: string; y: number }>;
   campaignDistribution: Array<{ label: string; amount: number; percentage: number }>;
   transactionTypeDistribution: Array<{ label: string; amount: number; percentage: number }>;
   totalDonations: number;
+  totalDonationCount: number;
+  averageDonationAmount: number;
   recentTransactions: Array<Record<string, unknown>>;
 };
 
@@ -24,8 +27,11 @@ export function FinancialAnalyticsDashboard({
 }) {
   const [payload, setPayload] = useState(initial);
   const [range, setRange] = useState<AnalyticsRangeKey>(initial.range);
+  const [rowLimit, setRowLimit] = useState<10 | 25 | 50 | 100>(10);
   const [loading, setLoading] = useState(false);
-  const [expandedReport, setExpandedReport] = useState<"trend" | "funds" | "types" | null>(null);
+  const [expandedReport, setExpandedReport] = useState<
+    "trendAmount" | "trendCount" | "funds" | "types" | null
+  >(null);
 
   const campaignPalette = ["#2563EB", "#7C3AED", "#0891B2", "#16A34A", "#D97706", "#DC2626", "#4F46E5"];
   const paymentPalette: Record<string, string> = {
@@ -33,7 +39,13 @@ export function FinancialAnalyticsDashboard({
     Credit: "#2563EB",
     Check: "#D97706"
   };
-  const trendTotal = payload.trend.reduce((sum, point) => sum + Number(point.y ?? 0), 0);
+  const trendTotal = Number(payload.totalDonations ?? 0);
+  const donationCountTotal =
+    Number(payload.totalDonationCount ?? 0) ||
+    payload.donationCountTrend.reduce((sum, point) => sum + Number(point.y ?? 0), 0);
+  const averageDonationAmount =
+    Number(payload.averageDonationAmount ?? 0) ||
+    (donationCountTotal > 0 ? trendTotal / donationCountTotal : 0);
   const campaignSlices = payload.campaignDistribution.map((row, idx) => ({
     ...row,
     color: campaignPalette[idx % campaignPalette.length]
@@ -43,15 +55,27 @@ export function FinancialAnalyticsDashboard({
     color: paymentPalette[row.label] ?? campaignPalette[idx % campaignPalette.length]
   }));
 
+  async function refreshDashboard(nextRange: AnalyticsRangeKey, nextLimit: 10 | 25 | 50 | 100) {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/analytics/financial?range=${nextRange}&limit=${nextLimit}`);
+      const data = await response.json();
+      if (response.ok) {
+        setPayload(data as FinancialAnalyticsPayload);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function onRangeChange(nextRange: AnalyticsRangeKey) {
     setRange(nextRange);
-    setLoading(true);
-    const response = await fetch(`/api/analytics/financial?range=${nextRange}`);
-    const data = await response.json();
-    if (response.ok) {
-      setPayload(data as FinancialAnalyticsPayload);
-    }
-    setLoading(false);
+    await refreshDashboard(nextRange, rowLimit);
+  }
+
+  async function onRowLimitChange(nextLimit: 10 | 25 | 50 | 100) {
+    setRowLimit(nextLimit);
+    await refreshDashboard(range, nextLimit);
   }
 
   return (
@@ -73,16 +97,16 @@ export function FinancialAnalyticsDashboard({
         </select>
       </div>
 
-      {loading ? <p className="text-sm text-slate-500">Updating financial trend...</p> : null}
+      {loading ? <p className="text-sm text-slate-500">Updating financial dashboard...</p> : null}
 
-      <div className="grid gap-4 xl:grid-cols-10">
-        <div className="xl:col-span-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
           <LineChart
             title={`Donations Trend (${formatCurrency(trendTotal)})`}
             yAxisLabel="Donation Total"
             xAxisLabel="Time"
             size="compact"
-            onExpand={() => setExpandedReport("trend")}
+            onExpand={() => setExpandedReport("trendAmount")}
             series={[
               {
                 name: "Donations",
@@ -92,7 +116,26 @@ export function FinancialAnalyticsDashboard({
             ]}
           />
         </div>
-        <div className="xl:col-span-3">
+        <div>
+          <LineChart
+            title={`Donations Count Trend (${donationCountTotal.toLocaleString()})`}
+            yAxisLabel="Donation Count"
+            xAxisLabel="Time"
+            size="compact"
+            onExpand={() => setExpandedReport("trendCount")}
+            series={[
+              {
+                name: "Donation Count",
+                color: "#2563EB",
+                points: payload.donationCountTrend.map((point) => ({ label: point.label, y: point.y }))
+              }
+            ]}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div>
           <PieChart
             title="Fund Distribution"
             slices={campaignSlices}
@@ -101,7 +144,7 @@ export function FinancialAnalyticsDashboard({
             valueFormatter={(value) => formatCurrency(value)}
           />
         </div>
-        <div className="xl:col-span-3">
+        <div>
           <PieChart
             title="Transaction Type Distribution"
             slices={paymentSlices}
@@ -110,6 +153,31 @@ export function FinancialAnalyticsDashboard({
             valueFormatter={(value) => formatCurrency(value)}
           />
         </div>
+        <section className="flex h-[240px] flex-col justify-between rounded-md border border-slate-200 p-4">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Average Donation Amount</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Total Donation Amount / Number of Donations for selected range
+            </p>
+          </div>
+          <div>
+            <p className="text-3xl font-bold text-slate-900">{formatCurrency(averageDonationAmount)}</p>
+            <p className="mt-2 text-xs text-slate-500">
+              Based on {donationCountTotal.toLocaleString()} donation
+              {donationCountTotal === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+              <p className="uppercase tracking-wide text-slate-500">Total Amount</p>
+              <p className="text-sm font-medium text-slate-900">{formatCurrency(trendTotal)}</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+              <p className="uppercase tracking-wide text-slate-500">Donation Count</p>
+              <p className="text-sm font-medium text-slate-900">{donationCountTotal.toLocaleString()}</p>
+            </div>
+          </div>
+        </section>
       </div>
 
       {expandedReport ? (
@@ -117,8 +185,10 @@ export function FinancialAnalyticsDashboard({
           <div className="w-[96vw] max-w-[1400px] rounded-xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h4 className="text-base font-semibold text-slate-900">
-                {expandedReport === "trend"
+                {expandedReport === "trendAmount"
                   ? "Donations Trend (Expanded)"
+                  : expandedReport === "trendCount"
+                    ? "Donations Count Trend (Expanded)"
                   : expandedReport === "funds"
                     ? "Fund Distribution (Expanded)"
                     : "Transaction Type Distribution (Expanded)"}
@@ -131,7 +201,7 @@ export function FinancialAnalyticsDashboard({
                 Close
               </button>
             </div>
-            {expandedReport === "trend" ? (
+            {expandedReport === "trendAmount" ? (
               <LineChart
                 title={`Donations Trend (${formatCurrency(trendTotal)})`}
                 yAxisLabel="Donation Total"
@@ -142,6 +212,20 @@ export function FinancialAnalyticsDashboard({
                     name: "Donations",
                     color: "#16A34A",
                     points: payload.trend.map((point) => ({ label: point.label, y: point.y }))
+                  }
+                ]}
+              />
+            ) : expandedReport === "trendCount" ? (
+              <LineChart
+                title={`Donations Count Trend (${donationCountTotal.toLocaleString()})`}
+                yAxisLabel="Donation Count"
+                xAxisLabel="Time"
+                size="expanded"
+                series={[
+                  {
+                    name: "Donation Count",
+                    color: "#2563EB",
+                    points: payload.donationCountTrend.map((point) => ({ label: point.label, y: point.y }))
                   }
                 ]}
               />
@@ -166,10 +250,26 @@ export function FinancialAnalyticsDashboard({
 
       <section className="rounded-md border border-slate-200 p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-900">Recent Transactions (Latest 30)</h3>
-          <Link href="/staff/financial/donations" className="text-xs font-medium text-brand-700">
-            View All Donations
-          </Link>
+          <h3 className="text-sm font-semibold text-slate-900">Recent Transactions (Latest {rowLimit})</h3>
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500" htmlFor="financial-row-limit">
+              Rows
+            </label>
+            <select
+              id="financial-row-limit"
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              value={rowLimit}
+              onChange={(event) => void onRowLimitChange(Number(event.target.value) as 10 | 25 | 50 | 100)}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <Link href="/staff/financial/donations" className="text-xs font-medium text-brand-700">
+              View All Donations
+            </Link>
+          </div>
         </div>
 
         {payload.recentTransactions.length === 0 ? (
