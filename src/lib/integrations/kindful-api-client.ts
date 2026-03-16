@@ -180,10 +180,25 @@ export class KindfulApiClient {
     return Array.from(deduped);
   }
 
-  private buildHeaders(authHeaderValue?: string) {
-    const headers: HeadersInit = { "content-type": "application/json" };
+  private buildAuthHeaderNameCandidates() {
+    const candidates = [this.authHeaderName, "Authorization"].filter((value) => value.trim().length > 0);
+    const deduped = new Set<string>();
+    for (const candidate of candidates) deduped.add(candidate);
+    return Array.from(deduped);
+  }
+
+  private buildHeaders(input: {
+    method: "GET" | "POST";
+    authHeaderValue?: string;
+    authHeaderNameOverride?: string;
+  }) {
+    const headers: HeadersInit = { accept: "application/json" };
+    if (input.method === "POST") {
+      headers["content-type"] = "application/json";
+    }
     if (this.authMode() === "api_key_header" && this.token) {
-      headers[this.authHeaderName] = authHeaderValue ?? this.buildAuthHeaderCandidates()[0] ?? this.token;
+      const headerName = input.authHeaderNameOverride ?? this.authHeaderName;
+      headers[headerName] = input.authHeaderValue ?? this.buildAuthHeaderCandidates()[0] ?? this.token;
     }
     return headers;
   }
@@ -218,46 +233,61 @@ export class KindfulApiClient {
     const authCandidates =
       this.authMode() === "api_key_header" ? this.buildAuthHeaderCandidates() : [""];
     const requestAuthCandidates = authCandidates.length > 0 ? authCandidates : [""];
+    const requestAuthHeaderNames =
+      this.authMode() === "api_key_header" ? this.buildAuthHeaderNameCandidates() : [""];
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
-      for (let candidateIndex = 0; candidateIndex < requestAuthCandidates.length; candidateIndex += 1) {
-        await this.paceRequest();
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-        const authHeaderValue =
-          this.authMode() === "api_key_header" ? requestAuthCandidates[candidateIndex] : undefined;
-        try {
-          const response = await fetch(url, {
-            method: input.method,
-            headers: this.buildHeaders(authHeaderValue),
-            body: input.method === "POST" ? JSON.stringify(input.body ?? {}) : undefined,
-            signal: controller.signal
-          });
-          clearTimeout(timeout);
-          const rawText = await response.text().catch(() => "");
-          const parsed = rawText ? (JSON.parse(rawText) as unknown) : {};
-          if (!response.ok) {
-            const is401 = response.status === 401;
-            const hasMoreAuthCandidates = candidateIndex < requestAuthCandidates.length - 1;
-            if (is401 && hasMoreAuthCandidates) {
+      for (let headerNameIndex = 0; headerNameIndex < requestAuthHeaderNames.length; headerNameIndex += 1) {
+        for (let candidateIndex = 0; candidateIndex < requestAuthCandidates.length; candidateIndex += 1) {
+          await this.paceRequest();
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+          const authHeaderValue =
+            this.authMode() === "api_key_header" ? requestAuthCandidates[candidateIndex] : undefined;
+          const authHeaderNameOverride =
+            this.authMode() === "api_key_header" ? requestAuthHeaderNames[headerNameIndex] : undefined;
+          try {
+            const response = await fetch(url, {
+              method: input.method,
+              headers: this.buildHeaders({
+                method: input.method,
+                authHeaderValue,
+                authHeaderNameOverride
+              }),
+              body: input.method === "POST" ? JSON.stringify(input.body ?? {}) : undefined,
+              signal: controller.signal
+            });
+            clearTimeout(timeout);
+            const rawText = await response.text().catch(() => "");
+            const parsed = rawText ? (JSON.parse(rawText) as unknown) : {};
+            if (!response.ok) {
+              const is401 = response.status === 401;
+              const hasMoreAuthCandidates =
+                headerNameIndex < requestAuthHeaderNames.length - 1 ||
+                candidateIndex < requestAuthCandidates.length - 1;
+              if (is401 && hasMoreAuthCandidates) {
+                continue;
+              }
+              const extraHint =
+                is401 && !hasMoreAuthCandidates
+                  ? ` Verify Application Token, environment (Sandbox vs Production), and auth header configuration. Tried headers: ${requestAuthHeaderNames.join(", ")}.`
+                  : "";
+              throw new Error(
+                `Kindful ${input.method} ${input.path} failed with HTTP ${response.status}: ${
+                  rawText || "Request failed"
+                }.${extraHint}`
+              );
+            }
+            return parsed as T;
+          } catch (error) {
+            clearTimeout(timeout);
+            lastError =
+              error instanceof Error ? error : new Error(`Kindful request failed: ${String(error)}`);
+            const hasMoreAuthCandidates =
+              headerNameIndex < requestAuthHeaderNames.length - 1 ||
+              candidateIndex < requestAuthCandidates.length - 1;
+            if (hasMoreAuthCandidates) {
               continue;
             }
-            const extraHint =
-              is401 && !hasMoreAuthCandidates
-                ? " Verify Application Token and environment (Sandbox vs Production)."
-                : "";
-            throw new Error(
-              `Kindful ${input.method} ${input.path} failed with HTTP ${response.status}: ${
-                rawText || "Request failed"
-              }.${extraHint}`
-            );
-          }
-          return parsed as T;
-        } catch (error) {
-          clearTimeout(timeout);
-          lastError =
-            error instanceof Error ? error : new Error(`Kindful request failed: ${String(error)}`);
-          if (candidateIndex < requestAuthCandidates.length - 1) {
-            continue;
           }
         }
       }
