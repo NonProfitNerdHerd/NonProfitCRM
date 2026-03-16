@@ -6,15 +6,19 @@ import { KindfulApiClient } from "@/lib/integrations/kindful-api-client";
 import {
   KINDFUL_AUTH_HEADER_NAME,
   KINDFUL_AUTH_HEADER_PREFIX,
+  KINDFUL_ACTIVITIES_PATH,
   KINDFUL_BASE_URL,
   KINDFUL_CONTACTS_QUERY_PATH,
   KINDFUL_DEFAULT_PAGE_SIZE,
   KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
+  KINDFUL_NOTES_PATH,
   KINDFUL_SYNC_STATUS_PATH,
   KINDFUL_TRANSACTIONS_QUERY_PATH
 } from "@/lib/integrations/kindful-config";
 import { KindfulContactSyncService } from "@/lib/integrations/kindful-contact-sync-service";
 import { KindfulTransactionSyncService } from "@/lib/integrations/kindful-transaction-sync-service";
+import { KindfulNoteSyncService } from "@/lib/integrations/kindful-note-sync-service";
+import { KindfulActivitySyncService } from "@/lib/integrations/kindful-activity-sync-service";
 
 type SyncExecutionResult = {
   jobId: string;
@@ -28,6 +32,12 @@ type SyncExecutionResult = {
   pagingComplete: boolean;
   completedSuccessfully: boolean;
   errorSummary?: string | null;
+  entitySummaries?: {
+    contacts?: Record<string, unknown>;
+    transactions?: Record<string, unknown>;
+    notes?: Record<string, unknown>;
+    activities?: Record<string, unknown>;
+  };
 };
 
 function resolveApplicationToken(connection: IntegrationConnection) {
@@ -60,6 +70,8 @@ export class KindfulSyncService {
   private logService = new IntegrationLogService();
   private contactSyncService = new KindfulContactSyncService();
   private transactionSyncService = new KindfulTransactionSyncService();
+  private noteSyncService = new KindfulNoteSyncService();
+  private activitySyncService = new KindfulActivitySyncService();
 
   private buildClient(connection: IntegrationConnection, tokenOverride?: string) {
     const config = (connection.configuration_json ?? {}) as Record<string, unknown>;
@@ -74,6 +86,8 @@ export class KindfulSyncService {
       requestIntervalMs: Number(config.requestIntervalMs ?? 200),
       contactsQueryPath: String(config.contactsQueryPath ?? KINDFUL_CONTACTS_QUERY_PATH),
       transactionsQueryPath: String(config.transactionsQueryPath ?? KINDFUL_TRANSACTIONS_QUERY_PATH),
+      notesPath: String(config.notesPath ?? KINDFUL_NOTES_PATH),
+      activitiesPath: String(config.activitiesPath ?? KINDFUL_ACTIVITIES_PATH),
       syncStatusPath: String(config.syncStatusPath ?? KINDFUL_SYNC_STATUS_PATH),
       importStatusPathTemplate: String(
         config.importStatusPathTemplate ?? KINDFUL_IMPORT_STATUS_PATH_TEMPLATE
@@ -122,6 +136,7 @@ export class KindfulSyncService {
     let totalRecordsExpected: number | null = null;
     let pagingComplete = true;
     let completionDetail = "Sync running.";
+    const entitySummaries: SyncExecutionResult["entitySummaries"] = {};
 
     await supabase
       .from("integration_connections")
@@ -209,6 +224,7 @@ export class KindfulSyncService {
             completionNote: contactsResult.completionNote,
             finishedAt: new Date().toISOString()
           };
+          entitySummaries.contacts = syncSettings.kindfulLastContactsSummary as Record<string, unknown>;
         }
 
         if (input.scope === "donations" || input.scope === "all") {
@@ -249,6 +265,84 @@ export class KindfulSyncService {
             completionNote: transactionsResult.completionNote,
             finishedAt: new Date().toISOString()
           };
+          entitySummaries.transactions =
+            syncSettings.kindfulLastTransactionsSummary as Record<string, unknown>;
+        }
+
+        if (normalizeBoolean(syncSettings.noteSyncEnabled ?? true) && (input.scope === "contacts" || input.scope === "all")) {
+          const notesResult = await this.noteSyncService.run({
+            organizationId: input.organizationId,
+            connection: input.connection,
+            job,
+            apiClient: client,
+            logService: this.logService
+          });
+          recordsRetrieved += notesResult.retrieved;
+          recordsProcessed += notesResult.processed;
+          recordsCreated += notesResult.created;
+          recordsUpdated += notesResult.updated;
+          recordsSkipped += notesResult.skipped;
+          recordsFailed += notesResult.failed;
+          pagingComplete = pagingComplete && notesResult.pagingComplete;
+          currentPage =
+            typeof currentPage === "number"
+              ? currentPage + notesResult.pagesProcessed
+              : notesResult.pagesProcessed;
+          completionDetail = notesResult.completionNote;
+          syncSettings.kindfulLastNotesSummary = {
+            mode: syncSettings.kindfulNotesMode ?? "incremental",
+            pagesProcessed: notesResult.pagesProcessed,
+            retrieved: notesResult.retrieved,
+            processed: notesResult.processed,
+            created: notesResult.created,
+            updated: notesResult.updated,
+            failed: notesResult.failed,
+            skipped: notesResult.skipped,
+            pagingComplete: notesResult.pagingComplete,
+            completionNote: notesResult.completionNote,
+            finishedAt: new Date().toISOString()
+          };
+          entitySummaries.notes = syncSettings.kindfulLastNotesSummary as Record<string, unknown>;
+        }
+
+        if (
+          normalizeBoolean(syncSettings.activitySyncEnabled ?? true) &&
+          (input.scope === "contacts" || input.scope === "all")
+        ) {
+          const activitiesResult = await this.activitySyncService.run({
+            organizationId: input.organizationId,
+            connection: input.connection,
+            job,
+            apiClient: client,
+            logService: this.logService
+          });
+          recordsRetrieved += activitiesResult.retrieved;
+          recordsProcessed += activitiesResult.processed;
+          recordsCreated += activitiesResult.created;
+          recordsUpdated += activitiesResult.updated;
+          recordsSkipped += activitiesResult.skipped;
+          recordsFailed += activitiesResult.failed;
+          pagingComplete = pagingComplete && activitiesResult.pagingComplete;
+          currentPage =
+            typeof currentPage === "number"
+              ? currentPage + activitiesResult.pagesProcessed
+              : activitiesResult.pagesProcessed;
+          completionDetail = activitiesResult.completionNote;
+          syncSettings.kindfulLastActivitiesSummary = {
+            mode: syncSettings.kindfulActivitiesMode ?? "incremental",
+            pagesProcessed: activitiesResult.pagesProcessed,
+            retrieved: activitiesResult.retrieved,
+            processed: activitiesResult.processed,
+            created: activitiesResult.created,
+            updated: activitiesResult.updated,
+            failed: activitiesResult.failed,
+            skipped: activitiesResult.skipped,
+            pagingComplete: activitiesResult.pagingComplete,
+            completionNote: activitiesResult.completionNote,
+            finishedAt: new Date().toISOString()
+          };
+          entitySummaries.activities =
+            syncSettings.kindfulLastActivitiesSummary as Record<string, unknown>;
         }
       }
 
@@ -373,7 +467,8 @@ export class KindfulSyncService {
       recordsFailed,
       pagingComplete,
       completedSuccessfully: status === "completed" && pagingComplete && recordsFailed === 0,
-      errorSummary: errorSummary ?? completionDetail
+      errorSummary: errorSummary ?? completionDetail,
+      entitySummaries
     };
   }
 }

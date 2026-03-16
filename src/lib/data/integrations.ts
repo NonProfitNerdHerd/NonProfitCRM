@@ -43,8 +43,10 @@ import {
   KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
   KINDFUL_INTEGRATION_KEY,
   KINDFUL_INTEGRATION_NAME,
+  KINDFUL_NOTES_PATH,
   KINDFUL_SYNC_STATUS_PATH,
-  KINDFUL_TRANSACTIONS_QUERY_PATH
+  KINDFUL_TRANSACTIONS_QUERY_PATH,
+  KINDFUL_ACTIVITIES_PATH
 } from "@/lib/integrations/kindful-config";
 
 const registryService = new IntegrationRegistryService();
@@ -171,6 +173,8 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
           ? {
               contactsQueryPath: KINDFUL_CONTACTS_QUERY_PATH,
               transactionsQueryPath: KINDFUL_TRANSACTIONS_QUERY_PATH,
+              notesPath: KINDFUL_NOTES_PATH,
+              activitiesPath: KINDFUL_ACTIVITIES_PATH,
               syncStatusPath: KINDFUL_SYNC_STATUS_PATH,
               importStatusPathTemplate: KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
               authHeaderName: KINDFUL_AUTH_HEADER_NAME,
@@ -194,6 +198,8 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
         scheduleFrequency: isKindful ? "hourly" : "daily",
         contactSyncEnabled: isKindful ? true : !isDonations,
         donationSyncEnabled: isKindful ? true : isDonations,
+        noteSyncEnabled: isKindful ? true : false,
+        activitySyncEnabled: isKindful ? true : false,
         fullSyncEnabled: isKindful,
         incrementalSyncEnabled: true,
         fallbackContactMatch: isKindful ? "email_phone_name_address" : "external_id_only",
@@ -885,6 +891,8 @@ export async function updateIntegrationConfiguration(
               ...(payload.configuration ?? {}),
               contactsQueryPath: KINDFUL_CONTACTS_QUERY_PATH,
               transactionsQueryPath: KINDFUL_TRANSACTIONS_QUERY_PATH,
+              notesPath: KINDFUL_NOTES_PATH,
+              activitiesPath: KINDFUL_ACTIVITIES_PATH,
               syncStatusPath: KINDFUL_SYNC_STATUS_PATH,
               importStatusPathTemplate: KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
               authHeaderName: KINDFUL_AUTH_HEADER_NAME,
@@ -897,6 +905,8 @@ export async function updateIntegrationConfiguration(
               ...(payload.syncSettings ?? {}),
               contactSyncEnabled: true,
               donationSyncEnabled: true,
+              noteSyncEnabled: true,
+              activitySyncEnabled: true,
               fullSyncEnabled: true,
               incrementalSyncEnabled: true,
               fallbackContactMatch: "email_phone_name_address"

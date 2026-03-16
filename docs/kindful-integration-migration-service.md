@@ -1,131 +1,95 @@
-# Kindful Integration + Migration Service
+# Kindful Integration (Read-Only Inbound Sync)
 
-This document describes the production Kindful migration and transition sync implementation added to NerdCore.
+This document describes the Kindful integration as an inbound-only service into NerdCore. Kindful is treated as source-only until decommissioned.
 
-## Goals covered
+## Read-only policy
 
-- Full backfill of contacts + transactions from Kindful.
-- Ongoing incremental sync during migration overlap.
-- Idempotent upserts with external ID priority.
-- Duplicate/review safety queue for ambiguous matches.
-- Dead-letter + replay flow for recoverable failures.
-- Cutover readiness checks and freeze control.
+- No write-back logic to Kindful.
+- No `PUT`, `PATCH`, or `DELETE` calls to Kindful.
+- Metadata helper calls are GET-only.
+- Contact/transaction retrieval uses Kindful Customer API query endpoints (POST-based query semantics, read-only behavior).
 
-## Kindful Customer API patterns used
+## Endpoints used
 
-The implementation is configured around documented Kindful Customer API paths:
+Primary:
 
 - `POST /admin/oauth2/api/v1/contacts/query`
 - `POST /admin/oauth2/api/v1/transactions/query`
-- `GET /admin/oauth2/api/v1/imports/stats` (sync readiness)
-- `GET /admin/oauth2/api/v1/imports/{jobId}` (import/job status)
+- `GET /admin/oauth2/api/v1/imports/stats`
+- `GET /admin/oauth2/api/v1/imports/{jobId}`
 
-Defaults are configurable in integration connection settings (no hardcoded lock-in).
+Optional/dedicated (attempted when available in tenant/API plan):
 
-## Authentication
+- `GET /admin/oauth2/api/v1/notes`
+- `GET /admin/oauth2/api/v1/activities`
 
-- Uses Kindful Application Token via HTTP header.
-- Default header mode:
-  - `Authorization: Token token=<application_token>`
-- Token is encrypted at rest in integration configuration.
-- Token is never echoed back to UI once saved.
+If dedicated notes/activities endpoints are unavailable, sync falls back to extracting note/activity payloads from contact and transaction records.
 
-## Schema additions
+## Entities synchronized inbound
 
-Migration: `supabase/migrations/202603171500_kindful_integration_migration_service.sql`
+1. Contacts / Customers
+2. Transactions / Donations
+3. Notes
+4. Activities
 
-Adds:
+## Entity mapping and links
 
-- `integration_sync_checkpoints`
-- `integration_dead_letter_queue`
-- `integration_review_queue`
-- `raw_source_payloads`
-- `transaction_external_ids`
-- `campaign_external_ids`
-- `tag_external_ids`
-- `integration_cutover_reports`
-- `resolve_transaction_by_external_id(...)` RPC
-- `integration_definitions` row for provider key `kindful`
+- Contacts upsert into `contacts` and `contact_external_ids`.
+- Transactions upsert into `donations` and `transaction_external_ids`.
+- Notes upsert into `notes` and `note_external_ids`.
+  - linked to `contact_id` and/or `entity_type/entity_id` (`contact`/`donation`) when resolvable.
+- Activities upsert into `activity_log` and `activity_external_ids`.
+  - linked to `related_contact_id` and entity (`contact` or `donation`) when resolvable.
 
-All tables include RLS + grants aligned to `can_manage_integrations`.
+## Idempotency and deduplication
 
-## Service architecture
+- External IDs are always checked first.
+- Fallback matching uses normalized values (email/phone/name/address logic for contacts).
+- Ambiguous records are queued to review queue rather than auto-merged.
+- Upserts are safe to replay.
 
-Key files:
+## Sync strategy
 
-- Client/config:
-  - `src/lib/integrations/kindful-config.ts`
-  - `src/lib/integrations/kindful-api-client.ts`
-- Mapping + dedupe helpers:
-  - `src/lib/integrations/kindful-mapper.ts`
-  - `src/lib/integrations/kindful-sync-support.ts`
-- Sync engines:
-  - `src/lib/integrations/kindful-contact-sync-service.ts`
-  - `src/lib/integrations/kindful-transaction-sync-service.ts`
-  - `src/lib/integrations/kindful-sync-service.ts`
-- Wiring:
-  - `src/lib/integrations/integration-job-runner.ts`
-  - `src/lib/integrations/integration-configuration-service.ts`
-  - `src/lib/integrations/integration-retry-service.ts`
-  - `src/lib/data/integrations.ts`
+Each entity tracks independent sync state:
 
-## Matching / dedupe behavior
+- `kindfulLastContactsSyncDate`
+- `kindfulLastTransactionsSyncDate`
+- `kindfulLastNotesSyncDate`
+- `kindfulLastActivitiesSyncDate`
 
-### Contacts (priority)
+Entity modes:
 
-1. Kindful external ID (`contact_external_ids` / `contact_external_references`)
-2. Exact email
-3. Exact phone
-4. Exact name + address / name + city+state/postal
-5. If ambiguous -> `integration_review_queue` (no auto-merge)
+- `kindfulContactsMode`, `kindfulTransactionsMode`, `kindfulNotesMode`, `kindfulActivitiesMode`
+- `backfill` on first run, then `incremental`
 
-### Transactions (priority)
+Checkpoints are persisted in `integration_sync_checkpoints` by scope (`contacts`, `transactions`, `notes`, `activities`).
 
-1. Kindful transaction external ID (`transaction_external_ids` / `donation_external_references`)
-2. Alternate transaction/link IDs from payload
-3. Date + amount + donor match fallback
-4. Ambiguous match -> `integration_review_queue`
+## Schema changes
 
-## Sync modes
+Migrations:
 
-Connection sync settings drive mode:
+- `supabase/migrations/202603171500_kindful_integration_migration_service.sql`
+- `supabase/migrations/202603171700_kindful_notes_activities_support.sql`
 
-- `kindfulContactsMode`: `backfill` | `incremental`
-- `kindfulTransactionsMode`: `backfill` | `incremental`
+Additional inbound tracking tables:
 
-Backfill mode defaults on first run, then rolls to incremental.
+- `note_external_ids`
+- `activity_external_ids`
+- `raw_source_payloads` snapshots for troubleshooting and reconciliation
 
-## Admin UI
+All tables use RLS constrained to integration managers (`can_manage_integrations`).
 
-Detail page for `kindful` provider includes:
+## Services
 
-- Integration Settings
-- Initial Migration dashboard
-- Ongoing Sync dashboard
-- Error/Review queue management
-- Dead-letter replay
-- Cutover readiness + freeze approval
+- `src/lib/integrations/kindful-api-client.ts`
+- `src/lib/integrations/kindful-contact-sync-service.ts`
+- `src/lib/integrations/kindful-transaction-sync-service.ts`
+- `src/lib/integrations/kindful-note-sync-service.ts`
+- `src/lib/integrations/kindful-activity-sync-service.ts`
+- `src/lib/integrations/kindful-sync-service.ts`
 
-Component:
+## Known API limitations / assumptions
 
-- `src/components/admin/integrations/kindful-integration-setup.tsx`
-
-API routes:
-
-- `GET/POST /api/admin/integrations/[integrationKey]/kindful/cutover`
-- `GET /api/admin/integrations/[integrationKey]/kindful/review-queue`
-- `POST /api/admin/integrations/[integrationKey]/kindful/review-queue/[reviewId]/resolve`
-- `GET /api/admin/integrations/[integrationKey]/kindful/dead-letter`
-- `POST /api/admin/integrations/[integrationKey]/kindful/dead-letter/[deadLetterId]/replay`
-
-## Cutover flow
-
-Readiness checks include:
-
-- Contacts imported with Kindful external IDs
-- Transactions imported with Kindful external IDs
-- Open failed queue count
-- Open review queue count
-- Days since last Kindful-only payload activity
-
-Approving cutover writes a report to `integration_cutover_reports` and disables the integration connection.
+1. Kindful list/query endpoints for contacts/transactions are POST-based query operations (read-only semantics), not simple GET list endpoints.
+2. Notes/activities endpoint availability may vary by Kindful account/docs version; fallback extraction from contact/transaction payloads is implemented.
+3. Some notes/activities may not include stable source IDs; deterministic hashes are used for idempotent external ID tracking.

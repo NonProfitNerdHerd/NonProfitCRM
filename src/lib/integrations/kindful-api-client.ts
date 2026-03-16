@@ -8,6 +8,8 @@ type KindfulClientConfig = {
   requestIntervalMs?: number;
   contactsQueryPath?: string;
   transactionsQueryPath?: string;
+  notesPath?: string;
+  activitiesPath?: string;
   syncStatusPath?: string;
   importStatusPathTemplate?: string;
   orgDetailsPath?: string;
@@ -32,6 +34,12 @@ export type KindfulQueryResult = {
   hasMore: boolean;
   totalExpected: number | null;
   raw: Record<string, unknown>;
+};
+
+export type KindfulListInput = {
+  page?: number;
+  perPage?: number;
+  updatedSince?: string | null;
 };
 
 function wait(ms: number) {
@@ -114,6 +122,8 @@ export class KindfulApiClient {
   private requestIntervalMs: number;
   private contactsQueryPath: string;
   private transactionsQueryPath: string;
+  private notesPath: string;
+  private activitiesPath: string;
   private syncStatusPath: string;
   private importStatusPathTemplate: string;
   private orgDetailsPath: string;
@@ -133,6 +143,8 @@ export class KindfulApiClient {
     this.contactsQueryPath = config.contactsQueryPath ?? "/admin/oauth2/api/v1/contacts/query";
     this.transactionsQueryPath =
       config.transactionsQueryPath ?? "/admin/oauth2/api/v1/transactions/query";
+    this.notesPath = config.notesPath ?? "/admin/oauth2/api/v1/notes";
+    this.activitiesPath = config.activitiesPath ?? "/admin/oauth2/api/v1/activities";
     this.syncStatusPath = config.syncStatusPath ?? "/admin/oauth2/api/v1/imports/stats";
     this.importStatusPathTemplate =
       config.importStatusPathTemplate ?? "/admin/oauth2/api/v1/imports/{jobId}";
@@ -338,12 +350,44 @@ export class KindfulApiClient {
     return this.normalizeQueryResult(payload, perPage);
   }
 
-  async queryMetadata(path: string, body?: Record<string, unknown>) {
+  async queryMetadata(path: string) {
     return this.request<Record<string, unknown>>({
-      method: body ? "POST" : "GET",
-      path,
-      body
+      // Read-only mode: metadata calls are GET-only by design.
+      method: "GET",
+      path
     });
+  }
+
+  async getNotes(input: KindfulListInput = {}) {
+    const perPage = Math.max(1, Math.min(input.perPage ?? this.pageSize, 200));
+    const params = new URLSearchParams();
+    params.set("per_page", String(perPage));
+    if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+      params.set("page", String(Math.floor(input.page)));
+    }
+    if (input.updatedSince) params.set("updated_since", input.updatedSince);
+    const path = `${this.notesPath}${this.notesPath.includes("?") ? "&" : "?"}${params.toString()}`;
+    const payload = await this.request<Record<string, unknown>>({
+      method: "GET",
+      path
+    });
+    return this.normalizeQueryResult(payload, perPage);
+  }
+
+  async getActivities(input: KindfulListInput = {}) {
+    const perPage = Math.max(1, Math.min(input.perPage ?? this.pageSize, 200));
+    const params = new URLSearchParams();
+    params.set("per_page", String(perPage));
+    if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+      params.set("page", String(Math.floor(input.page)));
+    }
+    if (input.updatedSince) params.set("updated_since", input.updatedSince);
+    const path = `${this.activitiesPath}${this.activitiesPath.includes("?") ? "&" : "?"}${params.toString()}`;
+    const payload = await this.request<Record<string, unknown>>({
+      method: "GET",
+      path
+    });
+    return this.normalizeQueryResult(payload, perPage);
   }
 
   async testConnection() {

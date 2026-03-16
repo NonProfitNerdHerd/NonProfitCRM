@@ -7,8 +7,7 @@ import {
   extractGroups,
   extractKindfulContactIds,
   readDateTime,
-  readString,
-  valueByPath
+  readString
 } from "@/lib/integrations/kindful-mapper";
 import {
   archiveRawPayload,
@@ -71,62 +70,6 @@ export class KindfulContactSyncService {
       if (refResult.data?.contact_id) return String(refResult.data.contact_id);
     }
     return null;
-  }
-
-  private async upsertKindfulNotes(input: {
-    supabase: Awaited<ReturnType<typeof createIntegrationClient>>;
-    organizationId: string;
-    contactId: string;
-    externalId: string;
-    record: Record<string, unknown>;
-  }) {
-    const notesCandidates = [
-      valueByPath(input.record, "notes"),
-      valueByPath(input.record, "contact.notes"),
-      valueByPath(input.record, "note")
-    ];
-    const noteBodies: string[] = [];
-    for (const candidate of notesCandidates) {
-      if (typeof candidate === "string" && candidate.trim()) {
-        noteBodies.push(candidate.trim());
-      } else if (Array.isArray(candidate)) {
-        for (const row of candidate) {
-          if (typeof row === "string" && row.trim()) noteBodies.push(row.trim());
-          if (row && typeof row === "object") {
-            const body = readString(row as Record<string, unknown>, ["body", "note", "text", "content"]);
-            if (body) noteBodies.push(body);
-          }
-        }
-      }
-    }
-
-    const uniqueBodies = Array.from(new Set(noteBodies)).slice(0, 20);
-    for (const body of uniqueBodies) {
-      const marker = `[kindful-note:${input.externalId}:${buildPayloadHash(body).slice(0, 12)}]`;
-      const fullBody = `${marker} ${body}`;
-      const exists = await input.supabase
-        .from("notes")
-        .select("id")
-        .eq("organization_id", input.organizationId)
-        .eq("contact_id", input.contactId)
-        .eq("note_type", "kindful_import")
-        .eq("body", fullBody)
-        .limit(1)
-        .maybeSingle();
-      if (exists.error) throw exists.error;
-      if (exists.data?.id) continue;
-      const insertResult = await input.supabase.from("notes").insert({
-        organization_id: input.organizationId,
-        contact_id: input.contactId,
-        entity_type: "contact",
-        entity_id: input.contactId,
-        note_type: "kindful_import",
-        body: fullBody,
-        contains_pii: false,
-        visibility_classification: "staff_public"
-      });
-      if (insertResult.error) throw insertResult.error;
-    }
   }
 
   private async upsertContactFromRecord(input: {
@@ -326,14 +269,6 @@ export class KindfulContactSyncService {
         throw externalResult.error;
       }
     }
-
-    await this.upsertKindfulNotes({
-      supabase: input.supabase,
-      organizationId: input.organizationId,
-      contactId,
-      externalId: primaryExternalId,
-      record: input.record
-    });
 
     return {
       externalId: primaryExternalId,

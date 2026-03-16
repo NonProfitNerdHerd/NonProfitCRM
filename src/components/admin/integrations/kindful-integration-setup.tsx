@@ -88,7 +88,9 @@ export function KindfulIntegrationSetup({
     environment: String(config.environment ?? "production"),
     pageSize: toNumber(config.pageSize, 50),
     requestIntervalMs: toNumber(config.requestIntervalMs, 200),
-    isEnabled: Boolean(data.connection.is_enabled ?? false)
+    isEnabled: Boolean(data.connection.is_enabled ?? false),
+    noteSyncEnabled: Boolean(syncSettings.noteSyncEnabled ?? true),
+    activitySyncEnabled: Boolean(syncSettings.activitySyncEnabled ?? true)
   });
 
   async function refreshDetail() {
@@ -189,7 +191,9 @@ export function KindfulIntegrationSetup({
               ...(syncSettings ?? {}),
               scheduleFrequency: syncSettings.scheduleFrequency ?? "hourly",
               contactSyncEnabled: true,
-              donationSyncEnabled: true
+              donationSyncEnabled: true,
+              noteSyncEnabled: settingsForm.noteSyncEnabled,
+              activitySyncEnabled: settingsForm.activitySyncEnabled
             }
           })
         }),
@@ -202,10 +206,19 @@ export function KindfulIntegrationSetup({
   async function runBackfill(scope: "contacts" | "donations" | "all") {
     const modePatch =
       scope === "contacts"
-        ? { kindfulContactsMode: "backfill" }
+        ? {
+            kindfulContactsMode: "backfill",
+            kindfulNotesMode: "backfill",
+            kindfulActivitiesMode: "backfill"
+          }
         : scope === "donations"
           ? { kindfulTransactionsMode: "backfill" }
-          : { kindfulContactsMode: "backfill", kindfulTransactionsMode: "backfill" };
+          : {
+              kindfulContactsMode: "backfill",
+              kindfulTransactionsMode: "backfill",
+              kindfulNotesMode: "backfill",
+              kindfulActivitiesMode: "backfill"
+            };
     await runAction(
       `backfill-${scope}`,
       async () => {
@@ -231,10 +244,19 @@ export function KindfulIntegrationSetup({
   async function runIncremental(scope: "contacts" | "donations" | "all") {
     const modePatch =
       scope === "contacts"
-        ? { kindfulContactsMode: "incremental" }
+        ? {
+            kindfulContactsMode: "incremental",
+            kindfulNotesMode: "incremental",
+            kindfulActivitiesMode: "incremental"
+          }
         : scope === "donations"
           ? { kindfulTransactionsMode: "incremental" }
-          : { kindfulContactsMode: "incremental", kindfulTransactionsMode: "incremental" };
+          : {
+              kindfulContactsMode: "incremental",
+              kindfulTransactionsMode: "incremental",
+              kindfulNotesMode: "incremental",
+              kindfulActivitiesMode: "incremental"
+            };
     await runAction(
       `incremental-${scope}`,
       async () => {
@@ -263,7 +285,9 @@ export function KindfulIntegrationSetup({
       environment: String(config.environment ?? "production"),
       pageSize: toNumber(config.pageSize, 50),
       requestIntervalMs: toNumber(config.requestIntervalMs, 200),
-      isEnabled: Boolean(data.connection.is_enabled ?? false)
+      isEnabled: Boolean(data.connection.is_enabled ?? false),
+      noteSyncEnabled: Boolean(syncSettings.noteSyncEnabled ?? true),
+      activitySyncEnabled: Boolean(syncSettings.activitySyncEnabled ?? true)
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.connection.id]);
@@ -282,6 +306,14 @@ export function KindfulIntegrationSetup({
   const transactionsSummary = useMemo(
     () =>
       (syncSettings.kindfulLastTransactionsSummary as Record<string, unknown> | undefined) ?? {},
+    [syncSettings]
+  );
+  const notesSummary = useMemo(
+    () => (syncSettings.kindfulLastNotesSummary as Record<string, unknown> | undefined) ?? {},
+    [syncSettings]
+  );
+  const activitiesSummary = useMemo(
+    () => (syncSettings.kindfulLastActivitiesSummary as Record<string, unknown> | undefined) ?? {},
     [syncSettings]
   );
 
@@ -385,6 +417,26 @@ export function KindfulIntegrationSetup({
               />
               Integration enabled
             </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={settingsForm.noteSyncEnabled}
+                onChange={(event) =>
+                  setSettingsForm((prev) => ({ ...prev, noteSyncEnabled: event.target.checked }))
+                }
+              />
+              Notes inbound sync enabled
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={settingsForm.activitySyncEnabled}
+                onChange={(event) =>
+                  setSettingsForm((prev) => ({ ...prev, activitySyncEnabled: event.target.checked }))
+                }
+              />
+              Activities inbound sync enabled
+            </label>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={() => void saveSettings()} disabled={Boolean(loading)}>
@@ -433,7 +485,7 @@ export function KindfulIntegrationSetup({
               value={latestJob ? formatDateTime(String(latestJob.started_date ?? null)) : "Never run"}
             />
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard title="Contacts Backfill">
               <p>Pages: {String(contactsSummary.pagesProcessed ?? 0)}</p>
               <p>Processed: {String(contactsSummary.processed ?? 0)}</p>
@@ -447,6 +499,20 @@ export function KindfulIntegrationSetup({
               <p>Created: {String(transactionsSummary.created ?? 0)}</p>
               <p>Updated: {String(transactionsSummary.updated ?? 0)}</p>
               <p>Failed: {String(transactionsSummary.failed ?? 0)}</p>
+            </SummaryCard>
+            <SummaryCard title="Notes Backfill">
+              <p>Pages: {String(notesSummary.pagesProcessed ?? 0)}</p>
+              <p>Processed: {String(notesSummary.processed ?? 0)}</p>
+              <p>Created: {String(notesSummary.created ?? 0)}</p>
+              <p>Updated: {String(notesSummary.updated ?? 0)}</p>
+              <p>Failed: {String(notesSummary.failed ?? 0)}</p>
+            </SummaryCard>
+            <SummaryCard title="Activities Backfill">
+              <p>Pages: {String(activitiesSummary.pagesProcessed ?? 0)}</p>
+              <p>Processed: {String(activitiesSummary.processed ?? 0)}</p>
+              <p>Created: {String(activitiesSummary.created ?? 0)}</p>
+              <p>Updated: {String(activitiesSummary.updated ?? 0)}</p>
+              <p>Failed: {String(activitiesSummary.failed ?? 0)}</p>
             </SummaryCard>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -484,6 +550,16 @@ export function KindfulIntegrationSetup({
             <Metric
               label="Next Scheduled Window"
               value={`~${String(syncSettings.scheduleFrequency ?? "hourly")}`}
+            />
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            <Metric
+              label="Last Notes Sync"
+              value={formatDateTime(String(syncSettings.kindfulLastNotesSyncDate ?? null))}
+            />
+            <Metric
+              label="Last Activities Sync"
+              value={formatDateTime(String(syncSettings.kindfulLastActivitiesSyncDate ?? null))}
             />
           </div>
           <div className="grid gap-2 md:grid-cols-4">

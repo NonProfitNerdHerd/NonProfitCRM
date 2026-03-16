@@ -23,8 +23,10 @@ import {
   KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
   KINDFUL_INTEGRATION_KEY,
   KINDFUL_INTEGRATION_NAME,
+  KINDFUL_NOTES_PATH,
   KINDFUL_SYNC_STATUS_PATH,
-  KINDFUL_TRANSACTIONS_QUERY_PATH
+  KINDFUL_TRANSACTIONS_QUERY_PATH,
+  KINDFUL_ACTIVITIES_PATH
 } from "@/lib/integrations/kindful-config";
 import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 
@@ -116,6 +118,8 @@ const DEFAULT_KINDFUL_SYNC_SETTINGS = {
   scheduleFrequency: "hourly",
   contactSyncEnabled: true,
   donationSyncEnabled: true,
+  noteSyncEnabled: true,
+  activitySyncEnabled: true,
   fullSyncEnabled: true,
   incrementalSyncEnabled: true,
   fallbackContactMatch: "email_phone_name_address",
@@ -123,8 +127,14 @@ const DEFAULT_KINDFUL_SYNC_SETTINGS = {
   lastSuccessfulSyncDate: null,
   kindfulContactsMode: "backfill",
   kindfulTransactionsMode: "backfill",
+  kindfulNotesMode: "backfill",
+  kindfulActivitiesMode: "backfill",
   kindfulContactsQueryToken: null,
-  kindfulTransactionsQueryToken: null
+  kindfulTransactionsQueryToken: null,
+  kindfulNotesQueryToken: null,
+  kindfulActivitiesQueryToken: null,
+  kindfulLastNotesSyncDate: null,
+  kindfulLastActivitiesSyncDate: null
 };
 
 function defaultConnectionName(definition: IntegrationDefinition) {
@@ -194,6 +204,8 @@ export class IntegrationConfigurationService {
               ? {
                   contactsQueryPath: KINDFUL_CONTACTS_QUERY_PATH,
                   transactionsQueryPath: KINDFUL_TRANSACTIONS_QUERY_PATH,
+                  notesPath: KINDFUL_NOTES_PATH,
+                  activitiesPath: KINDFUL_ACTIVITIES_PATH,
                   syncStatusPath: KINDFUL_SYNC_STATUS_PATH,
                   importStatusPathTemplate: KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
                   testPath: KINDFUL_SYNC_STATUS_PATH,

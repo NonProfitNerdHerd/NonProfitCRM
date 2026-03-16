@@ -22,6 +22,8 @@ export function isKindfulSchemaMissingError(error: unknown) {
     message.includes("integration_dead_letter_queue") ||
     message.includes("raw_source_payloads") ||
     message.includes("transaction_external_ids") ||
+    message.includes("note_external_ids") ||
+    message.includes("activity_external_ids") ||
     message.includes("campaign_external_ids") ||
     message.includes("tag_external_ids")
   );
@@ -349,4 +351,56 @@ export function extractCustomFieldsMap(record: Record<string, unknown>) {
     return custom as Record<string, unknown>;
   }
   return {};
+}
+
+export async function resolveContactByKindfulExternalId(input: {
+  supabase: IntegrationClient;
+  organizationId: string;
+  externalId: string;
+}): Promise<string | null> {
+  const external = input.externalId.trim();
+  if (!external) return null;
+  const rpc = await input.supabase.rpc("resolve_contact_by_external_id", {
+    org_id: input.organizationId,
+    source: "kindful",
+    external
+  });
+  if (!rpc.error && rpc.data) return String(rpc.data);
+  if (rpc.error && !isExternalIdSchemaMissingError(rpc.error)) throw rpc.error;
+
+  const legacy = await input.supabase
+    .from("contact_external_references")
+    .select("contact_id")
+    .eq("organization_id", input.organizationId)
+    .eq("source_system", "kindful")
+    .eq("external_record_id", external)
+    .maybeSingle();
+  if (legacy.error) throw legacy.error;
+  return legacy.data?.contact_id ? String(legacy.data.contact_id) : null;
+}
+
+export async function resolveDonationByKindfulExternalId(input: {
+  supabase: IntegrationClient;
+  organizationId: string;
+  externalId: string;
+}): Promise<string | null> {
+  const external = input.externalId.trim();
+  if (!external) return null;
+  const rpc = await input.supabase.rpc("resolve_transaction_by_external_id", {
+    org_id: input.organizationId,
+    source: "kindful",
+    external
+  });
+  if (!rpc.error && rpc.data) return String(rpc.data);
+  if (rpc.error && !isExternalIdSchemaMissingError(rpc.error)) throw rpc.error;
+
+  const legacy = await input.supabase
+    .from("donation_external_references")
+    .select("donation_id")
+    .eq("organization_id", input.organizationId)
+    .eq("source_system", "kindful")
+    .eq("external_record_id", external)
+    .maybeSingle();
+  if (legacy.error) throw legacy.error;
+  return legacy.data?.donation_id ? String(legacy.data.donation_id) : null;
 }

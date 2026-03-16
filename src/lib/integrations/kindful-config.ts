@@ -9,6 +9,8 @@ export const KINDFUL_CONTACTS_QUERY_PATH = "/admin/oauth2/api/v1/contacts/query"
 export const KINDFUL_TRANSACTIONS_QUERY_PATH = "/admin/oauth2/api/v1/transactions/query";
 export const KINDFUL_SYNC_STATUS_PATH = "/admin/oauth2/api/v1/imports/stats";
 export const KINDFUL_IMPORT_STATUS_PATH_TEMPLATE = "/admin/oauth2/api/v1/imports/{jobId}";
+export const KINDFUL_NOTES_PATH = "/admin/oauth2/api/v1/notes";
+export const KINDFUL_ACTIVITIES_PATH = "/admin/oauth2/api/v1/activities";
 
 // Kindful query docs note max/default page size of 50.
 export const KINDFUL_DEFAULT_PAGE_SIZE = 50;
