@@ -206,7 +206,13 @@ export class KindfulApiClient {
   }
 
   private buildAuthHeaderNameCandidates() {
-    const candidates = [this.authHeaderName, "Authorization"].filter((value) => value.trim().length > 0);
+    const candidates = [
+      this.authHeaderName,
+      "Authorization",
+      "APIKEY",
+      "X-API-KEY",
+      "X-Auth-Token"
+    ].filter((value) => value.trim().length > 0);
     const deduped = new Set<string>();
     for (const candidate of candidates) deduped.add(candidate);
     return Array.from(deduped);
@@ -473,13 +479,32 @@ export class KindfulApiClient {
     if (Array.isArray(input.customFields) && input.customFields.length > 0) {
       body.custom_fields = input.customFields;
     }
-    const response = await this.requestWithPathFallback<Record<string, unknown>>({
-      method: "POST",
-      paths: [this.contactsQueryPath, "/admin/oauth2/api/v1/contacts/query", "/api/v1/contacts/query"],
-      body,
-      operationName: "Kindful contacts query"
-    });
-    return this.normalizeQueryResult(response.payload, perPage);
+    const candidateBodies: Array<Record<string, unknown>> = [body];
+    if (this.token) {
+      candidateBodies.push({ ...body, application_token: this.token });
+      candidateBodies.push({ ...body, api_token: this.token });
+      candidateBodies.push({ ...body, token: this.token });
+      candidateBodies.push({ ...body, access_token: this.token });
+    }
+    let lastError: Error | null = null;
+    for (const candidateBody of candidateBodies) {
+      try {
+        const response = await this.requestWithPathFallback<Record<string, unknown>>({
+          method: "POST",
+          paths: [this.contactsQueryPath, "/admin/oauth2/api/v1/contacts/query", "/api/v1/contacts/query"],
+          body: candidateBody,
+          operationName: "Kindful contacts query"
+        });
+        return this.normalizeQueryResult(response.payload, perPage);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        lastError = error instanceof Error ? error : new Error(message);
+        if (!message.includes("HTTP 401")) {
+          throw lastError;
+        }
+      }
+    }
+    throw lastError ?? new Error("Kindful contacts query failed.");
   }
 
   async queryTransactions(input: KindfulQueryInput = {}): Promise<KindfulQueryResult> {
@@ -493,17 +518,36 @@ export class KindfulApiClient {
     if (Array.isArray(input.customFields) && input.customFields.length > 0) {
       body.custom_fields = input.customFields;
     }
-    const response = await this.requestWithPathFallback<Record<string, unknown>>({
-      method: "POST",
-      paths: [
-        this.transactionsQueryPath,
-        "/admin/oauth2/api/v1/transactions/query",
-        "/api/v1/transactions/query"
-      ],
-      body,
-      operationName: "Kindful transactions query"
-    });
-    return this.normalizeQueryResult(response.payload, perPage);
+    const candidateBodies: Array<Record<string, unknown>> = [body];
+    if (this.token) {
+      candidateBodies.push({ ...body, application_token: this.token });
+      candidateBodies.push({ ...body, api_token: this.token });
+      candidateBodies.push({ ...body, token: this.token });
+      candidateBodies.push({ ...body, access_token: this.token });
+    }
+    let lastError: Error | null = null;
+    for (const candidateBody of candidateBodies) {
+      try {
+        const response = await this.requestWithPathFallback<Record<string, unknown>>({
+          method: "POST",
+          paths: [
+            this.transactionsQueryPath,
+            "/admin/oauth2/api/v1/transactions/query",
+            "/api/v1/transactions/query"
+          ],
+          body: candidateBody,
+          operationName: "Kindful transactions query"
+        });
+        return this.normalizeQueryResult(response.payload, perPage);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        lastError = error instanceof Error ? error : new Error(message);
+        if (!message.includes("HTTP 401")) {
+          throw lastError;
+        }
+      }
+    }
+    throw lastError ?? new Error("Kindful transactions query failed.");
   }
 
   async queryMetadata(path: string) {
@@ -556,6 +600,10 @@ export class KindfulApiClient {
     try {
       const sync = await this.getSyncStatus();
       const syncEnabled = normalizeBoolean(sync.sync_enabled);
+      await this.queryContacts({
+        query: ["linked"],
+        perPage: 1
+      });
       return {
         ok: true,
         message:
