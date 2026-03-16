@@ -16,6 +16,7 @@ import { IntegrationLogService } from "@/lib/integrations/integration-log-servic
 import { IntegrationJobRunner } from "@/lib/integrations/integration-job-runner";
 import { IntegrationRetryService } from "@/lib/integrations/integration-retry-service";
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
+import { KindfulSyncService } from "@/lib/integrations/kindful-sync-service";
 import { ContactSyncService } from "@/lib/integrations/contact-sync-service";
 import { createIntegrationClient } from "@/lib/integrations/db";
 import { logAuditEvent } from "@/lib/data/audit";
@@ -32,6 +33,19 @@ import {
   GIVINGFUEL_TRANSACTIONS_PATH,
   isGivingFuelIntegrationKey
 } from "@/lib/integrations/givingfuel-contacts-config";
+import {
+  isKindfulIntegrationKey,
+  KINDFUL_AUTH_HEADER_NAME,
+  KINDFUL_AUTH_HEADER_PREFIX,
+  KINDFUL_BASE_URL,
+  KINDFUL_CONTACTS_QUERY_PATH,
+  KINDFUL_DEFAULT_PAGE_SIZE,
+  KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
+  KINDFUL_INTEGRATION_KEY,
+  KINDFUL_INTEGRATION_NAME,
+  KINDFUL_SYNC_STATUS_PATH,
+  KINDFUL_TRANSACTIONS_QUERY_PATH
+} from "@/lib/integrations/kindful-config";
 
 const registryService = new IntegrationRegistryService();
 const configurationService = new IntegrationConfigurationService();
@@ -39,6 +53,7 @@ const logService = new IntegrationLogService();
 const jobRunner = new IntegrationJobRunner();
 const retryService = new IntegrationRetryService();
 const webconnexSyncService = new WebconnexSyncService();
+const kindfulSyncService = new KindfulSyncService();
 const contactSyncService = new ContactSyncService();
 const INTEGRATIONS_API_PAUSED = process.env.INTEGRATIONS_API_PAUSED === "true";
 const INTEGRATIONS_API_PAUSED_MESSAGE =
@@ -75,12 +90,14 @@ export type DonationPageMappingRow = {
 function integrationDisplayName(key: string) {
   if (key === GIVINGFUEL_INTEGRATION_KEY) return GIVINGFUEL_INTEGRATION_NAME;
   if (key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) return GIVINGFUEL_DONATIONS_INTEGRATION_NAME;
+  if (key === KINDFUL_INTEGRATION_KEY) return KINDFUL_INTEGRATION_NAME;
   return key;
 }
 
 function integrationTileType(key: string) {
   if (key === GIVINGFUEL_INTEGRATION_KEY) return "Contacts";
   if (key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) return "Donations";
+  if (key === KINDFUL_INTEGRATION_KEY) return "Migration + Sync";
   return "General";
 }
 
@@ -110,8 +127,9 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
   const now = new Date().toISOString();
   const name = integrationDisplayName(integrationKey);
   const isGivingFuel = isGivingFuelIntegrationKey(integrationKey);
+  const isKindful = isKindfulIntegrationKey(integrationKey);
   const isDonations = integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY;
-  const fallbackWebconnexBaseUrl = GIVINGFUEL_BASE_URL;
+  const fallbackBaseUrl = isKindful ? KINDFUL_BASE_URL : GIVINGFUEL_BASE_URL;
   return {
     definition: {
       id: `fallback-${integrationKey}`,
@@ -122,8 +140,10 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
           ? isDonations
             ? "GivingFuel Donations API sync from Webconnex v2 public transactions endpoint."
             : "GivingFuel Contacts API sync from Webconnex v2 public customers endpoint."
+          : isKindful
+            ? "Kindful Customer API migration + transition sync."
           : "Integration metadata unavailable until migrations are applied.",
-      category: isDonations ? "donations" : "contacts",
+      category: isKindful || isDonations ? "donations" : "contacts",
       is_active: true,
       supports_manual_sync: true,
       supports_scheduled_sync: true,
@@ -136,7 +156,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       organization_id: organizationId,
       integration_definition_id: `fallback-${integrationKey}`,
       name,
-      base_url: fallbackWebconnexBaseUrl,
+      base_url: fallbackBaseUrl,
       auth_type: "api_key_header",
       api_key_reference: null,
       is_enabled: false,
@@ -147,22 +167,36 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       retry_settings: { maxRetries: 3, backoffMs: 1000 },
       debug_logging_enabled: false,
       configuration_json: {
-        contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
-        transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
-        formsPath: GIVINGFUEL_FORMS_PATH,
-        testPath: GIVINGFUEL_CUSTOMERS_PATH,
-        authHeaderName: GIVINGFUEL_API_HEADER_NAME,
-        staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
+        ...(isKindful
+          ? {
+              contactsQueryPath: KINDFUL_CONTACTS_QUERY_PATH,
+              transactionsQueryPath: KINDFUL_TRANSACTIONS_QUERY_PATH,
+              syncStatusPath: KINDFUL_SYNC_STATUS_PATH,
+              importStatusPathTemplate: KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
+              authHeaderName: KINDFUL_AUTH_HEADER_NAME,
+              authHeaderPrefix: KINDFUL_AUTH_HEADER_PREFIX,
+              pageSize: KINDFUL_DEFAULT_PAGE_SIZE,
+              requestIntervalMs: 200,
+              environment: "production"
+            }
+          : {
+              contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+              transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
+              formsPath: GIVINGFUEL_FORMS_PATH,
+              testPath: GIVINGFUEL_CUSTOMERS_PATH,
+              authHeaderName: GIVINGFUEL_API_HEADER_NAME,
+              staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE }
+            }),
         apiKeyConfigured: false
       },
       sync_settings_json: {
         syncMode: "manual_and_scheduled",
-        scheduleFrequency: "daily",
-        contactSyncEnabled: !isDonations,
-        donationSyncEnabled: isDonations,
-        fullSyncEnabled: false,
+        scheduleFrequency: isKindful ? "hourly" : "daily",
+        contactSyncEnabled: isKindful ? true : !isDonations,
+        donationSyncEnabled: isKindful ? true : isDonations,
+        fullSyncEnabled: isKindful,
         incrementalSyncEnabled: true,
-        fallbackContactMatch: "external_id_only",
+        fallbackContactMatch: isKindful ? "email_phone_name_address" : "external_id_only",
         initialImportStartDate: null,
         lastSuccessfulSyncDate: null
       },
@@ -501,6 +535,26 @@ export async function listIntegrationsForAdmin() {
         jobs: []
       });
     }
+    if (!existingKeys.has(KINDFUL_INTEGRATION_KEY)) {
+      rows.push({
+        definition: {
+          id: `fallback-${KINDFUL_INTEGRATION_KEY}`,
+          name: KINDFUL_INTEGRATION_NAME,
+          provider_key: KINDFUL_INTEGRATION_KEY,
+          description: "Kindful migration + transition synchronization.",
+          category: "donations",
+          is_active: true,
+          supports_manual_sync: true,
+          supports_scheduled_sync: true,
+          supports_test_connection: true,
+          created_at: now,
+          updated_at: now
+        },
+        connection: null,
+        lastJob: null,
+        jobs: []
+      });
+    }
 
     const failedJobs = rows.filter((row) => {
       const latest = row.jobs[0] ?? row.lastJob;
@@ -621,10 +675,39 @@ export async function listIntegrationsForAdmin() {
           errorSummary: "Migration required",
           completedSuccessfully: false,
           canManageIntegration
+        },
+        {
+          integrationKey: KINDFUL_INTEGRATION_KEY,
+          name: KINDFUL_INTEGRATION_NAME,
+          providerType: "Migration + Sync",
+          description:
+            "Kindful migration + transition synchronization is available after migration 202603130021 and 202603171500 are applied.",
+          enabledStatus: "Disabled",
+          connectionStatus: "Not Tested",
+          isEnabled: false,
+          syncStatus: "Could Not Complete",
+          syncStatusColor: "red",
+          statusDetail: "Migration required",
+          runId: null,
+          lastSyncStartTime: null,
+          lastSyncEndTime: null,
+          lastSuccessfulSyncTime: null,
+          recordsRetrieved: 0,
+          recordsProcessed: 0,
+          recordsInserted: 0,
+          recordsUpdated: 0,
+          recordsSkipped: 0,
+          recordsFailed: 0,
+          totalRecordsExpected: null,
+          currentPage: null,
+          currentCursor: null,
+          errorSummary: "Migration required",
+          completedSuccessfully: false,
+          canManageIntegration
         }
       ],
       summary: {
-        totalIntegrations: 2,
+        totalIntegrations: 3,
         enabledIntegrations: 0,
         failedJobs: 0,
         last24hSyncActivity: 0
@@ -753,7 +836,7 @@ export async function updateIntegrationConfiguration(
   try {
     const definition = await registryService.getDefinition(integrationKey);
     if (!definition) throw new Error("Integration not found.");
-    if (isGivingFuelIntegrationKey(integrationKey)) {
+    if (isGivingFuelIntegrationKey(integrationKey) || isKindfulIntegrationKey(integrationKey)) {
       const existing = await configurationService.getConnection(context.organizationId, definition);
       const existingConfig = (existing?.configuration_json ?? {}) as Record<string, unknown>;
       const existingHasApiKey =
@@ -791,7 +874,35 @@ export async function updateIntegrationConfiguration(
             fallbackContactMatch: "external_id_only"
           }
         }
-      : payload;
+      : isKindfulIntegrationKey(integrationKey)
+        ? {
+            ...payload,
+            name: payload.name ?? integrationDisplayName(integrationKey),
+            baseUrl: payload.baseUrl ?? KINDFUL_BASE_URL,
+            authType: "api_key_header",
+            apiKeyReference: null,
+            configuration: {
+              ...(payload.configuration ?? {}),
+              contactsQueryPath: KINDFUL_CONTACTS_QUERY_PATH,
+              transactionsQueryPath: KINDFUL_TRANSACTIONS_QUERY_PATH,
+              syncStatusPath: KINDFUL_SYNC_STATUS_PATH,
+              importStatusPathTemplate: KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
+              authHeaderName: KINDFUL_AUTH_HEADER_NAME,
+              authHeaderPrefix: KINDFUL_AUTH_HEADER_PREFIX,
+              pageSize: KINDFUL_DEFAULT_PAGE_SIZE,
+              requestIntervalMs: 200,
+              environment: "production"
+            },
+            syncSettings: {
+              ...(payload.syncSettings ?? {}),
+              contactSyncEnabled: true,
+              donationSyncEnabled: true,
+              fullSyncEnabled: true,
+              incrementalSyncEnabled: true,
+              fallbackContactMatch: "email_phone_name_address"
+            }
+          }
+        : payload;
     const connection = await configurationService.upsertConfiguration({
       organizationId: context.organizationId,
       userId: context.userId,
@@ -829,13 +940,16 @@ export async function testIntegrationConnection(
       context.userId,
       integrationKey
     );
-    if (!isGivingFuelIntegrationKey(integrationKey)) {
-      return { ok: false, message: `No test connector implemented for ${integrationKey}.` };
-    }
-    const result = await webconnexSyncService.testConnection(connection, {
-      apiKeyOverride: apiKeyOverride?.trim() || undefined,
-      probeTransactions: integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
-    });
+    const result = isGivingFuelIntegrationKey(integrationKey)
+      ? await webconnexSyncService.testConnection(connection, {
+          apiKeyOverride: apiKeyOverride?.trim() || undefined,
+          probeTransactions: integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+        })
+      : isKindfulIntegrationKey(integrationKey)
+        ? await kindfulSyncService.testConnection(connection, {
+            tokenOverride: apiKeyOverride?.trim() || undefined
+          })
+        : { ok: false, message: `No test connector implemented for ${integrationKey}.` };
     const supabase = await createIntegrationClient();
     await supabase
       .from("integration_connections")
@@ -850,13 +964,15 @@ export async function testIntegrationConnection(
     return result;
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
-      if (!isGivingFuelIntegrationKey(integrationKey)) {
+      if (!isGivingFuelIntegrationKey(integrationKey) && !isKindfulIntegrationKey(integrationKey)) {
         throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
       }
-      const schemaFreeConnection = buildSchemaFreeWebconnexConnection(
-        context.organizationId,
-        integrationKey
-      );
+      if (isKindfulIntegrationKey(integrationKey)) {
+        throw new Error(
+          "Integrations schema is required before testing Kindful. Run migrations 202603130021 and 202603171500."
+        );
+      }
+      const schemaFreeConnection = buildSchemaFreeWebconnexConnection(context.organizationId, integrationKey);
       const result = await webconnexSyncService.testConnection(schemaFreeConnection, {
         apiKeyOverride: apiKeyOverride?.trim() || undefined,
         probeTransactions: integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
@@ -1521,5 +1637,415 @@ export async function createSubCampaignForIntegration(
     description: String(data.description ?? ""),
     status: String(data.status ?? ""),
     externalPageKey: String(data.external_page_key ?? "")
+  };
+}
+
+type KindfulReviewQueueItem = {
+  id: string;
+  entityType: string;
+  sourceRecordId: string | null;
+  reason: string;
+  confidenceScore: number | null;
+  resolutionStatus: string;
+  resolutionNotes: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  candidateMatches: Array<Record<string, unknown>>;
+};
+
+type KindfulDeadLetterQueueItem = {
+  id: string;
+  entityType: string;
+  sourceRecordId: string | null;
+  errorMessage: string;
+  retryable: boolean;
+  retryCount: number;
+  status: string;
+  lastRetryDate: string | null;
+  createdAt: string;
+};
+
+async function getKindfulContext(integrationKey = KINDFUL_INTEGRATION_KEY) {
+  if (!isKindfulIntegrationKey(integrationKey)) {
+    throw new Error("Kindful-only operation requested for a non-Kindful integration key.");
+  }
+  const context = await requireIntegrationsManager();
+  const { definition, connection } = await getDefinitionAndConnection(
+    context.organizationId,
+    context.userId,
+    integrationKey
+  );
+  return { ...context, definition, connection };
+}
+
+export async function listKindfulReviewQueue(
+  integrationKey: string,
+  status: "open" | "resolved" | "all" = "open"
+) {
+  const context = await getKindfulContext(integrationKey);
+  const supabase = await createIntegrationClient();
+  let query = supabase
+    .from("integration_review_queue")
+    .select(
+      "id, entity_type, source_record_id, reason, confidence_score, resolution_status, resolution_notes, resolved_at, created_at, candidate_matches"
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", context.connection.id)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (status === "open") {
+    query = query.neq("resolution_status", "resolved");
+  } else if (status === "resolved") {
+    query = query.eq("resolution_status", "resolved");
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    entityType: String(row.entity_type ?? ""),
+    sourceRecordId: typeof row.source_record_id === "string" ? row.source_record_id : null,
+    reason: String(row.reason ?? ""),
+    confidenceScore:
+      typeof row.confidence_score === "number" ? Number(row.confidence_score) : null,
+    resolutionStatus: String(row.resolution_status ?? "open"),
+    resolutionNotes:
+      typeof row.resolution_notes === "string" ? String(row.resolution_notes) : null,
+    resolvedAt: typeof row.resolved_at === "string" ? String(row.resolved_at) : null,
+    createdAt: String(row.created_at ?? ""),
+    candidateMatches: Array.isArray(row.candidate_matches)
+      ? (row.candidate_matches as Array<Record<string, unknown>>)
+      : []
+  })) as KindfulReviewQueueItem[];
+}
+
+export async function resolveKindfulReviewQueueItem(input: {
+  integrationKey: string;
+  reviewId: string;
+  resolutionNotes?: string;
+}) {
+  const context = await getKindfulContext(input.integrationKey);
+  const supabase = await createIntegrationClient();
+  const { error } = await supabase
+    .from("integration_review_queue")
+    .update({
+      resolution_status: "resolved",
+      resolution_notes: input.resolutionNotes?.trim() || null,
+      resolved_by: context.userId,
+      resolved_at: new Date().toISOString()
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", context.connection.id)
+    .eq("id", input.reviewId);
+  if (error) throw error;
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "integration_review_queue_resolved",
+    targetEntityType: "integration_review_queue",
+    targetEntityId: input.reviewId,
+    metadata: {
+      integrationKey: KINDFUL_INTEGRATION_KEY
+    }
+  });
+  return { ok: true };
+}
+
+export async function listKindfulDeadLetterQueue(
+  integrationKey: string,
+  status: "open" | "replayed" | "resolved" | "all" = "open"
+) {
+  const context = await getKindfulContext(integrationKey);
+  const supabase = await createIntegrationClient();
+  let query = supabase
+    .from("integration_dead_letter_queue")
+    .select(
+      "id, entity_type, source_record_id, error_message, retryable, retry_count, status, last_retry_date, created_at"
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", context.connection.id)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (status !== "all") query = query.eq("status", status);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    entityType: String(row.entity_type ?? ""),
+    sourceRecordId: typeof row.source_record_id === "string" ? row.source_record_id : null,
+    errorMessage: String(row.error_message ?? ""),
+    retryable: Boolean(row.retryable),
+    retryCount: Number(row.retry_count ?? 0),
+    status: String(row.status ?? "open"),
+    lastRetryDate: typeof row.last_retry_date === "string" ? String(row.last_retry_date) : null,
+    createdAt: String(row.created_at ?? "")
+  })) as KindfulDeadLetterQueueItem[];
+}
+
+export async function replayKindfulDeadLetterItem(integrationKey: string, deadLetterId: string) {
+  const context = await getKindfulContext(integrationKey);
+  const supabase = await createIntegrationClient();
+  const { data: row, error: rowError } = await supabase
+    .from("integration_dead_letter_queue")
+    .select("id, status, retry_count")
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", context.connection.id)
+    .eq("id", deadLetterId)
+    .maybeSingle();
+  if (rowError) throw rowError;
+  if (!row) throw new Error("Dead-letter queue item not found.");
+
+  const { error: updateError } = await supabase
+    .from("integration_dead_letter_queue")
+    .update({
+      status: "replayed",
+      retry_count: Number(row.retry_count ?? 0) + 1,
+      last_retry_date: new Date().toISOString()
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", context.connection.id)
+    .eq("id", deadLetterId);
+  if (updateError) throw updateError;
+
+  const result = await jobRunner.run({
+    organizationId: context.organizationId,
+    userId: context.userId,
+    definition: context.definition,
+    connection: context.connection,
+    scope: "all",
+    jobType: "retry_failed"
+  });
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "integration_dead_letter_replayed",
+    targetEntityType: "integration_dead_letter_queue",
+    targetEntityId: deadLetterId,
+    metadata: {
+      integrationKey: KINDFUL_INTEGRATION_KEY,
+      replayJobId: result.jobId
+    }
+  });
+
+  return {
+    ok: true,
+    replayJobId: result.jobId,
+    status: result.status
+  };
+}
+
+export async function getKindfulCutoverReadiness(
+  integrationKey: string,
+  input?: { quietDays?: number }
+) {
+  const context = await getKindfulContext(integrationKey);
+  const supabase = await createIntegrationClient();
+  const quietDays = Math.max(1, Math.min(Number(input?.quietDays ?? 7), 90));
+
+  const [
+    contactsExternalCount,
+    contactsExternalFallback,
+    transactionsExternalCount,
+    transactionsExternalFallback,
+    integrationErrorsOpen,
+    deadLetterOpen,
+    reviewOpen,
+    lastKindfulPayload,
+    latestReport
+  ] = await Promise.all([
+    supabase
+      .from("contact_external_ids")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("source_system", "kindful")
+      .eq("is_active", true),
+    supabase
+      .from("contact_external_references")
+      .select("contact_id")
+      .eq("organization_id", context.organizationId)
+      .eq("source_system", "kindful"),
+    supabase
+      .from("transaction_external_ids")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("source_system", "kindful")
+      .eq("is_active", true),
+    supabase
+      .from("donation_external_references")
+      .select("donation_id")
+      .eq("organization_id", context.organizationId)
+      .eq("source_system", "kindful"),
+    supabase
+      .from("integration_error_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", context.connection.id)
+      .neq("status", "resolved"),
+    supabase
+      .from("integration_dead_letter_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", context.connection.id)
+      .eq("status", "open"),
+    supabase
+      .from("integration_review_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", context.connection.id)
+      .neq("resolution_status", "resolved"),
+    supabase
+      .from("raw_source_payloads")
+      .select("ingested_at")
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", context.connection.id)
+      .eq("source_system", "kindful")
+      .order("ingested_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("integration_cutover_reports")
+      .select("*")
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", context.connection.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  ]);
+
+  if (contactsExternalCount.error) throw contactsExternalCount.error;
+  if (contactsExternalFallback.error) throw contactsExternalFallback.error;
+  if (transactionsExternalCount.error) throw transactionsExternalCount.error;
+  if (transactionsExternalFallback.error) throw transactionsExternalFallback.error;
+  if (integrationErrorsOpen.error) throw integrationErrorsOpen.error;
+  if (deadLetterOpen.error) throw deadLetterOpen.error;
+  if (reviewOpen.error) throw reviewOpen.error;
+  if (lastKindfulPayload.error) throw lastKindfulPayload.error;
+  if (latestReport.error) throw latestReport.error;
+
+  const fallbackContactIds = new Set(
+    ((contactsExternalFallback.data ?? []) as Array<{ contact_id?: string | null }>)
+      .map((row) => String(row.contact_id ?? ""))
+      .filter(Boolean)
+  );
+  const fallbackDonationIds = new Set(
+    ((transactionsExternalFallback.data ?? []) as Array<{ donation_id?: string | null }>)
+      .map((row) => String(row.donation_id ?? ""))
+      .filter(Boolean)
+  );
+
+  const contactsImported = Math.max(
+    Number(contactsExternalCount.count ?? 0),
+    fallbackContactIds.size
+  );
+  const transactionsImported = Math.max(
+    Number(transactionsExternalCount.count ?? 0),
+    fallbackDonationIds.size
+  );
+  const openFailedQueue =
+    Number(integrationErrorsOpen.count ?? 0) + Number(deadLetterOpen.count ?? 0);
+  const openReviewQueue = Number(reviewOpen.count ?? 0);
+  const lastKindfulChangeAt =
+    typeof lastKindfulPayload.data?.ingested_at === "string"
+      ? String(lastKindfulPayload.data.ingested_at)
+      : null;
+  const lastChangeMs = lastKindfulChangeAt ? new Date(lastKindfulChangeAt).getTime() : null;
+  const daysSinceLastKindfulChange =
+    typeof lastChangeMs === "number" && Number.isFinite(lastChangeMs)
+      ? Math.floor((Date.now() - lastChangeMs) / (24 * 60 * 60 * 1000))
+      : null;
+  const readyToCutover =
+    openFailedQueue === 0 &&
+    openReviewQueue === 0 &&
+    (daysSinceLastKindfulChange === null || daysSinceLastKindfulChange >= quietDays);
+
+  return {
+    integrationKey: KINDFUL_INTEGRATION_KEY,
+    contactsImported,
+    transactionsImported,
+    openFailedQueue,
+    openReviewQueue,
+    lastKindfulOnlyChangeAt: lastKindfulChangeAt,
+    daysSinceLastKindfulChange,
+    quietDaysTarget: quietDays,
+    readyToCutover,
+    latestReport: latestReport.data ?? null
+  };
+}
+
+export async function approveKindfulCutover(
+  integrationKey: string,
+  input?: { notes?: string; quietDays?: number }
+) {
+  const context = await getKindfulContext(integrationKey);
+  const readiness = await getKindfulCutoverReadiness(integrationKey, {
+    quietDays: input?.quietDays
+  });
+  if (!readiness.readyToCutover) {
+    throw new Error(
+      "Kindful cutover readiness checks are not yet satisfied. Resolve queue items or wait for quiet period."
+    );
+  }
+  const supabase = await createIntegrationClient();
+  const now = new Date().toISOString();
+
+  const reportInsert = await supabase
+    .from("integration_cutover_reports")
+    .insert({
+      organization_id: context.organizationId,
+      integration_connection_id: context.connection.id,
+      source_system: "kindful",
+      report_status: "approved",
+      contacts_with_external_ids: readiness.contactsImported,
+      transactions_with_external_ids: readiness.transactionsImported,
+      open_failed_queue_count: readiness.openFailedQueue,
+      open_review_queue_count: readiness.openReviewQueue,
+      last_kindful_only_change_at: readiness.lastKindfulOnlyChangeAt,
+      reconciliation_summary: {
+        approvedNotes: input?.notes ?? null,
+        readyToCutover: readiness.readyToCutover,
+        approvedAt: now
+      },
+      approved_by: context.userId,
+      approved_at: now
+    })
+    .select("id")
+    .single();
+  if (reportInsert.error) throw reportInsert.error;
+
+  const nextSyncSettings = {
+    ...(context.connection.sync_settings_json ?? {}),
+    kindfulCutoverApprovedAt: now,
+    kindfulCutoverApprovedBy: context.userId,
+    kindfulCutoverNotes: input?.notes ?? null
+  };
+  const updateConnection = await supabase
+    .from("integration_connections")
+    .update({
+      is_enabled: false,
+      sync_settings_json: nextSyncSettings,
+      updated_by: context.userId
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("id", context.connection.id);
+  if (updateConnection.error) throw updateConnection.error;
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "integration_cutover_approved",
+    targetEntityType: "integration_connections",
+    targetEntityId: context.connection.id,
+    metadata: {
+      integrationKey,
+      reportId: reportInsert.data?.id ?? null,
+      notes: input?.notes ?? null
+    }
+  });
+
+  return {
+    ok: true,
+    reportId: String(reportInsert.data?.id ?? ""),
+    integrationFrozen: true
   };
 }

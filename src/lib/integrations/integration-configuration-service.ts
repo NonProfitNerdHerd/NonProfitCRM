@@ -13,6 +13,19 @@ import {
   GIVINGFUEL_TRANSACTIONS_PATH,
   isGivingFuelIntegrationKey
 } from "@/lib/integrations/givingfuel-contacts-config";
+import {
+  isKindfulIntegrationKey,
+  KINDFUL_AUTH_HEADER_NAME,
+  KINDFUL_AUTH_HEADER_PREFIX,
+  KINDFUL_BASE_URL,
+  KINDFUL_CONTACTS_QUERY_PATH,
+  KINDFUL_DEFAULT_PAGE_SIZE,
+  KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
+  KINDFUL_INTEGRATION_KEY,
+  KINDFUL_INTEGRATION_NAME,
+  KINDFUL_SYNC_STATUS_PATH,
+  KINDFUL_TRANSACTIONS_QUERY_PATH
+} from "@/lib/integrations/kindful-config";
 import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 
 const DEFAULT_WEBCONNEX_FIELD_MAPPING = {
@@ -70,11 +83,56 @@ const DEFAULT_DONATIONS_SYNC_SETTINGS = {
   donationsCursor: null
 };
 
+const DEFAULT_KINDFUL_FIELD_MAPPING = {
+  contacts: {
+    externalContactId: ["id", "external_id", "contact.id", "contact.external_id"],
+    firstName: ["first_name", "firstName", "contact.first_name"],
+    lastName: ["last_name", "lastName", "contact.last_name"],
+    email: ["email", "primary_email", "contact.email"],
+    phone: ["phone", "mobile_phone", "contact.phone"],
+    addressLine1: ["address_line_1", "address.street1", "contact.address.street1"],
+    city: ["city", "address.city", "contact.address.city"],
+    state: ["state", "address.state", "contact.address.state"],
+    postalCode: ["postal_code", "zip", "address.postal_code", "contact.address.postal_code"]
+  },
+  donations: {
+    externalTransactionId: ["id", "external_id", "transaction.id", "transaction.external_id"],
+    externalContactId: ["contact_id", "contact.id", "contact.external_id", "donor_id"],
+    amountInCents: ["amount_in_cents", "transaction.amount_in_cents"],
+    amount: ["amount", "transaction.amount"],
+    donationDate: ["transaction_time", "created_at", "updated_at"],
+    paymentMethod: ["payment_method", "payment_type", "payment"],
+    status: ["status"],
+    campaignName: ["campaign.name", "campaign", "transaction.campaign.name"],
+    campaignId: ["campaign.id", "transaction.campaign.id"],
+    fundName: ["fund.name", "fund", "transaction.fund.name"],
+    fundId: ["fund.id", "transaction.fund.id"],
+    notes: ["note", "memo", "description"]
+  }
+};
+
+const DEFAULT_KINDFUL_SYNC_SETTINGS = {
+  syncMode: "manual_and_scheduled",
+  scheduleFrequency: "hourly",
+  contactSyncEnabled: true,
+  donationSyncEnabled: true,
+  fullSyncEnabled: true,
+  incrementalSyncEnabled: true,
+  fallbackContactMatch: "email_phone_name_address",
+  initialImportStartDate: null,
+  lastSuccessfulSyncDate: null,
+  kindfulContactsMode: "backfill",
+  kindfulTransactionsMode: "backfill",
+  kindfulContactsQueryToken: null,
+  kindfulTransactionsQueryToken: null
+};
+
 function defaultConnectionName(definition: IntegrationDefinition) {
   if (definition.provider_key === GIVINGFUEL_INTEGRATION_KEY) return GIVINGFUEL_INTEGRATION_NAME;
   if (definition.provider_key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) {
     return GIVINGFUEL_DONATIONS_INTEGRATION_NAME;
   }
+  if (definition.provider_key === KINDFUL_INTEGRATION_KEY) return KINDFUL_INTEGRATION_NAME;
   return definition.name;
 }
 
@@ -109,7 +167,11 @@ export class IntegrationConfigurationService {
         organization_id: organizationId,
         integration_definition_id: definition.id,
         name: defaultConnectionName(definition),
-        base_url: isGivingFuelIntegrationKey(definition.provider_key) ? GIVINGFUEL_BASE_URL : null,
+        base_url: isGivingFuelIntegrationKey(definition.provider_key)
+          ? GIVINGFUEL_BASE_URL
+          : isKindfulIntegrationKey(definition.provider_key)
+            ? KINDFUL_BASE_URL
+            : null,
         auth_type: "api_key_header",
         api_key_reference: null,
         is_enabled: false,
@@ -128,16 +190,34 @@ export class IntegrationConfigurationService {
                 staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
                 apiKeyConfigured: false
               }
+            : isKindfulIntegrationKey(definition.provider_key)
+              ? {
+                  contactsQueryPath: KINDFUL_CONTACTS_QUERY_PATH,
+                  transactionsQueryPath: KINDFUL_TRANSACTIONS_QUERY_PATH,
+                  syncStatusPath: KINDFUL_SYNC_STATUS_PATH,
+                  importStatusPathTemplate: KINDFUL_IMPORT_STATUS_PATH_TEMPLATE,
+                  testPath: KINDFUL_SYNC_STATUS_PATH,
+                  authHeaderName: KINDFUL_AUTH_HEADER_NAME,
+                  authHeaderPrefix: KINDFUL_AUTH_HEADER_PREFIX,
+                  pageSize: KINDFUL_DEFAULT_PAGE_SIZE,
+                  requestIntervalMs: 200,
+                  apiKeyConfigured: false,
+                  environment: "production"
+                }
             : {},
         sync_settings_json:
           definition.provider_key === GIVINGFUEL_INTEGRATION_KEY
             ? DEFAULT_CONTACTS_SYNC_SETTINGS
             : definition.provider_key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? DEFAULT_DONATIONS_SYNC_SETTINGS
+            : isKindfulIntegrationKey(definition.provider_key)
+              ? DEFAULT_KINDFUL_SYNC_SETTINGS
             : {},
         field_mapping_json:
           isGivingFuelIntegrationKey(definition.provider_key)
             ? DEFAULT_WEBCONNEX_FIELD_MAPPING
+            : isKindfulIntegrationKey(definition.provider_key)
+              ? DEFAULT_KINDFUL_FIELD_MAPPING
             : {},
         created_by: userId,
         updated_by: userId

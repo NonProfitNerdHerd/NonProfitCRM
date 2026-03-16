@@ -29,7 +29,7 @@ export async function POST(_request: Request, { params }: RouteProps) {
       ...result,
       message:
         result.recordsProcessed === 0
-          ? "No contact records were returned from GivingFuel."
+          ? "No contact records were returned from the source system."
           : "Contacts sync completed successfully."
     });
   } catch (error) {
