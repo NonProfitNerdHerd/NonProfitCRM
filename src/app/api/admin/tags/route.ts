@@ -5,9 +5,10 @@ import { createTagDefinition, listTagDefinitions } from "@/lib/data/tags";
 function flattenZodIssues(error: z.ZodError) {
   const flat = error.flatten();
   const fieldMessages = Object.entries(flat.fieldErrors)
-    .flatMap(([field, messages]) =>
-      (messages ?? []).map((message) => `${field}: ${message}`)
-    )
+    .flatMap(([field, messages]) => {
+      const list = Array.isArray(messages) ? messages : [];
+      return list.map((message) => `${field}: ${message}`);
+    })
     .filter(Boolean);
   const formMessages = flat.formErrors ?? [];
   return [...fieldMessages, ...formMessages];

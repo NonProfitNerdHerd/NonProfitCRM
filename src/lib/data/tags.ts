@@ -307,14 +307,14 @@ export async function listTagDefinitions(input?: {
 
 export async function createTagDefinition(input: {
   name: string;
-  slug?: string;
-  description?: string;
+  slug?: string | null;
+  description?: string | null;
   parentTagId?: string | null;
   isActive?: boolean;
   isSystem?: boolean;
-  color?: string;
+  color?: string | null;
   sortOrder?: number;
-  externalKey?: string;
+  externalKey?: string | null;
 }) {
   const context = await requireStaffPermission("can_manage_contact_tags");
   const supabase = await createClient();
@@ -359,7 +359,7 @@ export async function updateTagDefinition(
   tagId: string,
   input: {
     name?: string;
-    slug?: string;
+    slug?: string | null;
     description?: string | null;
     parentTagId?: string | null;
     isActive?: boolean;
