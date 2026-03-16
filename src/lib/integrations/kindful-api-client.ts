@@ -309,6 +309,62 @@ export class KindfulApiClient {
     throw lastError ?? new Error("Kindful request failed.");
   }
 
+  private async requestWithPathFallback<T>(input: {
+    method: "GET" | "POST";
+    paths: string[];
+    body?: Record<string, unknown>;
+    operationName: string;
+  }) {
+    const paths = Array.from(
+      new Set(input.paths.map((value) => value.trim()).filter((value) => value.length > 0))
+    );
+    let lastAuthError: Error | null = null;
+    let lastNotFoundError: Error | null = null;
+    let lastError: Error | null = null;
+
+    for (const path of paths) {
+      try {
+        const payload = await this.request<T>({
+          method: input.method,
+          path,
+          body: input.body
+        });
+        return {
+          payload,
+          pathUsed: path
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("HTTP 401")) {
+          lastAuthError = error instanceof Error ? error : new Error(message);
+          continue;
+        }
+        if (message.includes("HTTP 404")) {
+          lastNotFoundError = error instanceof Error ? error : new Error(message);
+          continue;
+        }
+        lastError = error instanceof Error ? error : new Error(message);
+      }
+    }
+
+    if (lastError) throw lastError;
+    if (lastAuthError) {
+      throw new Error(
+        `${input.operationName} failed with HTTP 401 on all candidate paths (${paths.join(
+          ", "
+        )}). Verify Kindful token scope and endpoint family (/api/v1 vs /admin/oauth2/api/v1).`
+      );
+    }
+    if (lastNotFoundError) {
+      throw new Error(
+        `${input.operationName} failed with HTTP 404 on all candidate paths (${paths.join(
+          ", "
+        )}). Verify configured Kindful query endpoint paths.`
+      );
+    }
+    throw new Error(`${input.operationName} failed on all candidate paths.`);
+  }
+
   private normalizeQueryResult(payload: unknown, perPage: number): KindfulQueryResult {
     const raw = asObject(payload);
     const records = normalizeRecords(payload);
@@ -404,12 +460,13 @@ export class KindfulApiClient {
     if (Array.isArray(input.customFields) && input.customFields.length > 0) {
       body.custom_fields = input.customFields;
     }
-    const payload = await this.request<Record<string, unknown>>({
+    const response = await this.requestWithPathFallback<Record<string, unknown>>({
       method: "POST",
-      path: this.contactsQueryPath,
-      body
+      paths: [this.contactsQueryPath, "/admin/oauth2/api/v1/contacts/query", "/api/v1/contacts/query"],
+      body,
+      operationName: "Kindful contacts query"
     });
-    return this.normalizeQueryResult(payload, perPage);
+    return this.normalizeQueryResult(response.payload, perPage);
   }
 
   async queryTransactions(input: KindfulQueryInput = {}): Promise<KindfulQueryResult> {
@@ -423,12 +480,17 @@ export class KindfulApiClient {
     if (Array.isArray(input.customFields) && input.customFields.length > 0) {
       body.custom_fields = input.customFields;
     }
-    const payload = await this.request<Record<string, unknown>>({
+    const response = await this.requestWithPathFallback<Record<string, unknown>>({
       method: "POST",
-      path: this.transactionsQueryPath,
-      body
+      paths: [
+        this.transactionsQueryPath,
+        "/admin/oauth2/api/v1/transactions/query",
+        "/api/v1/transactions/query"
+      ],
+      body,
+      operationName: "Kindful transactions query"
     });
-    return this.normalizeQueryResult(payload, perPage);
+    return this.normalizeQueryResult(response.payload, perPage);
   }
 
   async queryMetadata(path: string) {
