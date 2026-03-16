@@ -23,7 +23,12 @@ export function validateContactImportPayload(input: {
   const mappedHeaders = new Set(input.mappings.map((mapping) => mapping.sourceHeader));
   if (!mappedHeaders.size) errors.push("No headers were detected in the uploaded file.");
 
-  const requiredFields = CONTACT_STANDARD_FIELDS.filter((field) => field.required);
+  const requiredFieldKeys: string[] =
+    input.classification.contactType === "organization"
+      ? ["organization_name"]
+      : ["first_name", "last_name"];
+
+  const requiredFields = CONTACT_STANDARD_FIELDS.filter((field) => requiredFieldKeys.includes(field.key));
   for (const field of requiredFields) {
     const mapped = input.mappings.find(
       (mapping) => mapping.targetType === "standard" && mapping.targetKey === field.key

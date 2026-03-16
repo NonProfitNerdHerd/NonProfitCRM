@@ -52,6 +52,44 @@ function donorStatusForCategory(category: ContactClassificationInput["contactCat
   return "prospect";
 }
 
+function resolveContactIdentityFields(input: {
+  classification: ContactClassificationInput;
+  standard: Record<string, unknown>;
+}) {
+  const contactType = input.classification.contactType;
+  const mappedOrganizationName = toText(input.standard.organization_name);
+
+  if (contactType === "organization") {
+    if (!mappedOrganizationName) {
+      return {
+        ok: false as const,
+        errorMessage: "Organization Name is required when Contact Type is Organization."
+      };
+    }
+    return {
+      ok: true as const,
+      firstName: mappedOrganizationName,
+      lastName: "(Organization)",
+      organizationName: mappedOrganizationName
+    };
+  }
+
+  const firstName = toText(input.standard.first_name);
+  const lastName = toText(input.standard.last_name);
+  if (!firstName || !lastName) {
+    return {
+      ok: false as const,
+      errorMessage: "First Name and Last Name are required when Contact Type is Person."
+    };
+  }
+  return {
+    ok: true as const,
+    firstName,
+    lastName,
+    organizationName: mappedOrganizationName || null
+  };
+}
+
 async function resolveContactDuplicate(input: {
   organizationId: string;
   row: Record<string, unknown>;
@@ -240,15 +278,17 @@ export async function runContactsImport(input: ContactImportRunInput) {
   for (const [index, row] of input.rows.entries()) {
     try {
       const mapped = mapRowToTargets(row, input.mappings);
-      const firstName = toText(mapped.standard.first_name);
-      const lastName = toText(mapped.standard.last_name);
-      if (!firstName || !lastName) {
+      const identity = resolveContactIdentityFields({
+        classification: input.classification,
+        standard: mapped.standard
+      });
+      if (!identity.ok) {
         skippedRows += 1;
         await appendImportCenterRowError({
           organizationId: context.organizationId,
           jobId,
           rowIndex: index + 1,
-          errorMessage: "First Name and Last Name are required.",
+          errorMessage: identity.errorMessage,
           rawRow: row
         });
         continue;
@@ -277,13 +317,10 @@ export async function runContactsImport(input: ContactImportRunInput) {
 
       const contactPayload = {
         organization_id: context.organizationId,
-        first_name: firstName,
-        last_name: lastName,
+        first_name: identity.firstName,
+        last_name: identity.lastName,
         preferred_name: toText(mapped.standard.preferred_name) || null,
-        organization_name:
-          input.classification.contactType === "organization"
-            ? toText(mapped.standard.organization_name) || `${firstName} ${lastName}`
-            : toText(mapped.standard.organization_name) || null,
+        organization_name: identity.organizationName,
         entity_type: input.classification.contactType,
         tracking_status: input.classification.contactCategory,
         donor_status: donorStatusForCategory(input.classification.contactCategory),
@@ -513,15 +550,17 @@ export async function processContactsImportChunk(input: {
     const rowIndex = input.rowOffset + index + 1;
     try {
       const mapped = mapRowToTargets(row, input.mappings);
-      const firstName = toText(mapped.standard.first_name);
-      const lastName = toText(mapped.standard.last_name);
-      if (!firstName || !lastName) {
+      const identity = resolveContactIdentityFields({
+        classification: input.classification,
+        standard: mapped.standard
+      });
+      if (!identity.ok) {
         skippedRows += 1;
         await appendImportCenterRowError({
           organizationId: context.organizationId,
           jobId: input.jobId,
           rowIndex,
-          errorMessage: "First Name and Last Name are required.",
+          errorMessage: identity.errorMessage,
           rawRow: row
         });
         continue;
@@ -550,13 +589,10 @@ export async function processContactsImportChunk(input: {
 
       const contactPayload = {
         organization_id: context.organizationId,
-        first_name: firstName,
-        last_name: lastName,
+        first_name: identity.firstName,
+        last_name: identity.lastName,
         preferred_name: toText(mapped.standard.preferred_name) || null,
-        organization_name:
-          input.classification.contactType === "organization"
-            ? toText(mapped.standard.organization_name) || `${firstName} ${lastName}`
-            : toText(mapped.standard.organization_name) || null,
+        organization_name: identity.organizationName,
         entity_type: input.classification.contactType,
         tracking_status: input.classification.contactCategory,
         donor_status: donorStatusForCategory(input.classification.contactCategory),
