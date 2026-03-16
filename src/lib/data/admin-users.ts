@@ -81,6 +81,20 @@ function toFriendlyProvisionError(error: unknown) {
   return message || "Failed to provision user account.";
 }
 
+function isDuplicateAuthEmailError(error: unknown) {
+  const value = error as { message?: string; details?: string; hint?: string; code?: string };
+  const message = [value?.message, value?.details, value?.hint, value?.code]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return (
+    message.includes("already exists in authentication") ||
+    message.includes("already registered") ||
+    message.includes("already exists") ||
+    message.includes("duplicate key")
+  );
+}
+
 function formatDataError(error: unknown, fallback: string) {
   const value = error as { message?: string; details?: string; hint?: string; code?: string };
   const message = [value?.message, value?.details, value?.hint, value?.code]
@@ -256,10 +270,28 @@ export async function createAdminUser(input: {
         display_name: displayName
       }
     });
-    throwIfDataError(createError, "Failed to create auth user.");
-    userId = String(createdUser?.user?.id ?? "");
+    if (createError) {
+      if (!isDuplicateAuthEmailError(createError)) {
+        throw new Error(toFriendlyProvisionError(createError));
+      }
+      const { data: existingUserId, error: lookupError } = await supabase.rpc(
+        "admin_find_auth_user_by_email",
+        {
+          org_id: context.organizationId,
+          user_email: email
+        }
+      );
+      if (lookupError) {
+        throw new Error(toFriendlyProvisionError(lookupError));
+      }
+      userId = String(existingUserId ?? "");
+    } else {
+      userId = String(createdUser?.user?.id ?? "");
+    }
     if (!userId) {
-      throw new Error("Auth user was not returned after creation.");
+      throw new Error(
+        "A user with this email exists in authentication, but no auth user ID could be resolved."
+      );
     }
   } else {
     const { data: fallbackUserId, error: fallbackCreateError } = await supabase.rpc(
