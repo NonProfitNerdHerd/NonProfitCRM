@@ -61,6 +61,19 @@ function toText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function collectExpandableTagIds(nodes: TagNode[]) {
+  const expandableIds: string[] = [];
+  const walk = (node: TagNode) => {
+    const children = node.children ?? [];
+    if (children.length > 0) {
+      expandableIds.push(node.id);
+      for (const child of children) walk(child);
+    }
+  };
+  for (const node of nodes) walk(node);
+  return expandableIds;
+}
+
 export function TagsDashboard({
   initialTree,
   initialTags,
@@ -74,6 +87,7 @@ export function TagsDashboard({
 
   const [tags, setTags] = useState<Array<TagNode>>(initialTags);
   const [tree, setTree] = useState<Array<TagNode>>(initialTree);
+  const [expandedTagIds, setExpandedTagIds] = useState<string[]>(() => collectExpandableTagIds(initialTree));
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -149,6 +163,9 @@ export function TagsDashboard({
     return parentPath ? `${parentPath} > ${name}` : name;
   }, [form.name, form.parentTagId, tagById]);
 
+  const expandableTagIds = useMemo(() => collectExpandableTagIds(tree), [tree]);
+  const expandedTagIdSet = useMemo(() => new Set(expandedTagIds), [expandedTagIds]);
+
   async function loadTaxonomy() {
     setLoadingTaxonomy(true);
     setError(null);
@@ -197,6 +214,10 @@ export function TagsDashboard({
     void loadMappings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  useEffect(() => {
+    setExpandedTagIds(collectExpandableTagIds(tree));
+  }, [tree]);
 
   async function saveTag() {
     setError(null);
@@ -502,7 +523,27 @@ export function TagsDashboard({
 
           <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
             <div className="rounded-md border border-slate-200 p-3">
-              <p className="mb-2 text-sm font-semibold text-slate-900">Hierarchy</p>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-900">Hierarchy</p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setExpandedTagIds(expandableTagIds)}
+                    disabled={expandableTagIds.length === 0}
+                  >
+                    Expand All
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setExpandedTagIds([])}
+                    disabled={expandableTagIds.length === 0}
+                  >
+                    Collapse All
+                  </Button>
+                </div>
+              </div>
               {loadingTaxonomy ? (
                 <p className="text-sm text-slate-500">Loading tags...</p>
               ) : tree.length === 0 ? (
@@ -1070,6 +1111,9 @@ export function TagsDashboard({
   );
 
   function renderTagNode(node: TagNode, depth: number) {
+    const childNodes = node.children ?? [];
+    const hasChildren = childNodes.length > 0;
+    const isExpanded = !hasChildren || expandedTagIdSet.has(node.id);
     return (
       <div key={node.id} className="space-y-1">
         <div
@@ -1077,15 +1121,31 @@ export function TagsDashboard({
           style={{ marginLeft: `${depth * 16}px` }}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <button
-              type="button"
-              className="text-left text-sm"
-              onClick={() => void loadTagUsage(node.id)}
-              title={node.path}
-            >
-              <span className="font-medium text-slate-900">{node.name}</span>
-              <span className="ml-2 text-xs text-slate-500">({node.path})</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-300 text-xs text-slate-700 disabled:cursor-default disabled:opacity-40"
+                aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+                title={isExpanded ? "Collapse" : "Expand"}
+                disabled={!hasChildren}
+                onClick={() =>
+                  setExpandedTagIds((prev) =>
+                    prev.includes(node.id) ? prev.filter((entry) => entry !== node.id) : [...prev, node.id]
+                  )
+                }
+              >
+                {hasChildren ? (isExpanded ? "-" : "+") : " "}
+              </button>
+              <button
+                type="button"
+                className="text-left text-sm"
+                onClick={() => void loadTagUsage(node.id)}
+                title={node.path}
+              >
+                <span className="font-medium text-slate-900">{node.name}</span>
+                <span className="ml-2 text-xs text-slate-500">({node.path})</span>
+              </button>
+            </div>
             <div className="flex flex-wrap items-center gap-1">
               <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
                 Usage {node.usageCount}
@@ -1116,7 +1176,7 @@ export function TagsDashboard({
             </div>
           </div>
         </div>
-        {(node.children ?? []).map((child) => renderTagNode(child, depth + 1))}
+        {hasChildren && isExpanded ? childNodes.map((child) => renderTagNode(child, depth + 1)) : null}
       </div>
     );
   }
