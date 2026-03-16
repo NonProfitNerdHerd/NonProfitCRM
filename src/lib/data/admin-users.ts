@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient, createAdminClientOrNull } from "@/lib/supabase/admin";
+import { createPublicServerClient } from "@/lib/supabase/public-server";
 import {
   requireAdministratorRole,
   requireAnyStaffPermission
@@ -60,6 +61,25 @@ async function getAllowedRoles(organizationId: string) {
 function validateRoleIds(roles: string[], roleRows: RoleTemplateRow[]) {
   const set = new Set(roleRows.map((row) => row.id));
   return roles.filter((roleId) => set.has(roleId));
+}
+
+function displayNameFromInput(input: { displayName: string; firstName: string; lastName: string }) {
+  return input.displayName || `${input.firstName} ${input.lastName}`.trim();
+}
+
+function toFriendlyProvisionError(error: unknown) {
+  const value = error as { message?: string; details?: string; hint?: string; code?: string };
+  const message = [value?.message, value?.details, value?.hint, value?.code]
+    .filter(Boolean)
+    .join(" ");
+  const lower = message.toLowerCase();
+  if (lower.includes("already registered") || lower.includes("already exists")) {
+    return "A user with this email already exists in authentication.";
+  }
+  if (lower.includes("email") && lower.includes("disabled")) {
+    return "Email/password signup is currently disabled for this environment.";
+  }
+  return message || "Failed to provision user account.";
 }
 
 export async function listAdminUsersData() {
@@ -201,7 +221,8 @@ export async function createAdminUser(input: {
   roleTemplateIds: string[];
 }) {
   const context = await requireAdministratorRole();
-  const adminClient = createAdminClient();
+  const adminClient = createAdminClientOrNull();
+  const supabase = await createClient();
   const roles = await getAllowedRoles(context.organizationId);
   const email = input.email.trim();
   if (!email) {
@@ -212,25 +233,47 @@ export async function createAdminUser(input: {
     throw new Error("At least one valid role is required.");
   }
   const temporaryPassword = generateTemporaryPassword();
-
-  const { data: createdUser, error: createError } = await adminClient.auth.admin.createUser({
-    email,
-    password: temporaryPassword,
-    email_confirm: true,
-    user_metadata: {
-      display_name: input.displayName || `${input.firstName} ${input.lastName}`.trim()
+  const displayName = displayNameFromInput(input);
+  let userId = "";
+  if (adminClient) {
+    const { data: createdUser, error: createError } = await adminClient.auth.admin.createUser({
+      email,
+      password: temporaryPassword,
+      email_confirm: true,
+      user_metadata: {
+        display_name: displayName
+      }
+    });
+    if (createError) throw createError;
+    userId = createdUser.user.id;
+  } else {
+    const publicAuthClient = createPublicServerClient();
+    const { data: createdUser, error: signUpError } = await publicAuthClient.auth.signUp({
+      email,
+      password: temporaryPassword,
+      options: {
+        data: { display_name: displayName }
+      }
+    });
+    if (signUpError) {
+      throw new Error(toFriendlyProvisionError(signUpError));
     }
-  });
-  if (createError) throw createError;
+    userId = String(createdUser?.user?.id ?? "");
+    if (!userId) {
+      throw new Error(
+        "Unable to provision user account without service-role key. Please enable email/password signup or configure SUPABASE_SERVICE_ROLE_KEY."
+      );
+    }
+  }
 
-  const userId = createdUser.user.id;
   const [primaryRoleId, ...additionalRoleIds] = validRoleIds;
 
-  const { error: profileError } = await adminClient.from("profiles").upsert({
-    id: userId,
+  const { error: profileError } = await supabase.rpc("admin_upsert_user_profile", {
+    org_id: context.organizationId,
+    target_user_id: userId,
     first_name: input.firstName,
     last_name: input.lastName,
-    display_name: input.displayName || `${input.firstName} ${input.lastName}`.trim(),
+    display_name: displayName,
     email,
     username: input.username ?? null,
     is_active: input.isActive,
@@ -238,7 +281,7 @@ export async function createAdminUser(input: {
   });
   if (profileError) throw profileError;
 
-  const { error: membershipError } = await adminClient.from("organization_memberships").upsert(
+  const { error: membershipError } = await supabase.from("organization_memberships").upsert(
     {
       organization_id: context.organizationId,
       user_id: userId,
@@ -250,7 +293,7 @@ export async function createAdminUser(input: {
   if (membershipError) throw membershipError;
 
   if (additionalRoleIds.length > 0) {
-    const { error: additionalRolesError } = await adminClient
+    const { error: additionalRolesError } = await supabase
       .from("organization_user_role_assignments")
       .upsert(
         additionalRoleIds.map((roleTemplateId) => ({
@@ -290,7 +333,7 @@ export async function updateAdminUser(input: {
   roleTemplateIds: string[];
 }) {
   const context = await requireAdministratorRole();
-  const adminClient = createAdminClient();
+  const supabase = await createClient();
   const roles = await getAllowedRoles(context.organizationId);
   const validRoleIds = validateRoleIds(input.roleTemplateIds, roles);
   if (validRoleIds.length === 0) {
@@ -299,20 +342,20 @@ export async function updateAdminUser(input: {
 
   const [primaryRoleId, ...additionalRoleIds] = validRoleIds;
 
-  const { error: profileError } = await adminClient
-    .from("profiles")
-    .update({
-      first_name: input.firstName,
-      last_name: input.lastName,
-      display_name: input.displayName || `${input.firstName} ${input.lastName}`.trim(),
-      email: input.email,
-      username: input.username ?? null,
-      is_active: input.isActive
-    })
-    .eq("id", input.userId);
+  const { error: profileError } = await supabase.rpc("admin_upsert_user_profile", {
+    org_id: context.organizationId,
+    target_user_id: input.userId,
+    first_name: input.firstName,
+    last_name: input.lastName,
+    display_name: displayNameFromInput(input),
+    email: input.email.trim(),
+    username: input.username ?? null,
+    is_active: input.isActive,
+    must_change_password: null
+  });
   if (profileError) throw profileError;
 
-  const { error: membershipError } = await adminClient.from("organization_memberships").upsert(
+  const { error: membershipError } = await supabase.from("organization_memberships").upsert(
     {
       organization_id: context.organizationId,
       user_id: input.userId,
@@ -323,7 +366,7 @@ export async function updateAdminUser(input: {
   );
   if (membershipError) throw membershipError;
 
-  const { error: deleteError } = await adminClient
+  const { error: deleteError } = await supabase
     .from("organization_user_role_assignments")
     .delete()
     .eq("organization_id", context.organizationId)
@@ -331,7 +374,7 @@ export async function updateAdminUser(input: {
   if (deleteError) throw deleteError;
 
   if (additionalRoleIds.length > 0) {
-    const { error: insertError } = await adminClient
+    const { error: insertError } = await supabase
       .from("organization_user_role_assignments")
       .insert(
         additionalRoleIds.map((roleTemplateId) => ({
