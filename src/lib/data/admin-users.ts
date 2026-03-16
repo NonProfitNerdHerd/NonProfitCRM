@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, createAdminClientOrNull } from "@/lib/supabase/admin";
-import { createPublicServerClient } from "@/lib/supabase/public-server";
 import {
   requireAdministratorRole,
   requireAnyStaffPermission
@@ -263,21 +262,22 @@ export async function createAdminUser(input: {
       throw new Error("Auth user was not returned after creation.");
     }
   } else {
-    const publicAuthClient = createPublicServerClient();
-    const { data: createdUser, error: signUpError } = await publicAuthClient.auth.signUp({
-      email,
-      password: temporaryPassword,
-      options: {
-        data: { display_name: displayName }
+    const { data: fallbackUserId, error: fallbackCreateError } = await supabase.rpc(
+      "admin_create_auth_user",
+      {
+        org_id: context.organizationId,
+        user_email: email,
+        user_password: temporaryPassword,
+        user_metadata: { display_name: displayName }
       }
-    });
-    if (signUpError) {
-      throw new Error(toFriendlyProvisionError(signUpError));
+    );
+    if (fallbackCreateError) {
+      throw new Error(toFriendlyProvisionError(fallbackCreateError));
     }
-    userId = String(createdUser?.user?.id ?? "");
+    userId = String(fallbackUserId ?? "");
     if (!userId) {
       throw new Error(
-        "Unable to provision user account without service-role key. Please enable email/password signup or configure SUPABASE_SERVICE_ROLE_KEY."
+        "Unable to provision authentication user via SQL fallback. Please configure SUPABASE_SERVICE_ROLE_KEY or verify admin_create_auth_user migration."
       );
     }
   }
@@ -418,10 +418,11 @@ export async function updateAdminUser(input: {
 
 export async function resetAdminUserPassword(userId: string) {
   const context = await requireAdministratorRole();
-  const adminClient = createAdminClient();
+  const adminClient = createAdminClientOrNull();
+  const supabase = await createClient();
   const temporaryPassword = generateTemporaryPassword();
 
-  const { data: membership, error: membershipError } = await adminClient
+  const { data: membership, error: membershipError } = await supabase
     .from("organization_memberships")
     .select("user_id")
     .eq("organization_id", context.organizationId)
@@ -432,12 +433,21 @@ export async function resetAdminUserPassword(userId: string) {
     throw new Error("User is not a member of this organization.");
   }
 
-  const { error: resetError } = await adminClient.auth.admin.updateUserById(userId, {
-    password: temporaryPassword
-  });
-  throwIfDataError(resetError, "Failed to reset user password.");
+  if (adminClient) {
+    const { error: resetError } = await adminClient.auth.admin.updateUserById(userId, {
+      password: temporaryPassword
+    });
+    throwIfDataError(resetError, "Failed to reset user password.");
+  } else {
+    const { error: resetError } = await supabase.rpc("admin_set_auth_user_password", {
+      org_id: context.organizationId,
+      target_user_id: userId,
+      new_password: temporaryPassword
+    });
+    throwIfDataError(resetError, "Failed to reset user password.");
+  }
 
-  const { error: profileError } = await adminClient
+  const { error: profileError } = await supabase
     .from("profiles")
     .update({ must_change_password: true, is_active: true })
     .eq("id", userId);
