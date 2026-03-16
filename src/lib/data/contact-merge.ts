@@ -41,6 +41,26 @@ type RelatedSummary = {
   externalIds: Array<{ sourceSystem: string; externalId: string; externalType: string | null }>;
 };
 
+type MergeCandidateContact = {
+  id: string;
+  fullName: string;
+  organizationName: string | null;
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  state: string | null;
+  address: string | null;
+};
+
+type SuggestedDuplicateGroup = {
+  groupId: string;
+  groupType: "email" | "phone" | "name" | "address";
+  title: string;
+  normalizedValue: string;
+  duplicateCount: number;
+  contacts: MergeCandidateContact[];
+};
+
 const CONTACT_SELECT = [
   "id",
   "organization_id",
@@ -71,6 +91,24 @@ const CONTACT_SELECT = [
   "external_source_id",
   "is_merged",
   "merged_into_contact_id"
+].join(",");
+
+const SUGGESTION_CONTACT_SELECT = [
+  "id",
+  "first_name",
+  "last_name",
+  "organization_name",
+  "email",
+  "alternate_email",
+  "phone",
+  "alternate_phone",
+  "mobile_number",
+  "address_line_1",
+  "city",
+  "state",
+  "postal_code",
+  "is_merged",
+  "updated_at"
 ].join(",");
 
 const RESOLVABLE_FIELDS = [
@@ -125,6 +163,26 @@ function isFilled(value: unknown) {
 
 function fullName(contact: ContactRecord) {
   return `${text(contact.first_name)} ${text(contact.last_name)}`.trim();
+}
+
+function toCandidateContact(contact: ContactRecord): MergeCandidateContact {
+  return {
+    id: contact.id,
+    fullName: fullName(contact),
+    organizationName: text(contact.organization_name) || null,
+    email: text(contact.email) || null,
+    phone:
+      text(contact.phone) ||
+      text(contact.mobile_number) ||
+      text(contact.alternate_phone) ||
+      null,
+    city: text(contact.city) || null,
+    state: text(contact.state) || null,
+    address:
+      [text(contact.address_line_1), text(contact.city), text(contact.state), text(contact.postal_code)]
+        .filter(Boolean)
+        .join(", ") || null
+  };
 }
 
 function safeArray(input: unknown) {
@@ -417,18 +475,177 @@ export async function listMergeSearchContacts(input: { q: string; limit?: number
 
   const rows = ((data ?? []) as unknown[]) as ContactRecord[];
   const items = rows.map((record) => {
-    return {
-      id: record.id,
-      fullName: fullName(record),
-      organizationName: text(record.organization_name) || null,
-      email: text(record.email) || null,
-      phone: text(record.phone) || null,
-      city: text(record.city) || null,
-      state: text(record.state) || null
-    };
+    return toCandidateContact(record);
   });
 
   return { contacts: items };
+}
+
+function addContactToGroup(map: Map<string, Set<string>>, key: string, contactId: string) {
+  if (!key) return;
+  if (!map.has(key)) map.set(key, new Set<string>());
+  map.get(key)?.add(contactId);
+}
+
+function normalizeNameKey(contact: ContactRecord) {
+  const first = normalizeToken(contact.first_name);
+  const last = normalizeToken(contact.last_name);
+  if (!first || !last) return "";
+  return `${first}|${last}`;
+}
+
+function normalizeAddressKey(contact: ContactRecord) {
+  const line1 = normalizeAddress(contact.address_line_1);
+  const city = normalizeToken(contact.city);
+  const state = normalizeToken(contact.state);
+  const postal = normalizeToken(contact.postal_code);
+  if (!line1) return "";
+  const locality = [city, state, postal].filter(Boolean).join("|");
+  if (!locality) return "";
+  return `${line1}|${locality}`;
+}
+
+function buildSuggestionGroups(input: {
+  contactsById: Map<string, ContactRecord>;
+  groups: Map<string, Set<string>>;
+  groupType: SuggestedDuplicateGroup["groupType"];
+  titlePrefix: string;
+  limitGroups: number;
+}) {
+  const candidates: SuggestedDuplicateGroup[] = [];
+  for (const [normalizedValue, ids] of input.groups.entries()) {
+    if (ids.size < 2) continue;
+    const contacts = Array.from(ids)
+      .map((id) => input.contactsById.get(id))
+      .filter((row): row is ContactRecord => Boolean(row))
+      .map((row) => toCandidateContact(row))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+    if (contacts.length < 2) continue;
+    candidates.push({
+      groupId: `${input.groupType}:${normalizedValue}`,
+      groupType: input.groupType,
+      title: `${input.titlePrefix}: ${normalizedValue}`,
+      normalizedValue,
+      duplicateCount: contacts.length,
+      contacts
+    });
+  }
+  return candidates
+    .sort((a, b) => {
+      if (b.duplicateCount !== a.duplicateCount) return b.duplicateCount - a.duplicateCount;
+      return a.title.localeCompare(b.title);
+    })
+    .slice(0, input.limitGroups);
+}
+
+export async function getSuggestedDuplicateGroups(input?: {
+  limitGroups?: number;
+  maxContactsToScan?: number;
+}) {
+  await requireStaffPermission("can_merge_contacts");
+  const context = await requireStaffPermission("can_view_contacts");
+  const supabase = await createClient();
+
+  const limitGroups = Math.min(Math.max(Number(input?.limitGroups ?? 120), 1), 300);
+  const maxContactsToScan = Math.min(Math.max(Number(input?.maxContactsToScan ?? 30000), 1000), 100000);
+  const pageSize = 1000;
+
+  const scannedContacts: ContactRecord[] = [];
+  let from = 0;
+  while (scannedContacts.length < maxContactsToScan) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("contacts")
+      .select(SUGGESTION_CONTACT_SELECT)
+      .eq("organization_id", context.organizationId)
+      .eq("is_merged", false)
+      .order("updated_at", { ascending: false })
+      .range(from, to);
+    if (error) throw error;
+
+    const pageRows = ((data ?? []) as unknown[]) as ContactRecord[];
+    scannedContacts.push(...pageRows);
+    if (pageRows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  const contactsById = new Map<string, ContactRecord>();
+  const emailGroups = new Map<string, Set<string>>();
+  const phoneGroups = new Map<string, Set<string>>();
+  const nameGroups = new Map<string, Set<string>>();
+  const addressGroups = new Map<string, Set<string>>();
+
+  for (const contact of scannedContacts) {
+    contactsById.set(contact.id, contact);
+
+    const nameKey = normalizeNameKey(contact);
+    if (nameKey) addContactToGroup(nameGroups, nameKey, contact.id);
+
+    const addressKey = normalizeAddressKey(contact);
+    if (addressKey) addContactToGroup(addressGroups, addressKey, contact.id);
+
+    const emails = [normalizeEmail(contact.email), normalizeEmail(contact.alternate_email)].filter(Boolean);
+    for (const email of new Set(emails)) {
+      if (email.includes("@")) addContactToGroup(emailGroups, email, contact.id);
+    }
+
+    const phones = [
+      normalizePhone(contact.phone),
+      normalizePhone(contact.mobile_number),
+      normalizePhone(contact.alternate_phone)
+    ].filter(Boolean);
+    for (const phone of new Set(phones)) {
+      if (phone.length >= 7) addContactToGroup(phoneGroups, phone, contact.id);
+    }
+  }
+
+  const groups = [
+    ...buildSuggestionGroups({
+      contactsById,
+      groups: emailGroups,
+      groupType: "email",
+      titlePrefix: "Duplicate email",
+      limitGroups
+    }),
+    ...buildSuggestionGroups({
+      contactsById,
+      groups: phoneGroups,
+      groupType: "phone",
+      titlePrefix: "Duplicate phone",
+      limitGroups
+    }),
+    ...buildSuggestionGroups({
+      contactsById,
+      groups: nameGroups,
+      groupType: "name",
+      titlePrefix: "Duplicate first + last",
+      limitGroups
+    }),
+    ...buildSuggestionGroups({
+      contactsById,
+      groups: addressGroups,
+      groupType: "address",
+      titlePrefix: "Duplicate address",
+      limitGroups
+    })
+  ]
+    .sort((a, b) => {
+      const weight: Record<SuggestedDuplicateGroup["groupType"], number> = {
+        email: 0,
+        phone: 1,
+        name: 2,
+        address: 3
+      };
+      if (weight[a.groupType] !== weight[b.groupType]) return weight[a.groupType] - weight[b.groupType];
+      if (b.duplicateCount !== a.duplicateCount) return b.duplicateCount - a.duplicateCount;
+      return a.title.localeCompare(b.title);
+    })
+    .slice(0, limitGroups);
+
+  return {
+    scannedContactCount: scannedContacts.length,
+    groups
+  };
 }
 
 export async function getDuplicateCandidates(input: {
@@ -466,16 +683,7 @@ export async function getDuplicateCandidates(input: {
       .map((candidate) => {
         const result = scorePotentialDuplicate(base, candidate);
         return {
-          duplicateContact: {
-            id: candidate.id,
-            fullName: fullName(candidate),
-            email: text(candidate.email) || null,
-            phone: text(candidate.phone) || null,
-            address: [text(candidate.address_line_1), text(candidate.city), text(candidate.state)]
-              .filter(Boolean)
-              .join(", "),
-            organizationName: text(candidate.organization_name) || null
-          },
+          duplicateContact: toCandidateContact(candidate),
           score: result.score,
           matchReasons: result.reasons
         };
@@ -486,14 +694,7 @@ export async function getDuplicateCandidates(input: {
 
     return {
       sourceContact: {
-        id: base.id,
-        fullName: fullName(base),
-        email: text(base.email) || null,
-        phone: text(base.phone) || null,
-        address: [text(base.address_line_1), text(base.city), text(base.state)]
-          .filter(Boolean)
-          .join(", "),
-        organizationName: text(base.organization_name) || null
+        ...toCandidateContact(base)
       },
       candidates: ranked,
       searchContacts: []

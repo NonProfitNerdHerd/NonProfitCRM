@@ -2,19 +2,22 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   getDuplicateCandidates,
+  getSuggestedDuplicateGroups,
   isContactMergeSchemaMissingError
 } from "@/lib/data/contact-merge";
 
 const querySchema = z.object({
+  mode: z.enum(["suggested", "by_contact", "search"]).optional(),
   contactId: z.string().uuid().optional(),
   q: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional()
+  limit: z.coerce.number().int().min(1).max(300).optional()
 });
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const parsed = querySchema.safeParse({
+      mode: searchParams.get("mode") ?? undefined,
       contactId: searchParams.get("contactId") ?? undefined,
       q: searchParams.get("q") ?? undefined,
       limit: searchParams.get("limit") ?? undefined
@@ -26,9 +29,20 @@ export async function GET(request: Request) {
       );
     }
 
-    if (!parsed.data.contactId && !parsed.data.q) {
+    const mode = parsed.data.mode ?? "suggested";
+    if (mode === "suggested" && !parsed.data.contactId && !parsed.data.q) {
+      const result = await getSuggestedDuplicateGroups({
+        limitGroups: parsed.data.limit
+      });
+      return NextResponse.json(result);
+    }
+
+    if (mode === "search" && !parsed.data.q) {
+      return NextResponse.json({ message: "Provide q parameter for search mode." }, { status: 400 });
+    }
+    if (mode === "by_contact" && !parsed.data.contactId) {
       return NextResponse.json(
-        { message: "Provide either contactId or q parameter." },
+        { message: "Provide contactId parameter for by_contact mode." },
         { status: 400 }
       );
     }

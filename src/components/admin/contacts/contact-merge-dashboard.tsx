@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -12,11 +12,19 @@ type ContactOption = {
   phone: string | null;
   city: string | null;
   state: string | null;
+  address: string | null;
 };
 
-type MergePreviewContact = Record<string, unknown> & {
-  id: string;
+type SuggestedGroup = {
+  groupId: string;
+  groupType: "email" | "phone" | "name" | "address";
+  title: string;
+  normalizedValue: string;
+  duplicateCount: number;
+  contacts: ContactOption[];
 };
+
+type MergePreviewContact = Record<string, unknown> & { id: string };
 
 type MergePreview = {
   master: MergePreviewContact;
@@ -57,7 +65,7 @@ type MergeHistoryItem = {
   reassigned_counts: Record<string, unknown>;
 };
 
-const FIELD_CONFIG: Array<{ key: string; label: string; multiline?: boolean }> = [
+const FIELD_CONFIG: Array<{ key: string; label: string }> = [
   { key: "first_name", label: "First Name" },
   { key: "last_name", label: "Last Name" },
   { key: "preferred_name", label: "Preferred Name" },
@@ -77,7 +85,7 @@ const FIELD_CONFIG: Array<{ key: string; label: string; multiline?: boolean }> =
   { key: "mailing_city", label: "Mailing City" },
   { key: "mailing_state", label: "Mailing State" },
   { key: "mailing_postal_code", label: "Mailing Postal Code" },
-  { key: "formal_letter_name", label: "Formal Letter Name", multiline: true }
+  { key: "formal_letter_name", label: "Formal Letter Name" }
 ];
 
 function text(value: unknown) {
@@ -85,13 +93,14 @@ function text(value: unknown) {
 }
 
 function displayContactLabel(contact: ContactOption) {
-  const parts = [
+  return [
     contact.fullName || "Unnamed Contact",
     contact.organizationName,
     contact.email,
     contact.phone
-  ].filter(Boolean);
-  return parts.join(" • ");
+  ]
+    .filter(Boolean)
+    .join(" • ");
 }
 
 function formatDate(value: string) {
@@ -107,142 +116,154 @@ export function ContactMergeDashboard({
   initialHistory: MergeHistoryItem[];
   initialWarning?: string | null;
 }) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<ContactOption[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"merge" | "history">("merge");
+  const [history, setHistory] = useState<MergeHistoryItem[]>(initialHistory);
+  const [error, setError] = useState<string | null>(initialWarning ?? null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+
+  const [groups, setGroups] = useState<SuggestedGroup[]>([]);
+  const [groupLoading, setGroupLoading] = useState(false);
+  const [groupTypeFilter, setGroupTypeFilter] = useState<"all" | "email" | "phone" | "name" | "address">(
+    "all"
+  );
+  const [groupQuery, setGroupQuery] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [scannedContactCount, setScannedContactCount] = useState(0);
 
   const [masterContactId, setMasterContactId] = useState("");
-  const [duplicateContactId, setDuplicateContactId] = useState("");
-  const [candidateList, setCandidateList] = useState<
-    Array<{
-      duplicateContact: ContactOption;
-      score: number;
-      matchReasons: string[];
-    }>
-  >([]);
+  const [selectedDuplicateIds, setSelectedDuplicateIds] = useState<string[]>([]);
+  const [previewByDuplicate, setPreviewByDuplicate] = useState<Record<string, MergePreview>>({});
+  const [resolvedByDuplicate, setResolvedByDuplicate] = useState<Record<string, Record<string, unknown>>>({});
+  const [activePreviewDuplicateId, setActivePreviewDuplicateId] = useState("");
 
-  const [preview, setPreview] = useState<MergePreview | null>(null);
-  const [resolvedFields, setResolvedFields] = useState<Record<string, unknown>>({});
-  const [working, setWorking] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(initialWarning ?? null);
+  const filteredGroups = useMemo(() => {
+    return groups.filter((group) => {
+      if (groupTypeFilter !== "all" && group.groupType !== groupTypeFilter) return false;
+      if (!groupQuery.trim()) return true;
+      const q = groupQuery.trim().toLowerCase();
+      return group.title.toLowerCase().includes(q) || group.normalizedValue.toLowerCase().includes(q);
+    });
+  }, [groups, groupTypeFilter, groupQuery]);
 
-  const [history, setHistory] = useState<MergeHistoryItem[]>(initialHistory);
-  const [activeTab, setActiveTab] = useState<"merge" | "history">("merge");
-
-  const selectedMaster = useMemo(
-    () => searchResults.find((contact) => contact.id === masterContactId) ?? null,
-    [masterContactId, searchResults]
-  );
-  const selectedDuplicate = useMemo(
-    () => searchResults.find((contact) => contact.id === duplicateContactId) ?? null,
-    [duplicateContactId, searchResults]
+  const selectedGroup = useMemo(
+    () => filteredGroups.find((group) => group.groupId === selectedGroupId) ?? null,
+    [filteredGroups, selectedGroupId]
   );
 
-  async function searchContacts() {
-    setSearchLoading(true);
-    setSearchError(null);
-    const response = await fetch(
-      `/api/admin/contacts/merge/candidates?q=${encodeURIComponent(searchQuery.trim())}&limit=30`
-    );
+  const activePreview = activePreviewDuplicateId
+    ? (previewByDuplicate[activePreviewDuplicateId] ?? null)
+    : null;
+
+  async function loadSuggestedGroups() {
+    setGroupLoading(true);
+    setError(null);
+    const response = await fetch("/api/admin/contacts/merge/candidates?mode=suggested&limit=200");
     const payload = await response.json().catch(() => null);
-    setSearchLoading(false);
+    setGroupLoading(false);
     if (!response.ok) {
-      setSearchError(payload?.message ?? "Unable to search contacts.");
+      setError(payload?.message ?? "Unable to load suggested duplicate groups.");
       return;
     }
-    setSearchResults((payload?.searchContacts ?? []) as ContactOption[]);
+    const nextGroups = (payload?.groups ?? []) as SuggestedGroup[];
+    setGroups(nextGroups);
+    setScannedContactCount(Number(payload?.scannedContactCount ?? 0));
+
+    if (!selectedGroupId && nextGroups.length > 0) {
+      const firstGroup = nextGroups[0];
+      setSelectedGroupId(firstGroup.groupId);
+      setMasterContactId(firstGroup.contacts[0]?.id ?? "");
+      const remaining = firstGroup.contacts.slice(1).map((contact) => contact.id);
+      setSelectedDuplicateIds(remaining);
+    }
   }
 
-  async function loadDuplicateCandidates() {
-    if (!masterContactId) return;
+  useEffect(() => {
+    void loadSuggestedGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!selectedGroup) return;
+    if (!selectedGroup.contacts.some((contact) => contact.id === masterContactId)) {
+      setMasterContactId(selectedGroup.contacts[0]?.id ?? "");
+    }
+  }, [selectedGroup, masterContactId]);
+
+  useEffect(() => {
+    if (!selectedGroup || !masterContactId) return;
+    const allowed = new Set(
+      selectedGroup.contacts.filter((contact) => contact.id !== masterContactId).map((contact) => contact.id)
+    );
+    setSelectedDuplicateIds((prev) => prev.filter((id) => allowed.has(id)));
+  }, [selectedGroup, masterContactId]);
+
+  function setGroupSelection(group: SuggestedGroup) {
+    setSelectedGroupId(group.groupId);
+    setMasterContactId(group.contacts[0]?.id ?? "");
+    setSelectedDuplicateIds(group.contacts.slice(1).map((contact) => contact.id));
+    setPreviewByDuplicate({});
+    setResolvedByDuplicate({});
+    setActivePreviewDuplicateId("");
+    setMessage(null);
+    setError(null);
+  }
+
+  function toggleDuplicate(id: string) {
+    setSelectedDuplicateIds((prev) =>
+      prev.includes(id) ? prev.filter((entry) => entry !== id) : [...prev, id]
+    );
+  }
+
+  async function buildPreviewsForSelection() {
+    if (!masterContactId || selectedDuplicateIds.length === 0) return;
     setWorking(true);
     setError(null);
     setMessage(null);
-    const response = await fetch(
-      `/api/admin/contacts/merge/candidates?contactId=${encodeURIComponent(masterContactId)}&limit=20`
-    );
-    const payload = await response.json().catch(() => null);
-    setWorking(false);
-    if (!response.ok) {
-      setError(payload?.message ?? "Unable to find duplicate candidates.");
-      return;
+
+    const nextPreviews: Record<string, MergePreview> = {};
+    const nextResolved: Record<string, Record<string, unknown>> = {};
+    const failed: string[] = [];
+
+    for (const duplicateId of selectedDuplicateIds) {
+      const response = await fetch("/api/admin/contacts/merge/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ masterContactId, duplicateContactId: duplicateId })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        failed.push(duplicateId);
+        continue;
+      }
+      const preview = payload as MergePreview;
+      nextPreviews[duplicateId] = preview;
+      nextResolved[duplicateId] = preview.suggestedResolution ?? {};
     }
-    const candidates = (payload?.candidates ?? []) as Array<{
-      duplicateContact: ContactOption;
-      score: number;
-      matchReasons: string[];
-    }>;
-    setCandidateList(candidates);
-    setMessage(`Found ${candidates.length} likely duplicate candidates.`);
+
+    setPreviewByDuplicate(nextPreviews);
+    setResolvedByDuplicate(nextResolved);
+    const firstPreviewId = Object.keys(nextPreviews)[0] ?? "";
+    setActivePreviewDuplicateId(firstPreviewId);
+    setWorking(false);
+
+    if (failed.length > 0) {
+      setError(
+        `Built ${Object.keys(nextPreviews).length} preview(s). ${failed.length} duplicate(s) could not be previewed.`
+      );
+    } else {
+      setMessage(`Built ${Object.keys(nextPreviews).length} merge preview(s).`);
+    }
   }
 
-  async function buildPreview() {
-    if (!masterContactId || !duplicateContactId) return;
-    setWorking(true);
-    setError(null);
-    setMessage(null);
-    const response = await fetch("/api/admin/contacts/merge/preview", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        masterContactId,
-        duplicateContactId
-      })
-    });
-    const payload = await response.json().catch(() => null);
-    setWorking(false);
-    if (!response.ok) {
-      setError(payload?.message ?? "Unable to build merge preview.");
-      return;
-    }
-    const nextPreview = payload as MergePreview;
-    setPreview(nextPreview);
-    setResolvedFields(nextPreview.suggestedResolution ?? {});
-  }
-
-  function setResolvedValue(field: string, value: unknown) {
-    setResolvedFields((prev) => ({ ...prev, [field]: value }));
-  }
-
-  async function executeMerge() {
-    if (!preview) return;
-    const proceed = window.confirm(
-      "Confirm merge? This will mark the duplicate as merged and reassign all related records."
-    );
-    if (!proceed) return;
-
-    setWorking(true);
-    setError(null);
-    setMessage(null);
-    const response = await fetch("/api/admin/contacts/merge/execute", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        masterContactId: preview.master.id,
-        duplicateContactId: preview.duplicate.id,
-        resolvedFieldMap: resolvedFields,
-        actionSource: "admin_merge_dashboard"
-      })
-    });
-    const payload = await response.json().catch(() => null);
-    setWorking(false);
-    if (!response.ok) {
-      setError(payload?.message ?? "Unable to execute merge.");
-      return;
-    }
-
-    setMessage("Contact merge completed successfully.");
-    setPreview(null);
-    setCandidateList([]);
-    setDuplicateContactId("");
-
-    const historyResponse = await fetch("/api/admin/contacts/merge/history?limit=50");
-    const historyPayload = await historyResponse.json().catch(() => null);
-    if (historyResponse.ok) {
-      setHistory((historyPayload?.items ?? []) as MergeHistoryItem[]);
-    }
+  function setResolvedValue(duplicateId: string, field: string, value: unknown) {
+    setResolvedByDuplicate((prev) => ({
+      ...prev,
+      [duplicateId]: {
+        ...(prev[duplicateId] ?? {}),
+        [field]: value
+      }
+    }));
   }
 
   async function refreshHistory() {
@@ -253,6 +274,53 @@ export function ContactMergeDashboard({
       return;
     }
     setHistory((payload?.items ?? []) as MergeHistoryItem[]);
+  }
+
+  async function executeSelectedMerges() {
+    const previewEntries = Object.entries(previewByDuplicate);
+    if (!masterContactId || previewEntries.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Merge ${previewEntries.length} selected duplicate contact(s) into the master record?`
+    );
+    if (!confirmed) return;
+
+    setWorking(true);
+    setError(null);
+    setMessage(null);
+
+    let successCount = 0;
+    const failed: string[] = [];
+    for (const [duplicateId] of previewEntries) {
+      const response = await fetch("/api/admin/contacts/merge/execute", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          masterContactId,
+          duplicateContactId: duplicateId,
+          resolvedFieldMap: resolvedByDuplicate[duplicateId] ?? {},
+          actionSource: "admin_merge_dashboard_batch"
+        })
+      });
+      if (response.ok) {
+        successCount += 1;
+      } else {
+        failed.push(duplicateId);
+      }
+    }
+
+    setWorking(false);
+    await Promise.all([loadSuggestedGroups(), refreshHistory()]);
+    setPreviewByDuplicate({});
+    setResolvedByDuplicate({});
+    setActivePreviewDuplicateId("");
+    setSelectedDuplicateIds([]);
+
+    if (failed.length > 0) {
+      setError(`Merged ${successCount} duplicate(s), but ${failed.length} merge(s) failed.`);
+    } else {
+      setMessage(`Successfully merged ${successCount} duplicate contact(s).`);
+    }
   }
 
   return (
@@ -325,247 +393,260 @@ export function ContactMergeDashboard({
         </div>
       ) : (
         <div className="space-y-4">
-          <section className="space-y-2 rounded-md border border-slate-200 p-3">
-            <p className="text-sm font-semibold text-slate-900">1) Search Contacts</p>
-            <div className="flex gap-2">
+          <section className="space-y-3 rounded-md border border-slate-200 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-900">
+                1) Suggested duplicate groups (scanned {scannedContactCount} contacts)
+              </p>
+              <Button type="button" variant="secondary" onClick={() => void loadSuggestedGroups()} disabled={groupLoading}>
+                {groupLoading ? "Refreshing..." : "Refresh suggestions"}
+              </Button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-[1fr_auto]">
               <Input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search by name, email, phone, or organization"
+                value={groupQuery}
+                onChange={(event) => setGroupQuery(event.target.value)}
+                placeholder="Filter suggested groups"
               />
-              <Button type="button" variant="secondary" onClick={() => void searchContacts()} disabled={searchLoading}>
-                {searchLoading ? "Searching..." : "Search"}
-              </Button>
-            </div>
-            {searchError ? <p className="text-xs text-rose-600">{searchError}</p> : null}
-          </section>
-
-          <section className="space-y-2 rounded-md border border-slate-200 p-3">
-            <p className="text-sm font-semibold text-slate-900">2) Pick Master and Duplicate</p>
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="space-y-1 text-xs text-slate-600">
-                Master Contact (survives)
-                <select
-                  className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                  value={masterContactId}
-                  onChange={(event) => setMasterContactId(event.target.value)}
-                >
-                  <option value="">Select master contact</option>
-                  {searchResults.map((contact) => (
-                    <option key={`master-${contact.id}`} value={contact.id}>
-                      {displayContactLabel(contact)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-xs text-slate-600">
-                Duplicate Contact (merged into master)
-                <select
-                  className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                  value={duplicateContactId}
-                  onChange={(event) => setDuplicateContactId(event.target.value)}
-                >
-                  <option value="">Select duplicate contact</option>
-                  {searchResults
-                    .filter((contact) => contact.id !== masterContactId)
-                    .map((contact) => (
-                      <option key={`dup-${contact.id}`} value={contact.id}>
-                        {displayContactLabel(contact)}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={() => void loadDuplicateCandidates()} disabled={working || !masterContactId}>
-                Find Likely Duplicates
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void buildPreview()}
-                disabled={working || !masterContactId || !duplicateContactId}
+              <select
+                className="rounded-md border border-slate-300 px-2 py-2 text-sm"
+                value={groupTypeFilter}
+                onChange={(event) =>
+                  setGroupTypeFilter(
+                    event.target.value as "all" | "email" | "phone" | "name" | "address"
+                  )
+                }
               >
-                {working ? "Working..." : "Build Merge Preview"}
-              </Button>
+                <option value="all">All match types</option>
+                <option value="email">Duplicate email</option>
+                <option value="phone">Duplicate phone</option>
+                <option value="name">Duplicate first + last</option>
+                <option value="address">Duplicate address</option>
+              </select>
             </div>
 
-            {candidateList.length > 0 ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-2">
-                <p className="mb-1 text-xs font-semibold text-amber-800">
-                  Suggested duplicates for selected master:
-                </p>
-                <div className="space-y-1">
-                  {candidateList.map((entry) => (
+            <div className="max-h-60 overflow-auto rounded-md border border-slate-200">
+              {filteredGroups.length === 0 ? (
+                <p className="px-3 py-3 text-sm text-slate-500">No duplicate groups found.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {filteredGroups.map((group) => (
                     <button
-                      key={entry.duplicateContact.id}
+                      key={group.groupId}
                       type="button"
-                      onClick={() => setDuplicateContactId(entry.duplicateContact.id)}
-                      className={`w-full rounded border px-2 py-1 text-left text-xs ${
-                        duplicateContactId === entry.duplicateContact.id
-                          ? "border-brand-300 bg-white"
-                          : "border-amber-200 bg-white/70 hover:bg-white"
+                      onClick={() => setGroupSelection(group)}
+                      className={`w-full px-3 py-2 text-left text-sm ${
+                        selectedGroupId === group.groupId ? "bg-brand-50" : "hover:bg-slate-50"
                       }`}
                     >
-                      <div className="font-medium text-slate-800">
-                        {displayContactLabel(entry.duplicateContact)} (score {entry.score})
-                      </div>
-                      <div className="text-slate-600">{entry.matchReasons.join(" • ")}</div>
+                      <p className="font-medium text-slate-800">{group.title}</p>
+                      <p className="text-xs text-slate-600">
+                        {group.duplicateCount} contacts • type: {group.groupType}
+                      </p>
                     </button>
                   ))}
                 </div>
-              </div>
-            ) : null}
+              )}
+            </div>
           </section>
 
-          {preview ? (
+          {selectedGroup ? (
             <section className="space-y-3 rounded-md border border-slate-200 p-3">
-              <p className="text-sm font-semibold text-slate-900">3) Resolve Fields and Review Impact</p>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-md border border-slate-200 p-2">
-                  <p className="text-xs font-semibold text-slate-700">Master Contact</p>
-                  <p className="text-sm text-slate-800">{text(preview.master.first_name)} {text(preview.master.last_name)}</p>
-                  <p className="text-xs text-slate-600">{text(preview.master.email) || "No email"}</p>
-                </div>
-                <div className="rounded-md border border-slate-200 p-2">
-                  <p className="text-xs font-semibold text-slate-700">Duplicate Contact</p>
-                  <p className="text-sm text-slate-800">{text(preview.duplicate.first_name)} {text(preview.duplicate.last_name)}</p>
-                  <p className="text-xs text-slate-600">{text(preview.duplicate.email) || "No email"}</p>
-                </div>
+              <p className="text-sm font-semibold text-slate-900">
+                2) Choose master + duplicates from selected group
+              </p>
+
+              <div className="space-y-1 rounded-md border border-slate-200 p-2">
+                {selectedGroup.contacts.map((contact) => (
+                  <label
+                    key={contact.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-transparent px-2 py-1 hover:bg-slate-50"
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="merge-master-contact"
+                        checked={masterContactId === contact.id}
+                        onChange={() => setMasterContactId(contact.id)}
+                      />
+                      <span className="text-sm text-slate-800">{displayContactLabel(contact)}</span>
+                    </span>
+                    <span className="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={selectedDuplicateIds.includes(contact.id)}
+                        disabled={masterContactId === contact.id}
+                        onChange={() => toggleDuplicate(contact.id)}
+                      />
+                      Select duplicate
+                    </span>
+                  </label>
+                ))}
               </div>
 
-              {preview.conflicts.length > 0 ? (
-                <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  {preview.conflicts.length} conflicting fields detected. Resolve each value below before merging.
-                </p>
-              ) : null}
-
-              <div className="overflow-auto rounded-md border border-slate-200">
-                <table className="min-w-full divide-y divide-slate-200 text-xs">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-2 py-2 text-left font-semibold text-slate-700">Field</th>
-                      <th className="px-2 py-2 text-left font-semibold text-slate-700">Master Value</th>
-                      <th className="px-2 py-2 text-left font-semibold text-slate-700">Duplicate Value</th>
-                      <th className="px-2 py-2 text-left font-semibold text-slate-700">Final Value</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {FIELD_CONFIG.map((field) => (
-                      <tr key={field.key}>
-                        <td className="px-2 py-2 align-top font-medium text-slate-700">{field.label}</td>
-                        <td className="px-2 py-2 align-top">
-                          <button
-                            type="button"
-                            className="text-left text-slate-700 underline-offset-2 hover:underline"
-                            onClick={() => setResolvedValue(field.key, preview.master[field.key] ?? "")}
-                          >
-                            {text(preview.master[field.key]) || "—"}
-                          </button>
-                        </td>
-                        <td className="px-2 py-2 align-top">
-                          <button
-                            type="button"
-                            className="text-left text-slate-700 underline-offset-2 hover:underline"
-                            onClick={() => setResolvedValue(field.key, preview.duplicate[field.key] ?? "")}
-                          >
-                            {text(preview.duplicate[field.key]) || "—"}
-                          </button>
-                        </td>
-                        <td className="px-2 py-2 align-top">
-                          <Input
-                            value={text(resolvedFields[field.key])}
-                            onChange={(event) => setResolvedValue(field.key, event.target.value)}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <label className="block space-y-1 text-xs text-slate-600">
-                Communication Preferences (comma separated)
-                <Input
-                  value={
-                    Array.isArray(resolvedFields.communication_preferences)
-                      ? (resolvedFields.communication_preferences as unknown[]).map((entry) => text(entry)).join(", ")
-                      : text(resolvedFields.communication_preferences)
-                  }
-                  onChange={(event) =>
-                    setResolvedValue(
-                      "communication_preferences",
-                      event.target.value
-                        .split(",")
-                        .map((entry) => entry.trim())
-                        .filter(Boolean)
-                    )
-                  }
-                />
-              </label>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <details className="rounded-md border border-slate-200 p-2">
-                  <summary className="cursor-pointer text-xs font-semibold text-slate-700">
-                    Related data summary
-                  </summary>
-                  <ul className="mt-2 space-y-1 text-xs text-slate-700">
-                    <li>Master notes: {preview.related.master.notesCount}</li>
-                    <li>Duplicate notes (reassigned): {preview.related.duplicate.notesCount}</li>
-                    <li>Master tasks: {preview.related.master.tasksCount}</li>
-                    <li>Duplicate tasks (reassigned): {preview.related.duplicate.tasksCount}</li>
-                    <li>Master donations: {preview.related.master.donationsCount}</li>
-                    <li>Duplicate donations (reassigned): {preview.related.duplicate.donationsCount}</li>
-                    <li>Duplicate tags added: {preview.related.duplicate.tags.length}</li>
-                    <li>Duplicate external IDs preserved: {preview.related.duplicate.externalIds.length}</li>
-                  </ul>
-                </details>
-                <details className="rounded-md border border-slate-200 p-2">
-                  <summary className="cursor-pointer text-xs font-semibold text-slate-700">
-                    Tags and external IDs
-                  </summary>
-                  <div className="mt-2 space-y-2 text-xs text-slate-700">
-                    <div>
-                      <p className="font-semibold">Duplicate tags</p>
-                      <ul className="list-disc pl-4">
-                        {preview.related.duplicate.tags.length === 0 ? (
-                          <li>None</li>
-                        ) : (
-                          preview.related.duplicate.tags.map((tag) => <li key={tag.id}>{tag.path}</li>)
-                        )}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="font-semibold">Duplicate external IDs</p>
-                      <ul className="list-disc pl-4">
-                        {preview.related.duplicate.externalIds.length === 0 ? (
-                          <li>None</li>
-                        ) : (
-                          preview.related.duplicate.externalIds.map((item) => (
-                            <li key={`${item.sourceSystem}:${item.externalId}`}>
-                              {item.sourceSystem}:{item.externalId}
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </div>
-                  </div>
-                </details>
-              </div>
-
-              <div className="flex justify-end">
-                <Button type="button" onClick={() => void executeMerge()} disabled={working}>
-                  {working ? "Merging..." : "Confirm Merge"}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void buildPreviewsForSelection()}
+                  disabled={working || !masterContactId || selectedDuplicateIds.length === 0}
+                >
+                  {working ? "Building..." : `Build Preview (${selectedDuplicateIds.length})`}
                 </Button>
               </div>
             </section>
           ) : null}
 
-          {(selectedMaster || selectedDuplicate) && !preview ? (
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
-              <p className="font-semibold">Selected pair</p>
-              <p>Master: {selectedMaster ? displayContactLabel(selectedMaster) : "Not selected"}</p>
-              <p>Duplicate: {selectedDuplicate ? displayContactLabel(selectedDuplicate) : "Not selected"}</p>
-            </div>
+          {Object.keys(previewByDuplicate).length > 0 ? (
+            <section className="space-y-3 rounded-md border border-slate-200 p-3">
+              <p className="text-sm font-semibold text-slate-900">
+                3) Review multiple previews and resolve final values
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(previewByDuplicate).map(([duplicateId, preview]) => (
+                  <button
+                    key={duplicateId}
+                    type="button"
+                    onClick={() => setActivePreviewDuplicateId(duplicateId)}
+                    className={`rounded-md border px-2 py-1 text-xs ${
+                      duplicateId === activePreviewDuplicateId
+                        ? "border-brand-300 bg-brand-50 text-brand-700"
+                        : "border-slate-300 bg-white text-slate-700"
+                    }`}
+                  >
+                    {text(preview.duplicate.first_name)} {text(preview.duplicate.last_name)}
+                  </button>
+                ))}
+              </div>
+
+              {activePreview ? (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-md border border-slate-200 p-2">
+                      <p className="text-xs font-semibold text-slate-700">Master Contact</p>
+                      <p className="text-sm text-slate-800">
+                        {text(activePreview.master.first_name)} {text(activePreview.master.last_name)}
+                      </p>
+                      <p className="text-xs text-slate-600">{text(activePreview.master.email) || "No email"}</p>
+                    </div>
+                    <div className="rounded-md border border-slate-200 p-2">
+                      <p className="text-xs font-semibold text-slate-700">Duplicate Contact</p>
+                      <p className="text-sm text-slate-800">
+                        {text(activePreview.duplicate.first_name)} {text(activePreview.duplicate.last_name)}
+                      </p>
+                      <p className="text-xs text-slate-600">{text(activePreview.duplicate.email) || "No email"}</p>
+                    </div>
+                  </div>
+
+                  {activePreview.conflicts.length > 0 ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                      {activePreview.conflicts.length} conflicting fields detected for this duplicate.
+                    </p>
+                  ) : null}
+
+                  <div className="overflow-auto rounded-md border border-slate-200">
+                    <table className="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Field</th>
+                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Master Value</th>
+                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Duplicate Value</th>
+                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Final Value</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {FIELD_CONFIG.map((field) => (
+                          <tr key={field.key}>
+                            <td className="px-2 py-2 align-top font-medium text-slate-700">{field.label}</td>
+                            <td className="px-2 py-2 align-top">
+                              <button
+                                type="button"
+                                className="text-left text-slate-700 underline-offset-2 hover:underline"
+                                onClick={() =>
+                                  setResolvedValue(
+                                    activePreviewDuplicateId,
+                                    field.key,
+                                    activePreview.master[field.key] ?? ""
+                                  )
+                                }
+                              >
+                                {text(activePreview.master[field.key]) || "—"}
+                              </button>
+                            </td>
+                            <td className="px-2 py-2 align-top">
+                              <button
+                                type="button"
+                                className="text-left text-slate-700 underline-offset-2 hover:underline"
+                                onClick={() =>
+                                  setResolvedValue(
+                                    activePreviewDuplicateId,
+                                    field.key,
+                                    activePreview.duplicate[field.key] ?? ""
+                                  )
+                                }
+                              >
+                                {text(activePreview.duplicate[field.key]) || "—"}
+                              </button>
+                            </td>
+                            <td className="px-2 py-2 align-top">
+                              <Input
+                                value={text(
+                                  resolvedByDuplicate[activePreviewDuplicateId]?.[field.key] ??
+                                    activePreview.suggestedResolution?.[field.key]
+                                )}
+                                onChange={(event) =>
+                                  setResolvedValue(activePreviewDuplicateId, field.key, event.target.value)
+                                }
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <label className="block space-y-1 text-xs text-slate-600">
+                    Communication Preferences (comma separated)
+                    <Input
+                      value={
+                        Array.isArray(
+                          resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
+                            activePreview.suggestedResolution?.communication_preferences
+                        )
+                          ? (
+                              (resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
+                                activePreview.suggestedResolution?.communication_preferences) as unknown[]
+                            )
+                              .map((entry) => text(entry))
+                              .join(", ")
+                          : text(
+                              resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
+                                activePreview.suggestedResolution?.communication_preferences
+                            )
+                      }
+                      onChange={(event) =>
+                        setResolvedValue(
+                          activePreviewDuplicateId,
+                          "communication_preferences",
+                          event.target.value
+                            .split(",")
+                            .map((entry) => entry.trim())
+                            .filter(Boolean)
+                        )
+                      }
+                    />
+                  </label>
+                </>
+              ) : null}
+
+              <div className="flex justify-end">
+                <Button type="button" onClick={() => void executeSelectedMerges()} disabled={working}>
+                  {working
+                    ? "Merging..."
+                    : `Merge Selected Duplicates (${Object.keys(previewByDuplicate).length})`}
+                </Button>
+              </div>
+            </section>
           ) : null}
         </div>
       )}
