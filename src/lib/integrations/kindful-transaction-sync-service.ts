@@ -356,7 +356,7 @@ export class KindfulTransactionSyncService {
             campaignExternalId: campaign.campaignId || ""
           });
 
-          let contactId = await this.resolveContactId({
+          const contactId = await this.resolveContactId({
             supabase,
             organizationId: input.organizationId,
             record

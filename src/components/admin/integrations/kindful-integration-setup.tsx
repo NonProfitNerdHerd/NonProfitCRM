@@ -73,8 +73,14 @@ export function KindfulIntegrationSetup({
   const [cutoverNotes, setCutoverNotes] = useState("");
 
   const apiPaused = Boolean(data.apiPaused);
-  const config = (data.connection.configuration_json as Record<string, unknown>) ?? {};
-  const syncSettings = (data.connection.sync_settings_json as Record<string, unknown>) ?? {};
+  const config = useMemo(
+    () => (data.connection.configuration_json as Record<string, unknown>) ?? {},
+    [data.connection.configuration_json]
+  );
+  const syncSettings = useMemo(
+    () => (data.connection.sync_settings_json as Record<string, unknown>) ?? {},
+    [data.connection.sync_settings_json]
+  );
   const apiKeyConfigured = Boolean(config.apiKeyConfigured);
 
   const [settingsForm, setSettingsForm] = useState({
