@@ -415,8 +415,8 @@ export async function listMergeSearchContacts(input: { q: string; limit?: number
   const { data, error } = await query;
   if (error) throw error;
 
-  const items = (data ?? []).map((row) => {
-    const record = row as ContactRecord;
+  const rows = ((data ?? []) as unknown[]) as ContactRecord[];
+  const items = rows.map((record) => {
     return {
       id: record.id,
       fullName: fullName(record),
