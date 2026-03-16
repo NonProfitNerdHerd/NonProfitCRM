@@ -30,6 +30,7 @@ type IntegrationRow = {
   currentPage?: number | null;
   currentCursor?: string | null;
   errorSummary?: string | null;
+  canManageIntegration?: boolean;
 };
 
 export function IntegrationsDashboard({
@@ -187,25 +188,33 @@ export function IntegrationsDashboard({
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Link href={`/staff/admin/integrations/${encodeURIComponent(row.integrationKey)}`}>
-                <Button type="button" variant="secondary">
-                  Open
+              {row.canManageIntegration ? (
+                <Link href={`/staff/admin/integrations/${encodeURIComponent(row.integrationKey)}`}>
+                  <Button type="button" variant="secondary">
+                    Open
+                  </Button>
+                </Link>
+              ) : null}
+              {row.canManageIntegration ? (
+                <Button
+                  type="button"
+                  variant={row.isEnabled ? "danger" : "primary"}
+                  onClick={() => void toggleIntegration(row.integrationKey, !row.isEnabled)}
+                  disabled={Boolean(togglingByKey[row.integrationKey])}
+                >
+                  {togglingByKey[row.integrationKey]
+                    ? row.isEnabled
+                      ? "Disabling..."
+                      : "Enabling..."
+                    : row.isEnabled
+                      ? "Disable Integration"
+                      : "Enable Integration"}
                 </Button>
-              </Link>
-              <Button
-                type="button"
-                variant={row.isEnabled ? "danger" : "primary"}
-                onClick={() => void toggleIntegration(row.integrationKey, !row.isEnabled)}
-                disabled={Boolean(togglingByKey[row.integrationKey])}
-              >
-                {togglingByKey[row.integrationKey]
-                  ? row.isEnabled
-                    ? "Disabling..."
-                    : "Enabling..."
-                  : row.isEnabled
-                    ? "Disable Integration"
-                    : "Enable Integration"}
-              </Button>
+              ) : (
+                <span className="text-xs text-slate-500">
+                  Read-only: integration configuration is restricted.
+                </span>
+              )}
             </div>
           </div>
         ))}

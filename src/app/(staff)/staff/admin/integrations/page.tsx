@@ -28,6 +28,7 @@ export default async function IntegrationsPage() {
     currentCursor?: string | null;
     errorSummary?: string | null;
     completedSuccessfully?: boolean;
+    canManageIntegration?: boolean;
   }> = [];
   let apiPaused = false;
   let loadError: string | null = null;
@@ -58,7 +59,8 @@ export default async function IntegrationsPage() {
       currentPage: item.currentPage,
       currentCursor: item.currentCursor,
       errorSummary: item.errorSummary,
-      completedSuccessfully: item.completedSuccessfully
+      completedSuccessfully: item.completedSuccessfully,
+      canManageIntegration: item.canManageIntegration
     }));
     apiPaused = Boolean((result as { apiPaused?: boolean }).apiPaused);
     loadError = (result as { schemaWarning?: string }).schemaWarning ?? null;
@@ -92,7 +94,8 @@ export default async function IntegrationsPage() {
         currentPage: null,
         currentCursor: null,
         errorSummary: "Migration required",
-        completedSuccessfully: false
+        completedSuccessfully: false,
+        canManageIntegration: false
       },
       {
         integrationKey: "givingfuel_donations",
@@ -118,7 +121,8 @@ export default async function IntegrationsPage() {
         currentPage: null,
         currentCursor: null,
         errorSummary: "Migration required",
-        completedSuccessfully: false
+        completedSuccessfully: false,
+        canManageIntegration: false
       }
     ];
     apiPaused = true;

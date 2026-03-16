@@ -1,11 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireStaffPermission } from "@/lib/auth/guards";
+import { requireAdministratorRole } from "@/lib/auth/guards";
+import { ROLE_HIERARCHY_DESCRIPTIONS, roleOrderScore } from "@/lib/auth/role-hierarchy";
+import { logAuditEvent } from "@/lib/data/audit";
 
 type RoleTemplateRow = {
   id: string;
   key: string;
   name: string;
+  description?: string | null;
 };
 
 export type AdminRoleTemplate = RoleTemplateRow;
@@ -30,11 +33,25 @@ async function getAllowedRoles(organizationId: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("role_templates")
-    .select("id, key, name")
+    .select("id, key, name, description")
     .or(`organization_id.is.null,organization_id.eq.${organizationId}`)
     .order("name", { ascending: true });
   if (error) throw error;
-  return (data ?? []) as RoleTemplateRow[];
+  const canonical = new Map<string, RoleTemplateRow>();
+  const additional: RoleTemplateRow[] = [];
+  for (const row of (data ?? []) as RoleTemplateRow[]) {
+    if (row.key === "executive_leader") continue;
+    if (ROLE_HIERARCHY_DESCRIPTIONS[row.key as keyof typeof ROLE_HIERARCHY_DESCRIPTIONS]) {
+      canonical.set(row.key, row);
+    } else {
+      additional.push(row);
+    }
+  }
+  const orderedCanonical = Array.from(canonical.values()).sort(
+    (a, b) => roleOrderScore(a.key) - roleOrderScore(b.key)
+  );
+  additional.sort((a, b) => a.name.localeCompare(b.name));
+  return [...orderedCanonical, ...additional];
 }
 
 function validateRoleIds(roles: string[], roleRows: RoleTemplateRow[]) {
@@ -43,7 +60,7 @@ function validateRoleIds(roles: string[], roleRows: RoleTemplateRow[]) {
 }
 
 export async function listAdminUsersData() {
-  const context = await requireStaffPermission("can_manage_users");
+  const context = await requireAdministratorRole();
   const supabase = await createClient();
 
   const [roles, membershipsResult, extraRolesResult] = await Promise.all([
@@ -172,7 +189,7 @@ export async function createAdminUser(input: {
   isActive: boolean;
   roleTemplateIds: string[];
 }) {
-  const context = await requireStaffPermission("can_manage_users");
+  const context = await requireAdministratorRole();
   const adminClient = createAdminClient();
   const roles = await getAllowedRoles(context.organizationId);
   const email = input.email.trim();
@@ -236,6 +253,18 @@ export async function createAdminUser(input: {
     if (additionalRolesError) throw additionalRolesError;
   }
 
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "role_assignment_created",
+    targetEntityType: "organization_memberships",
+    targetEntityId: userId,
+    metadata: {
+      assignedRoleTemplateIds: validRoleIds,
+      assignedRoleKeys: roles.filter((role) => validRoleIds.includes(role.id)).map((role) => role.key)
+    }
+  });
+
   return { userId, temporaryPassword };
 }
 
@@ -249,7 +278,7 @@ export async function updateAdminUser(input: {
   isActive: boolean;
   roleTemplateIds: string[];
 }) {
-  const context = await requireStaffPermission("can_manage_users");
+  const context = await requireAdministratorRole();
   const adminClient = createAdminClient();
   const roles = await getAllowedRoles(context.organizationId);
   const validRoleIds = validateRoleIds(input.roleTemplateIds, roles);
@@ -303,10 +332,22 @@ export async function updateAdminUser(input: {
       );
     if (insertError) throw insertError;
   }
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "role_assignment_updated",
+    targetEntityType: "organization_memberships",
+    targetEntityId: input.userId,
+    metadata: {
+      assignedRoleTemplateIds: validRoleIds,
+      assignedRoleKeys: roles.filter((role) => validRoleIds.includes(role.id)).map((role) => role.key)
+    }
+  });
 }
 
 export async function resetAdminUserPassword(userId: string) {
-  const context = await requireStaffPermission("can_manage_users");
+  const context = await requireAdministratorRole();
   const adminClient = createAdminClient();
   const temporaryPassword = generateTemporaryPassword();
 
@@ -331,6 +372,15 @@ export async function resetAdminUserPassword(userId: string) {
     .update({ must_change_password: true, is_active: true })
     .eq("id", userId);
   if (profileError) throw profileError;
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "admin_user_password_reset",
+    targetEntityType: "profiles",
+    targetEntityId: userId,
+    metadata: {}
+  });
 
   return { temporaryPassword };
 }

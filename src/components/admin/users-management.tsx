@@ -3,11 +3,13 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { roleOrderScore } from "@/lib/auth/role-hierarchy";
 
 type RoleTemplate = {
   id: string;
   key: string;
   name: string;
+  description?: string | null;
 };
 
 type UserRow = {
@@ -438,14 +440,16 @@ export function UsersManagement({
                   {user.roles.length === 0 ? (
                     <span className="text-xs text-slate-500">No roles assigned</span>
                   ) : (
-                    user.roles.map((role) => (
+                    [...user.roles]
+                      .sort((a, b) => roleOrderScore(a.key) - roleOrderScore(b.key))
+                      .map((role) => (
                       <span
                         key={`${user.user_id}-${role.id}`}
                         className="rounded-full bg-brand-50 px-2 py-1 text-[11px] text-brand-700"
                       >
                         {role.name}
                       </span>
-                    ))
+                      ))
                   )}
                 </div>
               </div>
@@ -533,14 +537,19 @@ export function UsersManagement({
                 <p className="mb-1 text-xs text-slate-600">Assign Role(s)</p>
                 <div className="grid gap-2 md:grid-cols-3">
                   {roles.map((role) => (
-                    <label key={role.id} className="inline-flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={createForm.roleTemplateIds.includes(role.id)}
-                        onChange={() => toggleCreateRole(role.id)}
-                      />
-                      {role.name}
-                    </label>
+                    <div key={role.id} className="rounded border border-slate-200 p-2">
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={createForm.roleTemplateIds.includes(role.id)}
+                          onChange={() => toggleCreateRole(role.id)}
+                        />
+                        {role.name}
+                      </label>
+                      {role.description ? (
+                        <p className="mt-1 text-xs text-slate-500">{role.description}</p>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -627,14 +636,19 @@ export function UsersManagement({
                 <p className="mb-1 text-xs text-slate-600">Assign Role(s)</p>
                 <div className="grid gap-2 md:grid-cols-3">
                   {roles.map((role) => (
-                    <label key={role.id} className="inline-flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={editForm.roleTemplateIds.includes(role.id)}
-                        onChange={() => toggleEditRole(role.id)}
-                      />
-                      {role.name}
-                    </label>
+                    <div key={role.id} className="rounded border border-slate-200 p-2">
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={editForm.roleTemplateIds.includes(role.id)}
+                          onChange={() => toggleEditRole(role.id)}
+                        />
+                        {role.name}
+                      </label>
+                      {role.description ? (
+                        <p className="mt-1 text-xs text-slate-500">{role.description}</p>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
               </div>

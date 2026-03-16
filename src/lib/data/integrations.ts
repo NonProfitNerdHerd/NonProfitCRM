@@ -1,5 +1,7 @@
-import { redirect } from "next/navigation";
-import { requireSessionContext } from "@/lib/auth/guards";
+import {
+  requireIntegrationManagerRole,
+  requireStaffPermission
+} from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 import {
   IntegrationConnection,
@@ -255,42 +257,12 @@ function sanitizeConnectionForUi(connection: IntegrationConnection): Integration
   };
 }
 
-async function requireIntegrationsAdmin() {
-  const context = await requireSessionContext();
-  const supabase = await createClient();
+async function requireIntegrationsViewer() {
+  return requireStaffPermission("can_view_dashboard");
+}
 
-  const permissionChecks = await Promise.all(
-    [
-      "can_manage_integrations",
-      "can_manage_users",
-      "can_manage_org_settings",
-      "can_manage_role_templates"
-    ].map(async (permission) => {
-      const { data, error } = await supabase.rpc("has_permission", {
-        org_id: context.organizationId,
-        permission_key: permission
-      });
-      return !error && Boolean(data);
-    })
-  );
-
-  if (permissionChecks.some(Boolean)) {
-    return context;
-  }
-
-  try {
-    const { data: roleKey } = await supabase.rpc("user_role_key", {
-      org_id: context.organizationId
-    });
-    const normalizedRole = String(roleKey ?? "").toLowerCase();
-    if (["administrator", "executive_leader", "executive_staff"].includes(normalizedRole)) {
-      return context;
-    }
-  } catch {
-    // Keep permission checks as primary guard; ignore role RPC failures.
-  }
-
-  redirect("/unauthorized");
+async function requireIntegrationsManager() {
+  return requireIntegrationManagerRole();
 }
 
 async function getDefinitionAndConnection(organizationId: string, userId: string, key: string) {
@@ -457,7 +429,13 @@ async function countUniqueLinkedContacts(input: {
 }
 
 export async function listIntegrationsForAdmin() {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsViewer();
+  const supabase = await createClient();
+  const { data: canManageIntegrationRaw } = await supabase.rpc("has_permission", {
+    org_id: context.organizationId,
+    permission_key: "can_manage_integrations"
+  });
+  const canManageIntegration = Boolean(canManageIntegrationRaw);
   try {
     const definitions = await registryService.listDefinitions();
     const rows: Array<{
@@ -570,7 +548,8 @@ export async function listIntegrationsForAdmin() {
           currentPage: syncStatus.currentPage,
           currentCursor: syncStatus.currentCursor,
           errorSummary: syncStatus.errorSummary,
-          completedSuccessfully: syncStatus.completedSuccessfully
+          completedSuccessfully: syncStatus.completedSuccessfully,
+          canManageIntegration
         };
       }),
       summary: {
@@ -611,7 +590,8 @@ export async function listIntegrationsForAdmin() {
           currentPage: null,
           currentCursor: null,
           errorSummary: "Migration required",
-          completedSuccessfully: false
+          completedSuccessfully: false,
+          canManageIntegration
         },
         {
           integrationKey: GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
@@ -639,7 +619,8 @@ export async function listIntegrationsForAdmin() {
           currentPage: null,
           currentCursor: null,
           errorSummary: "Migration required",
-          completedSuccessfully: false
+          completedSuccessfully: false,
+          canManageIntegration
         }
       ],
       summary: {
@@ -655,7 +636,7 @@ export async function listIntegrationsForAdmin() {
 }
 
 export async function getIntegrationDetailForAdmin(integrationKey: string) {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   try {
     const { definition, connection } = await getDefinitionAndConnection(
       context.organizationId,
@@ -768,7 +749,7 @@ export async function updateIntegrationConfiguration(
     apiKey?: string;
   }
 ) {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   try {
     const definition = await registryService.getDefinition(integrationKey);
     if (!definition) throw new Error("Integration not found.");
@@ -838,7 +819,7 @@ export async function testIntegrationConnection(
   integrationKey: string,
   apiKeyOverride?: string
 ) {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   if (INTEGRATIONS_API_PAUSED) {
     throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
   }
@@ -892,7 +873,7 @@ export async function testIntegrationConnection(
 }
 
 export async function runIntegrationSync(integrationKey: string, scope: SyncScope) {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   if (INTEGRATIONS_API_PAUSED) {
     throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
   }
@@ -934,7 +915,7 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
 }
 
 export async function retryFailedIntegrationSync(integrationKey: string) {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   if (INTEGRATIONS_API_PAUSED) {
     throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
   }
@@ -968,7 +949,7 @@ export async function retryFailedIntegrationSync(integrationKey: string) {
 }
 
 export async function listIntegrationJobs(integrationKey: string): Promise<IntegrationSyncJob[]> {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   try {
     const { connection } = await getDefinitionAndConnection(
       context.organizationId,
@@ -988,7 +969,7 @@ export async function getIntegrationJob(
   integrationKey: string,
   jobId: string
 ): Promise<{ job: IntegrationSyncJob | null; logs: Array<Record<string, unknown>> }> {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   try {
     await getDefinitionAndConnection(context.organizationId, context.userId, integrationKey);
     const job = await logService.getJob(context.organizationId, jobId);
@@ -1005,7 +986,7 @@ export async function getIntegrationJob(
 export async function listIntegrationErrors(
   integrationKey: string
 ): Promise<IntegrationErrorQueueItem[]> {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   try {
     const { connection } = await getDefinitionAndConnection(
       context.organizationId,
@@ -1022,7 +1003,7 @@ export async function listIntegrationErrors(
 }
 
 export async function resolveIntegrationError(integrationKey: string, errorId: string) {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   try {
     const { connection } = await getDefinitionAndConnection(
       context.organizationId,
@@ -1197,7 +1178,7 @@ export async function listRecentSyncedContactsForIntegration(
   integrationKey: string,
   limit = 20
 ): Promise<RecentSyncedContactRow[]> {
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   const boundedLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 100) : 20;
   try {
     await getDefinitionAndConnection(context.organizationId, context.userId, integrationKey);
@@ -1256,7 +1237,7 @@ async function getDonationIntegrationContext(integrationKey: string) {
   if (integrationKey !== GIVINGFUEL_DONATIONS_INTEGRATION_KEY) {
     throw new Error("Donation page mappings are available for GivingFuel Donations only.");
   }
-  const context = await requireIntegrationsAdmin();
+  const context = await requireIntegrationsManager();
   const { connection } = await getDefinitionAndConnection(
     context.organizationId,
     context.userId,

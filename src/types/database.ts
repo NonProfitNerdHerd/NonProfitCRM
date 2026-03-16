@@ -40,6 +40,7 @@ export type PermissionKey =
   | "can_export_excel"
   | "can_manage_users"
   | "can_manage_integrations"
+  | "can_mass_delete_records"
   | "can_manage_org_settings"
   | "can_view_audit_log"
   | "can_view_dashboard"

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext, requireStaffPermission } from "@/lib/auth/guards";
 import { recordActivity } from "@/lib/data/activity-log";
 import { createNotification } from "@/lib/data/notifications";
+import { logAuditEvent } from "@/lib/data/audit";
 
 export async function canCreateProjects() {
   const context = await requireSessionContext();
@@ -222,6 +223,17 @@ export async function createProject(input: {
     entityId: data.id,
     actionType: "created",
     actionSummary: `Created project ${input.name}`
+  });
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "project_created",
+    targetEntityType: "projects",
+    targetEntityId: data.id,
+    metadata: {
+      projectName: input.name,
+      projectManagerUserId: data.project_manager_user_id
+    }
   });
 
   for (const member of staffToAdd) {

@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const limit = Math.min(Number(url.searchParams.get("limit") ?? 20) || 20, 100);
 
     let query = supabase
-      .from("contacts")
+      .from("contacts_safe_view")
       .select(
         "id, first_name, last_name, preferred_name, email, phone, organization_name, entity_type, tracking_status, city, state"
       )

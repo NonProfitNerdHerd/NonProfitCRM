@@ -395,7 +395,13 @@ do update set
 
 insert into public.permissions (key, name, description, category)
 values
-  ('can_create_projects', 'Create Projects', 'Create CRM projects', 'projects')
+  ('can_create_projects', 'Create Projects', 'Create CRM projects', 'projects'),
+  (
+    'can_mass_delete_records',
+    'Mass Delete Records',
+    'Perform mass-delete operations for contacts, donations, and other data sets',
+    'security'
+  )
 on conflict (key) do update
 set
   name = excluded.name,
@@ -404,6 +410,13 @@ set
 
 insert into public.role_templates (organization_id, key, name, description, is_system_template)
 values
+  (
+    null,
+    'data_administrator',
+    'Data Administrator',
+    'High-privilege data operations role with integration management and mass-delete capabilities',
+    true
+  ),
   (null, 'executive_leader', 'Executive Leader', 'Leadership role with project creation rights', true)
 on conflict (key) where organization_id is null
 do update set
@@ -416,7 +429,14 @@ select rt.id, p.id
 from public.role_templates rt
 join public.permissions p on p.key = 'can_create_projects'
 where rt.organization_id is null
-  and rt.key in ('administrator', 'executive_staff', 'executive_leader')
+  and rt.key in (
+    'administrator',
+    'data_administrator',
+    'executive_staff',
+    'staff_non_pii',
+    'staff_pii',
+    'executive_leader'
+  )
 on conflict (role_template_id, permission_id) do nothing;
 
 insert into public.role_template_permissions (role_template_id, permission_id)
@@ -432,6 +452,197 @@ where rt.organization_id is null
     'staff_pii',
     'data_entry'
   )
+on conflict (role_template_id, permission_id) do nothing;
+
+-- Canonical RBAC hierarchy (reset system role permissions to authoritative mapping).
+with system_roles as (
+  select id, key
+  from public.role_templates
+  where organization_id is null
+    and key in (
+      'administrator',
+      'data_administrator',
+      'executive_staff',
+      'staff_pii',
+      'staff_non_pii',
+      'data_entry',
+      'volunteer'
+    )
+)
+delete from public.role_template_permissions rtp
+using system_roles sr
+where rtp.role_template_id = sr.id;
+
+with canonical_map as (
+  select 'administrator'::text as role_key, unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_create_contacts',
+    'can_edit_contacts',
+    'can_delete_contacts',
+    'can_view_pii',
+    'can_view_sensitive_notes',
+    'can_view_sensitive_tasks',
+    'can_create_notes',
+    'can_edit_notes',
+    'can_delete_notes',
+    'can_create_tasks',
+    'can_edit_tasks',
+    'can_delete_tasks',
+    'can_view_donations',
+    'can_create_donations',
+    'can_edit_donations',
+    'can_create_campaigns',
+    'can_manage_memberships',
+    'can_view_member_records',
+    'can_view_communications',
+    'can_manage_communications',
+    'can_manage_imports',
+    'can_run_reports',
+    'can_build_reports',
+    'can_export_csv',
+    'can_export_excel',
+    'can_manage_users',
+    'can_manage_org_settings',
+    'can_manage_role_templates',
+    'can_manage_integrations',
+    'can_mass_delete_records',
+    'can_view_audit_log',
+    'can_view_financial_summaries',
+    'can_create_projects'
+  ]) as permission_key
+  union all
+  select 'data_administrator', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_create_contacts',
+    'can_edit_contacts',
+    'can_delete_contacts',
+    'can_view_pii',
+    'can_view_sensitive_notes',
+    'can_view_sensitive_tasks',
+    'can_create_notes',
+    'can_edit_notes',
+    'can_delete_notes',
+    'can_create_tasks',
+    'can_edit_tasks',
+    'can_delete_tasks',
+    'can_view_donations',
+    'can_create_donations',
+    'can_edit_donations',
+    'can_create_campaigns',
+    'can_manage_memberships',
+    'can_view_member_records',
+    'can_view_communications',
+    'can_manage_communications',
+    'can_manage_imports',
+    'can_run_reports',
+    'can_build_reports',
+    'can_export_csv',
+    'can_export_excel',
+    'can_manage_integrations',
+    'can_mass_delete_records',
+    'can_view_audit_log',
+    'can_view_financial_summaries',
+    'can_create_projects'
+  ])
+  union all
+  select 'executive_staff', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_view_pii',
+    'can_view_sensitive_notes',
+    'can_view_sensitive_tasks',
+    'can_view_donations',
+    'can_create_campaigns',
+    'can_manage_memberships',
+    'can_view_member_records',
+    'can_view_communications',
+    'can_run_reports',
+    'can_export_csv',
+    'can_export_excel',
+    'can_view_audit_log',
+    'can_view_financial_summaries',
+    'can_create_projects'
+  ])
+  union all
+  select 'staff_pii', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_create_contacts',
+    'can_edit_contacts',
+    'can_view_pii',
+    'can_view_sensitive_notes',
+    'can_view_sensitive_tasks',
+    'can_create_notes',
+    'can_edit_notes',
+    'can_delete_notes',
+    'can_create_tasks',
+    'can_edit_tasks',
+    'can_delete_tasks',
+    'can_view_donations',
+    'can_create_donations',
+    'can_edit_donations',
+    'can_create_campaigns',
+    'can_manage_memberships',
+    'can_view_member_records',
+    'can_view_communications',
+    'can_manage_communications',
+    'can_run_reports',
+    'can_build_reports',
+    'can_export_csv',
+    'can_export_excel',
+    'can_view_financial_summaries',
+    'can_create_projects'
+  ])
+  union all
+  select 'staff_non_pii', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_create_contacts',
+    'can_edit_contacts',
+    'can_create_tasks',
+    'can_view_donations',
+    'can_create_donations',
+    'can_edit_donations',
+    'can_create_campaigns',
+    'can_manage_memberships',
+    'can_view_member_records',
+    'can_view_communications',
+    'can_manage_communications',
+    'can_run_reports',
+    'can_build_reports',
+    'can_export_csv',
+    'can_create_projects'
+  ])
+  union all
+  select 'data_entry', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_create_contacts',
+    'can_edit_contacts',
+    'can_view_donations',
+    'can_create_donations'
+  ])
+  union all
+  select 'volunteer', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_view_communications'
+  ])
+),
+resolved as (
+  select rt.id as role_template_id, p.id as permission_id
+  from canonical_map cm
+  join public.role_templates rt
+    on rt.key = cm.role_key
+   and rt.organization_id is null
+  join public.permissions p
+    on p.key = cm.permission_key
+)
+insert into public.role_template_permissions (role_template_id, permission_id)
+select role_template_id, permission_id
+from resolved
 on conflict (role_template_id, permission_id) do nothing;
 
 with org as (

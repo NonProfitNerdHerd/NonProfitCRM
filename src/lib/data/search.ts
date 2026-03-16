@@ -44,7 +44,7 @@ export async function globalSearch(query: string): Promise<SearchResultGroup> {
     { data: memberships }
   ] = await Promise.all([
     supabase
-      .from("contacts")
+      .from("contacts_safe_view")
       .select("id, first_name, last_name, email, phone")
       .eq("organization_id", context.organizationId)
       .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern}`)

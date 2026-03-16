@@ -274,7 +274,7 @@ export async function updateContact(contactId: string, input: ContactInput) {
   const supabase = await createClient();
   const { data: existingContact, error: initialExistingError } = await supabase
     .from("contacts")
-    .select("tracking_status, donor_status")
+    .select("tracking_status, donor_status, created_by")
     .eq("organization_id", context.organizationId)
     .eq("id", contactId)
     .maybeSingle();
@@ -283,7 +283,7 @@ export async function updateContact(contactId: string, input: ContactInput) {
   if (existingError && isClassificationSchemaMissingError(existingError)) {
     const fallbackResult = await supabase
       .from("contacts")
-      .select("donor_status")
+      .select("donor_status, created_by")
       .eq("organization_id", context.organizationId)
       .eq("id", contactId)
       .maybeSingle();
@@ -291,6 +291,15 @@ export async function updateContact(contactId: string, input: ContactInput) {
     existingError = fallbackResult.error;
   }
   if (existingError) throw existingError;
+
+  const { data: roleKey } = await supabase.rpc("user_role_key", {
+    org_id: context.organizationId
+  });
+  const normalizedRoleKey = String(roleKey ?? "").toLowerCase();
+  const contactCreatedBy = String(existingContactRecord?.created_by ?? "");
+  if (normalizedRoleKey === "data_entry" && contactCreatedBy && contactCreatedBy !== context.userId) {
+    throw new Error("Data Entry users may only edit contacts they created.");
+  }
 
   const existingTrackingStatusRaw = String(existingContactRecord?.tracking_status ?? "").toLowerCase();
   const existingDonorStatus = String(existingContactRecord?.donor_status ?? "").toLowerCase();

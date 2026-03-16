@@ -5,6 +5,24 @@ import {
   IntegrationSyncLog
 } from "@/lib/integrations/types";
 
+function isJobProgressSchemaMissing(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("records_retrieved") ||
+    message.includes("records_skipped") ||
+    message.includes("total_records_expected") ||
+    message.includes("current_cursor") ||
+    message.includes("current_page") ||
+    message.includes("completed_successfully") ||
+    message.includes("paging_complete")
+  );
+}
+
 export class IntegrationLogService {
   async createJob(input: {
     organizationId: string;
@@ -24,14 +42,6 @@ export class IntegrationLogService {
         sync_scope: input.syncScope,
         status: "running",
         started_date: new Date().toISOString(),
-        records_retrieved: 0,
-        records_processed: 0,
-        records_created: 0,
-        records_updated: 0,
-        records_skipped: 0,
-        records_failed: 0,
-        completed_successfully: false,
-        paging_complete: false,
         triggered_by: input.triggeredBy,
         triggered_by_type: input.triggeredByType ?? "manual"
       })
@@ -64,7 +74,7 @@ export class IntegrationLogService {
     const completedDate = new Date().toISOString();
     const durationMs =
       new Date(completedDate).getTime() - new Date(input.startedDate).getTime();
-    const { error } = await supabase
+    let { error } = await supabase
       .from("integration_sync_jobs")
       .update({
         status: input.status,
@@ -87,6 +97,25 @@ export class IntegrationLogService {
       })
       .eq("organization_id", input.organizationId)
       .eq("id", input.jobId);
+    if (error && isJobProgressSchemaMissing(error)) {
+      const fallbackResult = await supabase
+        .from("integration_sync_jobs")
+        .update({
+          status: input.status,
+          completed_date: completedDate,
+          duration_ms: durationMs,
+          records_processed: input.recordsProcessed,
+          records_created: input.recordsCreated,
+          records_updated: input.recordsUpdated,
+          records_failed: input.recordsFailed,
+          last_successful_cursor: input.cursor ?? null,
+          last_successful_sync_date: input.lastSuccessfulSyncDate ?? null,
+          error_summary: input.errorSummary ?? null
+        })
+        .eq("organization_id", input.organizationId)
+        .eq("id", input.jobId);
+      error = fallbackResult.error;
+    }
     if (error) throw error;
   }
 
@@ -123,11 +152,32 @@ export class IntegrationLogService {
     if (typeof input.recordsFailed === "number") updates.records_failed = input.recordsFailed;
     if (typeof input.statusDetail === "string") updates.error_summary = input.statusDetail;
     if (Object.keys(updates).length === 0) return;
-    const { error } = await supabase
+    let { error } = await supabase
       .from("integration_sync_jobs")
       .update(updates)
       .eq("organization_id", input.organizationId)
       .eq("id", input.jobId);
+    if (error && isJobProgressSchemaMissing(error)) {
+      const fallbackUpdates: Record<string, unknown> = {};
+      if (typeof input.recordsProcessed === "number") fallbackUpdates.records_processed = input.recordsProcessed;
+      if (typeof input.recordsCreated === "number") fallbackUpdates.records_created = input.recordsCreated;
+      if (typeof input.recordsUpdated === "number") fallbackUpdates.records_updated = input.recordsUpdated;
+      if (typeof input.recordsFailed === "number") fallbackUpdates.records_failed = input.recordsFailed;
+      if (typeof input.currentCursor === "string" || input.currentCursor === null) {
+        fallbackUpdates.last_successful_cursor = input.currentCursor;
+      }
+      if (typeof input.statusDetail === "string") fallbackUpdates.error_summary = input.statusDetail;
+      if (Object.keys(fallbackUpdates).length > 0) {
+        const retry = await supabase
+          .from("integration_sync_jobs")
+          .update(fallbackUpdates)
+          .eq("organization_id", input.organizationId)
+          .eq("id", input.jobId);
+        error = retry.error;
+      } else {
+        error = null;
+      }
+    }
     if (error) throw error;
   }
 

@@ -47,6 +47,13 @@ export async function listDonationsForStaff(filters?: {
 }): Promise<DonationRecord[]> {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
+  const { data: canViewPii } = await supabase.rpc("has_permission", {
+    org_id: context.organizationId,
+    permission_key: "can_view_pii"
+  });
+  const contactSelect = canViewPii
+    ? "id,first_name,last_name,preferred_name,email,phone,organization_name,city,state"
+    : "id,first_name,last_name,preferred_name,organization_name,city,state";
 
   let filteredDonationIds: string[] | null = null;
   if (filters?.campaignId) {
@@ -70,13 +77,14 @@ export async function listDonationsForStaff(filters?: {
     filteredDonorIds = [filters.donorId];
   } else if (filters?.donorQuery?.trim()) {
     const like = `%${filters.donorQuery.trim()}%`;
+    const donorSearchClause = canViewPii
+      ? `first_name.ilike.${like},last_name.ilike.${like},preferred_name.ilike.${like},email.ilike.${like}`
+      : `first_name.ilike.${like},last_name.ilike.${like},preferred_name.ilike.${like},organization_name.ilike.${like}`;
     const { data: donorRows, error: donorError } = await supabase
-      .from("contacts")
+      .from("contacts_safe_view")
       .select("id")
       .eq("organization_id", context.organizationId)
-      .or(
-        `first_name.ilike.${like},last_name.ilike.${like},preferred_name.ilike.${like},email.ilike.${like}`
-      )
+      .or(donorSearchClause)
       .limit(300);
     if (donorError) throw donorError;
     filteredDonorIds = (donorRows ?? []).map((row) => row.id as string);
@@ -101,9 +109,9 @@ export async function listDonationsForStaff(filters?: {
   }
 
   const fullSelect =
-    "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, crm_organization_id, memo, created_by, created_at, campaign_id, campaigns(name,status), crm_organizations(id,name), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))";
+    `id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, crm_organization_id, memo, created_by, created_at, campaign_id, campaigns(name,status), crm_organizations(id,name), contacts(${contactSelect}), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))`;
   const legacySelect =
-    "id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, memo, created_by, created_at, campaign_id, campaigns(name,status), contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))";
+    `id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, source, source_platform, external_transaction_id, is_recurring, memo, created_by, created_at, campaign_id, campaigns(name,status), contacts(${contactSelect}), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status))`;
 
   let { data, error } = await runQuery(fullSelect);
   if (error && isDonationOrgSchemaError(error)) {
@@ -145,11 +153,18 @@ export async function listPortalDonations(): Promise<DonationRecord[]> {
 export async function getDonationById(id: string): Promise<DonationRecord | null> {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
+  const { data: canViewPii } = await supabase.rpc("has_permission", {
+    org_id: context.organizationId,
+    permission_key: "can_view_pii"
+  });
+  const contactSelect = canViewPii
+    ? "id,first_name,last_name,preferred_name,email,phone,organization_name,city,state"
+    : "id,first_name,last_name,preferred_name,organization_name,city,state";
 
   const fullSelect =
-    "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), crm_organizations(id,name,description), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))";
+    `*, contacts(${contactSelect}), crm_organizations(id,name,description), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))`;
   const legacySelect =
-    "*, contacts(id,first_name,last_name,preferred_name,email,phone,organization_name,city,state), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))";
+    `*, contacts(${contactSelect}), campaigns(name,status,start_date,end_date), donation_allocations(campaign_id, allocation_amount, campaigns(id,name,status,start_date,end_date))`;
 
   let { data, error } = await supabase
     .from("donations")

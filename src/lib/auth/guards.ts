@@ -7,6 +7,16 @@ export type SessionContext = {
   organizationId: string;
 };
 
+export type RoleKey =
+  | "administrator"
+  | "data_administrator"
+  | "executive_staff"
+  | "staff_pii"
+  | "staff_non_pii"
+  | "data_entry"
+  | "volunteer"
+  | string;
+
 async function getActiveOrgId(userId: string): Promise<string | null> {
   const supabase = await createClient();
 
@@ -62,6 +72,54 @@ export async function requireStaffPermission(
   }
 
   return context;
+}
+
+export async function getPrimaryRoleKey(context?: SessionContext): Promise<RoleKey | null> {
+  const resolvedContext = context ?? (await requireSessionContext());
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("user_role_key", {
+    org_id: resolvedContext.organizationId
+  });
+  if (error) return null;
+  const key = String(data ?? "").trim();
+  return key ? key : null;
+}
+
+export async function requireRoleKeys(allowedRoleKeys: string[]): Promise<SessionContext> {
+  const context = await requireSessionContext();
+  const primaryRoleKey = await getPrimaryRoleKey(context);
+  if (primaryRoleKey && allowedRoleKeys.includes(primaryRoleKey)) {
+    return context;
+  }
+  const supabase = await createClient();
+  const { data: additionalRoleRows, error } = await supabase
+    .from("organization_user_role_assignments")
+    .select("role_templates(key)")
+    .eq("organization_id", context.organizationId)
+    .eq("user_id", context.userId);
+  if (!error) {
+    const additionalRoleKeys = (additionalRoleRows ?? [])
+      .map((row) => {
+        const roleTemplate = Array.isArray(row.role_templates)
+          ? row.role_templates[0]
+          : row.role_templates;
+        return String((roleTemplate as { key?: string } | null)?.key ?? "");
+      })
+      .filter(Boolean);
+    if (additionalRoleKeys.some((key) => allowedRoleKeys.includes(key))) {
+      return context;
+    }
+  }
+  redirect("/unauthorized");
+  return context;
+}
+
+export async function requireAdministratorRole(): Promise<SessionContext> {
+  return requireRoleKeys(["administrator"]);
+}
+
+export async function requireIntegrationManagerRole(): Promise<SessionContext> {
+  return requireRoleKeys(["administrator", "data_administrator"]);
 }
 
 export async function requirePortalIdentity(): Promise<SessionContext> {
