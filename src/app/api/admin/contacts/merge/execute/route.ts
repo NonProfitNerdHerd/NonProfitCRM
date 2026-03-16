@@ -8,7 +8,7 @@ import {
 const schema = z.object({
   masterContactId: z.string().uuid(),
   duplicateContactId: z.string().uuid(),
-  resolvedFieldMap: z.record(z.unknown()).default({}),
+  resolvedFieldMap: z.record(z.string(), z.unknown()).default({}),
   actionSource: z.string().max(120).optional()
 });
 
