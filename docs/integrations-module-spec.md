@@ -6,7 +6,7 @@ The Integrations module is a reusable administration platform for third-party pr
 
 - Entry point: `Administrator → Integrations`
 - First provider: **Webconnex**
-- Extensible for future providers: Kindful, Stripe, QuickBooks, Mailchimp, etc.
+- Extensible for future providers: Stripe, QuickBooks, Mailchimp, etc.
 
 ## 2) Administrator UX
 

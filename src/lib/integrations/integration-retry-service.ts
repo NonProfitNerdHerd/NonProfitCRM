@@ -3,12 +3,9 @@ import { IntegrationConnection } from "@/lib/integrations/types";
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
 import { IntegrationLogService } from "@/lib/integrations/integration-log-service";
 import { isGivingFuelIntegrationKey } from "@/lib/integrations/givingfuel-contacts-config";
-import { isKindfulIntegrationKey } from "@/lib/integrations/kindful-config";
-import { KindfulSyncService } from "@/lib/integrations/kindful-sync-service";
 
 export class IntegrationRetryService {
   private syncService = new WebconnexSyncService();
-  private kindfulSyncService = new KindfulSyncService();
   private logService = new IntegrationLogService();
 
   async retryFailed(input: {
@@ -17,8 +14,8 @@ export class IntegrationRetryService {
     integrationKey: string;
     connection: IntegrationConnection;
   }) {
-    if (!isGivingFuelIntegrationKey(input.integrationKey) && !isKindfulIntegrationKey(input.integrationKey)) {
-      throw new Error("Retry is currently supported for GivingFuel and Kindful integrations only.");
+    if (!isGivingFuelIntegrationKey(input.integrationKey)) {
+      throw new Error("Retry is currently supported for GivingFuel integrations only.");
     }
 
     const supabase = await createIntegrationClient();
@@ -33,11 +30,9 @@ export class IntegrationRetryService {
 
     const definition = {
       id: input.connection.integration_definition_id,
-      name: isKindfulIntegrationKey(input.integrationKey) ? "Kindful" : "Webconnex",
+      name: "Webconnex",
       provider_key: input.integrationKey,
-      description: isKindfulIntegrationKey(input.integrationKey)
-        ? "Kindful migration/synchronization"
-        : "Webconnex API synchronization",
+      description: "Webconnex API synchronization",
       category: "donations",
       is_active: true,
       supports_manual_sync: true,
@@ -47,23 +42,14 @@ export class IntegrationRetryService {
       updated_at: input.connection.updated_at
     } as const;
 
-    const result = isKindfulIntegrationKey(input.integrationKey)
-      ? await this.kindfulSyncService.runSync({
-          organizationId: input.organizationId,
-          userId: input.userId,
-          definition,
-          connection: input.connection,
-          scope: "all",
-          jobType: "retry_failed"
-        })
-      : await this.syncService.runSync({
-          organizationId: input.organizationId,
-          userId: input.userId,
-          definition,
-          connection: input.connection,
-          scope: "all",
-          jobType: "retry_failed"
-        });
+    const result = await this.syncService.runSync({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      definition,
+      connection: input.connection,
+      scope: "all",
+      jobType: "retry_failed"
+    });
 
     await supabase
       .from("integration_error_queue")

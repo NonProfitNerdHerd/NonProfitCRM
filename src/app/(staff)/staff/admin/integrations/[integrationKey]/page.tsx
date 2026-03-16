@@ -5,8 +5,6 @@ import { getIntegrationDetailForAdmin } from "@/lib/data/integrations";
 import { GivingFuelContactsSetup } from "@/components/admin/integrations/givingfuel-contacts-setup";
 import { GivingFuelDonationsSetup } from "@/components/admin/integrations/givingfuel-donations-setup";
 import { GIVINGFUEL_DONATIONS_INTEGRATION_KEY } from "@/lib/integrations/givingfuel-contacts-config";
-import { KINDFUL_INTEGRATION_KEY } from "@/lib/integrations/kindful-config";
-import { KindfulIntegrationSetup } from "@/components/admin/integrations/kindful-integration-setup";
 
 type RouteProps = {
   params: Promise<{ integrationKey: string }>;
@@ -15,6 +13,8 @@ type RouteProps = {
 
 export default async function IntegrationDetailPage({ params, searchParams }: RouteProps) {
   const { integrationKey } = await params;
+  const supportedIntegration =
+    integrationKey === "webconnex" || integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY;
   if (searchParams) {
     await searchParams;
   }
@@ -56,8 +56,6 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
             ? "GivingFuel Contacts"
             : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? "GivingFuel Donations"
-              : integrationKey === KINDFUL_INTEGRATION_KEY
-                ? "Kindful Migration + Sync"
               : integrationKey,
         provider_key: integrationKey,
         description: "Fallback integration detail due environment configuration mismatch.",
@@ -78,8 +76,6 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
             ? "GivingFuel Contacts"
             : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? "GivingFuel Donations"
-              : integrationKey === KINDFUL_INTEGRATION_KEY
-                ? "Kindful Migration + Sync"
               : integrationKey,
         base_url: "",
         auth_type: "api_key_header",
@@ -107,8 +103,6 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
             ? "GivingFuel Contacts"
             : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? "GivingFuel Donations"
-              : integrationKey === KINDFUL_INTEGRATION_KEY
-                ? "Kindful Migration + Sync"
               : integrationKey,
         description: "Integration framework fallback detail",
         currentStatus: "Disabled",
@@ -136,9 +130,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
       <CardHeader
         title={`${String(detail?.connection?.name ?? detail?.definition?.name ?? integrationKey)} Integration`}
         subtitle={
-          integrationKey === KINDFUL_INTEGRATION_KEY
-            ? "Kindful migration, transition sync monitoring, review queues, and cutover controls"
-            : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+          integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
             ? "GivingFuel donations API key setup, page mapping, and transaction synchronization"
             : "GivingFuel contacts API key setup and contacts synchronization"
         }
@@ -148,18 +140,10 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
           {loadError}
         </p>
       ) : null}
-      {integrationKey === KINDFUL_INTEGRATION_KEY ? (
-        <KindfulIntegrationSetup
-          integrationKey={integrationKey}
-          initialData={detail as {
-            definition: Record<string, unknown>;
-            connection: Record<string, unknown>;
-            jobs: Array<Record<string, unknown>>;
-            errors: Array<Record<string, unknown>>;
-            overview: Record<string, unknown>;
-            apiPaused?: boolean;
-          }}
-        />
+      {!supportedIntegration ? (
+        <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          This integration is not available in the current implementation.
+        </p>
       ) : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY ? (
         <GivingFuelDonationsSetup
           integrationKey={integrationKey}

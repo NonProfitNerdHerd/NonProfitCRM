@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 
 export function ImportForm() {
   const [domain, setDomain] = useState<"contacts" | "donations">("contacts");
-  const [sourcePlatform, setSourcePlatform] = useState("Kindful");
+  const [sourcePlatform, setSourcePlatform] = useState("WebConnex");
   const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

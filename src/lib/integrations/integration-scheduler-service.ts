@@ -6,6 +6,11 @@ import {
   GIVINGFUEL_INTEGRATION_KEY
 } from "@/lib/integrations/givingfuel-contacts-config";
 
+const SUPPORTED_PROVIDER_KEYS = new Set([
+  GIVINGFUEL_INTEGRATION_KEY,
+  GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+]);
+
 function shouldRun(syncSettings: Record<string, unknown>) {
   const mode = String(syncSettings.syncMode ?? "manual_and_scheduled");
   if (mode === "manual_only") return false;
@@ -46,6 +51,9 @@ export class IntegrationSchedulerService {
       if (!shouldRun(syncSettings)) continue;
       const definition = byId.get(String(connection.integration_definition_id));
       if (!definition) continue;
+      if (!SUPPORTED_PROVIDER_KEYS.has(String(definition.provider_key ?? ""))) {
+        continue;
+      }
 
       const fallbackUser = String(connection.updated_by ?? connection.created_by ?? "");
       if (!fallbackUser) {

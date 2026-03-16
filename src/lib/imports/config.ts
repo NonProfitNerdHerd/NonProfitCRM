@@ -8,7 +8,7 @@ export type ImportEntityType =
   | "campaigns"
   | "memberships";
 
-export type SourceSystem = "Kindful" | "WebConnex" | "Spreadsheet / Manual" | "Other";
+export type SourceSystem = "WebConnex" | "Spreadsheet / Manual" | "Other";
 
 export type FieldClassification = "basic" | "externalKey" | "relationshipKey";
 
@@ -234,7 +234,6 @@ export const IMPORT_ENTITY_CONFIG: Record<ImportEntityType, ImportEntityConfig> 
 };
 
 export const SOURCE_SYSTEM_OPTIONS: SourceSystem[] = [
-  "Kindful",
   "WebConnex",
   "Spreadsheet / Manual",
   "Other"
