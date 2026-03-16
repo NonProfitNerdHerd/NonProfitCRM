@@ -127,6 +127,7 @@ export function DonationsManagement({
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [displayLimit, setDisplayLimit] = useState<25 | 50 | 100>(25);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -144,6 +145,7 @@ export function DonationsManagement({
   const [newDonorForm, setNewDonorForm] = useState<NewDonorForm>(EMPTY_NEW_DONOR_FORM);
 
   const totalAmountNumber = Number(form.totalAmount || 0);
+  const visibleRows = useMemo(() => rows.slice(0, displayLimit), [rows, displayLimit]);
   const allocationTotal = useMemo(
     () =>
       form.allocations.reduce((sum, row) => {
@@ -448,6 +450,25 @@ export function DonationsManagement({
       ) : null}
 
       <section className="rounded-md border border-slate-200 p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">
+            Showing last {Math.min(visibleRows.length, displayLimit)} of {rows.length} donation entries
+          </p>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-slate-600">Show</label>
+            <select
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              value={displayLimit}
+              onChange={(event) =>
+                setDisplayLimit(Number(event.target.value) as 25 | 50 | 100)
+              }
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
@@ -464,7 +485,7 @@ export function DonationsManagement({
               </tr>
             </thead>
             <tbody>
-              {rows.map((donation) => {
+              {visibleRows.map((donation) => {
                 const donor = getDonorFromRow(donation);
                 const allocations = Array.isArray(donation.donation_allocations) ? donation.donation_allocations : [];
                 const allocationNames = allocations
@@ -511,7 +532,7 @@ export function DonationsManagement({
                   </tr>
                 );
               })}
-              {rows.length === 0 ? (
+              {visibleRows.length === 0 ? (
                 <tr>
                   <td className="py-3 text-sm text-slate-500" colSpan={9}>No donations found for current filters.</td>
                 </tr>
