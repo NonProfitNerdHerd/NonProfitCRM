@@ -222,8 +222,7 @@ export class KindfulApiClient {
     const nextQueryToken = readFirstString(raw, ["query_token", "queryToken", "next_query_token"]);
     const hasMore =
       normalizeBoolean(raw.has_more ?? raw.hasMore) ??
-      Boolean(nextQueryToken) ||
-      (records.length >= perPage && records.length > 0);
+      (Boolean(nextQueryToken) || (records.length >= perPage && records.length > 0));
     const totalExpected = readFirstNumber(raw, [
       "total_count",
       "totalCount",
