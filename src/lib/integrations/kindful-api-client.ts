@@ -112,6 +112,19 @@ function asObject(payload: unknown) {
   return {};
 }
 
+function tryParseJson(rawText: string): unknown {
+  const trimmed = rawText.trim();
+  if (!trimmed) return {};
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) {
+    return { message: trimmed };
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return { message: trimmed };
+  }
+}
+
 function normalizeBaseUrl(baseUrl: string) {
   const trimmed = baseUrl.trim();
   if (!trimmed) return "";
@@ -270,7 +283,7 @@ export class KindfulApiClient {
             });
             clearTimeout(timeout);
             const rawText = await response.text().catch(() => "");
-            const parsed = rawText ? (JSON.parse(rawText) as unknown) : {};
+            const parsed = tryParseJson(rawText);
             if (!response.ok) {
               const is401 = response.status === 401;
               const hasMoreAuthCandidates =
