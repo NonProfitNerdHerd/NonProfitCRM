@@ -134,7 +134,7 @@ export function TagsDashboard({
       .sort((a, b) => a.path.localeCompare(b.path))
       .map((tag) => {
         const level = Math.max(Number(tag.level || 1), 1);
-        const prefix = `${"-".repeat(level)} `;
+        const prefix = level > 1 ? `${"   ".repeat(level - 1)}└─ ` : "";
         return {
           id: tag.id,
           label: `${prefix}${tag.name}`
