@@ -364,52 +364,78 @@ export class KindfulNoteSyncService {
 
     // Fallback extraction from contact/transaction payloads when dedicated notes endpoint is unavailable.
     if (!useDedicatedNotesEndpoint) {
-      const contactPage = await input.apiClient.queryContacts({
-        query: ["linked", "changed"],
-        perPage
-      });
-      pagesProcessed += 1;
-      retrieved += contactPage.records.length;
-      for (const record of contactPage.records) {
-        const candidates = extractNoteCandidatesFromRecord(record, "contact");
-        for (const candidate of candidates) {
-          processed += 1;
-          try {
-            const upserted = await this.upsertNote({
-              supabase,
-              organizationId: input.organizationId,
-              candidate
-            });
-            if (upserted.actionTaken === "created") created += 1;
-            else updated += 1;
-          } catch {
-            failed += 1;
+      let contactQueryToken: string | null = null;
+      let contactGuard = 0;
+      const contactQuery =
+        notesMode === "backfill"
+          ? (["linked"] as Array<"linked">)
+          : (["linked", "changed"] as Array<"linked" | "changed">);
+      while (contactGuard < 2000) {
+        contactGuard += 1;
+        const contactPage = await input.apiClient.queryContacts({
+          query: contactQueryToken ? undefined : contactQuery,
+          queryToken: contactQueryToken,
+          perPage
+        });
+        pagesProcessed += 1;
+        retrieved += contactPage.records.length;
+        for (const record of contactPage.records) {
+          const candidates = extractNoteCandidatesFromRecord(record, "contact");
+          for (const candidate of candidates) {
+            processed += 1;
+            try {
+              const upserted = await this.upsertNote({
+                supabase,
+                organizationId: input.organizationId,
+                candidate
+              });
+              if (upserted.actionTaken === "created") created += 1;
+              else updated += 1;
+            } catch {
+              failed += 1;
+            }
           }
         }
+        if (!contactPage.hasMore) break;
+        contactQueryToken = contactPage.nextQueryToken;
+        if (!contactQueryToken) break;
       }
 
-      const txPage = await input.apiClient.queryTransactions({
-        query: ["changed"],
-        perPage
-      });
-      pagesProcessed += 1;
-      retrieved += txPage.records.length;
-      for (const record of txPage.records) {
-        const candidates = extractNoteCandidatesFromRecord(record, "transaction");
-        for (const candidate of candidates) {
-          processed += 1;
-          try {
-            const upserted = await this.upsertNote({
-              supabase,
-              organizationId: input.organizationId,
-              candidate
-            });
-            if (upserted.actionTaken === "created") created += 1;
-            else updated += 1;
-          } catch {
-            failed += 1;
+      let txQueryToken: string | null = null;
+      let txGuard = 0;
+      const txQuery =
+        notesMode === "backfill"
+          ? (["linked", "changed"] as Array<"linked" | "changed">)
+          : (["changed"] as Array<"changed">);
+      while (txGuard < 2000) {
+        txGuard += 1;
+        const txPage = await input.apiClient.queryTransactions({
+          query: txQueryToken ? undefined : txQuery,
+          queryToken: txQueryToken,
+          perPage
+        });
+        pagesProcessed += 1;
+        retrieved += txPage.records.length;
+        for (const record of txPage.records) {
+          const candidates = extractNoteCandidatesFromRecord(record, "transaction");
+          for (const candidate of candidates) {
+            processed += 1;
+            try {
+              const upserted = await this.upsertNote({
+                supabase,
+                organizationId: input.organizationId,
+                candidate
+              });
+              if (upserted.actionTaken === "created") created += 1;
+              else updated += 1;
+            } catch {
+              failed += 1;
+            }
           }
         }
+        if (!txPage.hasMore) break;
+        txQueryToken = txPage.nextQueryToken;
+        if (!txQueryToken) break;
       }
     }
 
