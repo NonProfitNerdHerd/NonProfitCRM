@@ -56,6 +56,7 @@ type SuggestedDuplicateGroup = {
   groupId: string;
   groupType: "email" | "phone" | "name" | "address";
   title: string;
+  displayValue: string;
   normalizedValue: string;
   duplicateCount: number;
   contacts: MergeCandidateContact[];
@@ -521,10 +522,25 @@ function buildSuggestionGroups(input: {
       .map((row) => toCandidateContact(row))
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
     if (contacts.length < 2) continue;
+
+    const displayValue =
+      input.groupType === "email"
+        ? contacts.find((contact) => contact.email)?.email ?? normalizedValue
+        : input.groupType === "phone"
+          ? contacts.find((contact) => contact.phone)?.phone ?? normalizedValue
+          : input.groupType === "name"
+            ? contacts[0]?.fullName || normalizedValue.replaceAll("|", " ")
+            : contacts.find((contact) => contact.address)?.address ??
+              normalizedValue
+                .replaceAll("|", ", ")
+                .replace(/\s*,\s*,/g, ", ")
+                .trim();
+
     candidates.push({
       groupId: `${input.groupType}:${normalizedValue}`,
       groupType: input.groupType,
-      title: `${input.titlePrefix}: ${normalizedValue}`,
+      title: `${input.titlePrefix}: ${displayValue}`,
+      displayValue,
       normalizedValue,
       duplicateCount: contacts.length,
       contacts

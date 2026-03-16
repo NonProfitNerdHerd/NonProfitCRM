@@ -19,6 +19,7 @@ type SuggestedGroup = {
   groupId: string;
   groupType: "email" | "phone" | "name" | "address";
   title: string;
+  displayValue: string;
   normalizedValue: string;
   duplicateCount: number;
   contacts: ContactOption[];
@@ -103,6 +104,13 @@ function displayContactLabel(contact: ContactOption) {
     .join(" • ");
 }
 
+function groupTypeLabel(groupType: SuggestedGroup["groupType"]) {
+  if (groupType === "email") return "Duplicate Email";
+  if (groupType === "phone") return "Duplicate Phone";
+  if (groupType === "name") return "Duplicate First + Last";
+  return "Duplicate Address";
+}
+
 function formatDate(value: string) {
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) return value;
@@ -136,19 +144,24 @@ export function ContactMergeDashboard({
   const [previewByDuplicate, setPreviewByDuplicate] = useState<Record<string, MergePreview>>({});
   const [resolvedByDuplicate, setResolvedByDuplicate] = useState<Record<string, Record<string, unknown>>>({});
   const [activePreviewDuplicateId, setActivePreviewDuplicateId] = useState("");
+  const [isResolverOpen, setIsResolverOpen] = useState(false);
 
   const filteredGroups = useMemo(() => {
     return groups.filter((group) => {
       if (groupTypeFilter !== "all" && group.groupType !== groupTypeFilter) return false;
       if (!groupQuery.trim()) return true;
       const q = groupQuery.trim().toLowerCase();
-      return group.title.toLowerCase().includes(q) || group.normalizedValue.toLowerCase().includes(q);
+      return (
+        group.title.toLowerCase().includes(q) ||
+        group.displayValue.toLowerCase().includes(q) ||
+        group.normalizedValue.toLowerCase().includes(q)
+      );
     });
   }, [groups, groupTypeFilter, groupQuery]);
 
   const selectedGroup = useMemo(
-    () => filteredGroups.find((group) => group.groupId === selectedGroupId) ?? null,
-    [filteredGroups, selectedGroupId]
+    () => groups.find((group) => group.groupId === selectedGroupId) ?? null,
+    [groups, selectedGroupId]
   );
 
   const activePreview = activePreviewDuplicateId
@@ -205,6 +218,7 @@ export function ContactMergeDashboard({
     setPreviewByDuplicate({});
     setResolvedByDuplicate({});
     setActivePreviewDuplicateId("");
+    setIsResolverOpen(false);
     setMessage(null);
     setError(null);
   }
@@ -215,7 +229,7 @@ export function ContactMergeDashboard({
     );
   }
 
-  async function buildPreviewsForSelection() {
+  async function buildPreviewsForSelection(openResolverAfterBuild = false) {
     if (!masterContactId || selectedDuplicateIds.length === 0) return;
     setWorking(true);
     setError(null);
@@ -253,6 +267,10 @@ export function ContactMergeDashboard({
       );
     } else {
       setMessage(`Built ${Object.keys(nextPreviews).length} merge preview(s).`);
+    }
+
+    if (openResolverAfterBuild && Object.keys(nextPreviews).length > 0) {
+      setIsResolverOpen(true);
     }
   }
 
@@ -315,6 +333,7 @@ export function ContactMergeDashboard({
     setResolvedByDuplicate({});
     setActivePreviewDuplicateId("");
     setSelectedDuplicateIds([]);
+    setIsResolverOpen(false);
 
     if (failed.length > 0) {
       setError(`Merged ${successCount} duplicate(s), but ${failed.length} merge(s) failed.`);
@@ -431,19 +450,35 @@ export function ContactMergeDashboard({
               ) : (
                 <div className="divide-y divide-slate-100">
                   {filteredGroups.map((group) => (
-                    <button
+                    <div
                       key={group.groupId}
-                      type="button"
-                      onClick={() => setGroupSelection(group)}
-                      className={`w-full px-3 py-2 text-left text-sm ${
-                        selectedGroupId === group.groupId ? "bg-brand-50" : "hover:bg-slate-50"
-                      }`}
+                      className={`px-3 py-2 ${selectedGroupId === group.groupId ? "bg-brand-50" : "bg-white"}`}
                     >
-                      <p className="font-medium text-slate-800">{group.title}</p>
-                      <p className="text-xs text-slate-600">
-                        {group.duplicateCount} contacts • type: {group.groupType}
-                      </p>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setGroupSelection(group)}
+                        className="w-full text-left"
+                      >
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {groupTypeLabel(group.groupType)}
+                        </p>
+                        <p className="text-sm font-semibold text-slate-800">{group.displayValue}</p>
+                        <p className="text-xs text-slate-600">{group.duplicateCount} contacts in this group</p>
+                      </button>
+                      <div className="mt-2 space-y-1 rounded border border-slate-200 bg-white p-2">
+                        {group.contacts.slice(0, 3).map((contact) => (
+                          <div key={`${group.groupId}-${contact.id}`} className="text-xs text-slate-700">
+                            <p className="font-medium">{contact.fullName || "Unnamed Contact"}</p>
+                            <p className="text-slate-600">
+                              {[contact.email, contact.phone, contact.address].filter(Boolean).join(" • ") || "No details"}
+                            </p>
+                          </div>
+                        ))}
+                        {group.contacts.length > 3 ? (
+                          <p className="text-xs text-slate-500">+{group.contacts.length - 3} more contacts</p>
+                        ) : null}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -487,169 +522,211 @@ export function ContactMergeDashboard({
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  onClick={() => void buildPreviewsForSelection()}
+                  onClick={() => void buildPreviewsForSelection(true)}
                   disabled={working || !masterContactId || selectedDuplicateIds.length === 0}
                 >
-                  {working ? "Building..." : `Build Preview (${selectedDuplicateIds.length})`}
+                  {working ? "Preparing..." : `Choose master and duplicates (${selectedDuplicateIds.length})`}
                 </Button>
-              </div>
-            </section>
-          ) : null}
-
-          {Object.keys(previewByDuplicate).length > 0 ? (
-            <section className="space-y-3 rounded-md border border-slate-200 p-3">
-              <p className="text-sm font-semibold text-slate-900">
-                3) Review multiple previews and resolve final values
-              </p>
-
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(previewByDuplicate).map(([duplicateId, preview]) => (
-                  <button
-                    key={duplicateId}
+                {Object.keys(previewByDuplicate).length > 0 ? (
+                  <Button
                     type="button"
-                    onClick={() => setActivePreviewDuplicateId(duplicateId)}
-                    className={`rounded-md border px-2 py-1 text-xs ${
-                      duplicateId === activePreviewDuplicateId
-                        ? "border-brand-300 bg-brand-50 text-brand-700"
-                        : "border-slate-300 bg-white text-slate-700"
-                    }`}
+                    variant="secondary"
+                    onClick={() => {
+                      if (!activePreviewDuplicateId) {
+                        const firstId = Object.keys(previewByDuplicate)[0] ?? "";
+                        setActivePreviewDuplicateId(firstId);
+                      }
+                      setIsResolverOpen(true);
+                    }}
                   >
-                    {text(preview.duplicate.first_name)} {text(preview.duplicate.last_name)}
-                  </button>
-                ))}
-              </div>
-
-              {activePreview ? (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-md border border-slate-200 p-2">
-                      <p className="text-xs font-semibold text-slate-700">Master Contact</p>
-                      <p className="text-sm text-slate-800">
-                        {text(activePreview.master.first_name)} {text(activePreview.master.last_name)}
-                      </p>
-                      <p className="text-xs text-slate-600">{text(activePreview.master.email) || "No email"}</p>
-                    </div>
-                    <div className="rounded-md border border-slate-200 p-2">
-                      <p className="text-xs font-semibold text-slate-700">Duplicate Contact</p>
-                      <p className="text-sm text-slate-800">
-                        {text(activePreview.duplicate.first_name)} {text(activePreview.duplicate.last_name)}
-                      </p>
-                      <p className="text-xs text-slate-600">{text(activePreview.duplicate.email) || "No email"}</p>
-                    </div>
-                  </div>
-
-                  {activePreview.conflicts.length > 0 ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                      {activePreview.conflicts.length} conflicting fields detected for this duplicate.
-                    </p>
-                  ) : null}
-
-                  <div className="overflow-auto rounded-md border border-slate-200">
-                    <table className="min-w-full divide-y divide-slate-200 text-xs">
-                      <thead className="bg-slate-50">
-                        <tr>
-                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Field</th>
-                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Master Value</th>
-                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Duplicate Value</th>
-                          <th className="px-2 py-2 text-left font-semibold text-slate-700">Final Value</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {FIELD_CONFIG.map((field) => (
-                          <tr key={field.key}>
-                            <td className="px-2 py-2 align-top font-medium text-slate-700">{field.label}</td>
-                            <td className="px-2 py-2 align-top">
-                              <button
-                                type="button"
-                                className="text-left text-slate-700 underline-offset-2 hover:underline"
-                                onClick={() =>
-                                  setResolvedValue(
-                                    activePreviewDuplicateId,
-                                    field.key,
-                                    activePreview.master[field.key] ?? ""
-                                  )
-                                }
-                              >
-                                {text(activePreview.master[field.key]) || "—"}
-                              </button>
-                            </td>
-                            <td className="px-2 py-2 align-top">
-                              <button
-                                type="button"
-                                className="text-left text-slate-700 underline-offset-2 hover:underline"
-                                onClick={() =>
-                                  setResolvedValue(
-                                    activePreviewDuplicateId,
-                                    field.key,
-                                    activePreview.duplicate[field.key] ?? ""
-                                  )
-                                }
-                              >
-                                {text(activePreview.duplicate[field.key]) || "—"}
-                              </button>
-                            </td>
-                            <td className="px-2 py-2 align-top">
-                              <Input
-                                value={text(
-                                  resolvedByDuplicate[activePreviewDuplicateId]?.[field.key] ??
-                                    activePreview.suggestedResolution?.[field.key]
-                                )}
-                                onChange={(event) =>
-                                  setResolvedValue(activePreviewDuplicateId, field.key, event.target.value)
-                                }
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <label className="block space-y-1 text-xs text-slate-600">
-                    Communication Preferences (comma separated)
-                    <Input
-                      value={
-                        Array.isArray(
-                          resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
-                            activePreview.suggestedResolution?.communication_preferences
-                        )
-                          ? (
-                              (resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
-                                activePreview.suggestedResolution?.communication_preferences) as unknown[]
-                            )
-                              .map((entry) => text(entry))
-                              .join(", ")
-                          : text(
-                              resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
-                                activePreview.suggestedResolution?.communication_preferences
-                            )
-                      }
-                      onChange={(event) =>
-                        setResolvedValue(
-                          activePreviewDuplicateId,
-                          "communication_preferences",
-                          event.target.value
-                            .split(",")
-                            .map((entry) => entry.trim())
-                            .filter(Boolean)
-                        )
-                      }
-                    />
-                  </label>
-                </>
-              ) : null}
-
-              <div className="flex justify-end">
-                <Button type="button" onClick={() => void executeSelectedMerges()} disabled={working}>
-                  {working
-                    ? "Merging..."
-                    : `Merge Selected Duplicates (${Object.keys(previewByDuplicate).length})`}
-                </Button>
+                    Open existing preview
+                  </Button>
+                ) : null}
               </div>
             </section>
           ) : null}
         </div>
       )}
+
+      {isResolverOpen && Object.keys(previewByDuplicate).length > 0 ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 p-4 pt-8">
+          <div className="max-h-[90vh] w-full max-w-6xl overflow-auto rounded-xl border border-slate-300 bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-base font-semibold text-slate-900">
+                  Step 3: Review and finalize merge preview
+                </p>
+                <p className="text-xs text-slate-600">
+                  Review each duplicate, resolve fields, then finish merge.
+                </p>
+              </div>
+              <Button type="button" variant="secondary" onClick={() => setIsResolverOpen(false)}>
+                Close
+              </Button>
+            </div>
+
+            <div className="mb-3 flex flex-wrap gap-2">
+              {Object.entries(previewByDuplicate).map(([duplicateId, preview]) => (
+                <button
+                  key={duplicateId}
+                  type="button"
+                  onClick={() => setActivePreviewDuplicateId(duplicateId)}
+                  className={`rounded-md border px-2 py-1 text-xs ${
+                    duplicateId === activePreviewDuplicateId
+                      ? "border-brand-300 bg-brand-50 text-brand-700"
+                      : "border-slate-300 bg-white text-slate-700"
+                  }`}
+                >
+                  {text(preview.duplicate.first_name)} {text(preview.duplicate.last_name)}
+                </button>
+              ))}
+            </div>
+
+            {activePreview ? (
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-xs font-semibold text-slate-700">Master Contact</p>
+                    <p className="text-sm text-slate-800">
+                      {text(activePreview.master.first_name)} {text(activePreview.master.last_name)}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {[text(activePreview.master.email), text(activePreview.master.phone), text(activePreview.master.address_line_1)]
+                        .filter(Boolean)
+                        .join(" • ") || "No details"}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 p-2">
+                    <p className="text-xs font-semibold text-slate-700">Duplicate Contact</p>
+                    <p className="text-sm text-slate-800">
+                      {text(activePreview.duplicate.first_name)} {text(activePreview.duplicate.last_name)}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {[
+                        text(activePreview.duplicate.email),
+                        text(activePreview.duplicate.phone),
+                        text(activePreview.duplicate.address_line_1)
+                      ]
+                        .filter(Boolean)
+                        .join(" • ") || "No details"}
+                    </p>
+                  </div>
+                </div>
+
+                {activePreview.conflicts.length > 0 ? (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    {activePreview.conflicts.length} conflicting fields detected for this duplicate.
+                  </p>
+                ) : null}
+
+                <div className="overflow-auto rounded-md border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-700">Field</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-700">Master Value</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-700">Duplicate Value</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-700">Final Value</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {FIELD_CONFIG.map((field) => (
+                        <tr key={field.key}>
+                          <td className="px-2 py-2 align-top font-medium text-slate-700">{field.label}</td>
+                          <td className="px-2 py-2 align-top">
+                            <button
+                              type="button"
+                              className="text-left text-slate-700 underline-offset-2 hover:underline"
+                              onClick={() =>
+                                setResolvedValue(
+                                  activePreviewDuplicateId,
+                                  field.key,
+                                  activePreview.master[field.key] ?? ""
+                                )
+                              }
+                            >
+                              {text(activePreview.master[field.key]) || "—"}
+                            </button>
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <button
+                              type="button"
+                              className="text-left text-slate-700 underline-offset-2 hover:underline"
+                              onClick={() =>
+                                setResolvedValue(
+                                  activePreviewDuplicateId,
+                                  field.key,
+                                  activePreview.duplicate[field.key] ?? ""
+                                )
+                              }
+                            >
+                              {text(activePreview.duplicate[field.key]) || "—"}
+                            </button>
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <Input
+                              value={text(
+                                resolvedByDuplicate[activePreviewDuplicateId]?.[field.key] ??
+                                  activePreview.suggestedResolution?.[field.key]
+                              )}
+                              onChange={(event) =>
+                                setResolvedValue(activePreviewDuplicateId, field.key, event.target.value)
+                              }
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <label className="block space-y-1 text-xs text-slate-600">
+                  Communication Preferences (comma separated)
+                  <Input
+                    value={
+                      Array.isArray(
+                        resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
+                          activePreview.suggestedResolution?.communication_preferences
+                      )
+                        ? (
+                            (resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
+                              activePreview.suggestedResolution?.communication_preferences) as unknown[]
+                          )
+                            .map((entry) => text(entry))
+                            .join(", ")
+                        : text(
+                            resolvedByDuplicate[activePreviewDuplicateId]?.communication_preferences ??
+                              activePreview.suggestedResolution?.communication_preferences
+                          )
+                    }
+                    onChange={(event) =>
+                      setResolvedValue(
+                        activePreviewDuplicateId,
+                        "communication_preferences",
+                        event.target.value
+                          .split(",")
+                          .map((entry) => entry.trim())
+                          .filter(Boolean)
+                      )
+                    }
+                  />
+                </label>
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setIsResolverOpen(false)}>
+                Close
+              </Button>
+              <Button type="button" onClick={() => void executeSelectedMerges()} disabled={working}>
+                {working
+                  ? "Merging..."
+                  : `Merge Selected Duplicates (${Object.keys(previewByDuplicate).length})`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
