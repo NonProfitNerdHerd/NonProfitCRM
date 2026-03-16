@@ -194,9 +194,9 @@ export function TagsDashboard({
       description: form.description || undefined,
       parentTagId: form.parentTagId || null,
       isActive: form.isActive,
-      color: form.color || null,
+      color: form.color || undefined,
       sortOrder: Number(form.sortOrder || 0),
-      externalKey: form.externalKey || null
+      externalKey: form.externalKey || undefined
     };
     const endpoint = editingTagId ? `/api/admin/tags/${editingTagId}` : "/api/admin/tags";
     const method = editingTagId ? "PATCH" : "POST";
@@ -207,7 +207,10 @@ export function TagsDashboard({
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      setError(payload?.message ?? "Unable to save tag.");
+      const issueSummary = payload?.issues
+        ? JSON.stringify(payload.issues)
+        : null;
+      setError(payload?.message ?? issueSummary ?? "Unable to save tag.");
       return;
     }
     setEditorOpen(false);
