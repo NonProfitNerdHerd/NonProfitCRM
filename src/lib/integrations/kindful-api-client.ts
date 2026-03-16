@@ -147,11 +147,31 @@ export class KindfulApiClient {
     return "api_key_header";
   }
 
-  private buildHeaders() {
+  private buildAuthHeaderCandidates() {
+    if (!this.token) return [] as string[];
+    const prefix = (this.authHeaderPrefix ?? "").trim();
+    const base = prefix
+      ? prefix.includes("{token}")
+        ? prefix.replaceAll("{token}", this.token)
+        : `${prefix}${this.token}`
+      : this.token;
+    const candidates = [
+      base,
+      `Token token=${this.token}`,
+      `Token token="${this.token}"`,
+      `Token ${this.token}`,
+      `Bearer ${this.token}`,
+      this.token
+    ].filter((value) => value.trim().length > 0);
+    const deduped = new Set<string>();
+    for (const candidate of candidates) deduped.add(candidate);
+    return Array.from(deduped);
+  }
+
+  private buildHeaders(authHeaderValue?: string) {
     const headers: HeadersInit = { "content-type": "application/json" };
     if (this.authMode() === "api_key_header" && this.token) {
-      const prefix = this.authHeaderPrefix ?? "";
-      headers[this.authHeaderName] = `${prefix}${this.token}`;
+      headers[this.authHeaderName] = authHeaderValue ?? this.buildAuthHeaderCandidates()[0] ?? this.token;
     }
     return headers;
   }
@@ -183,35 +203,54 @@ export class KindfulApiClient {
 
     let lastError: Error | null = null;
     const url = this.buildUrl(input.path);
+    const authCandidates =
+      this.authMode() === "api_key_header" ? this.buildAuthHeaderCandidates() : [""];
+    const requestAuthCandidates = authCandidates.length > 0 ? authCandidates : [""];
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
-      await this.paceRequest();
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-      try {
-        const response = await fetch(url, {
-          method: input.method,
-          headers: this.buildHeaders(),
-          body: input.method === "POST" ? JSON.stringify(input.body ?? {}) : undefined,
-          signal: controller.signal
-        });
-        clearTimeout(timeout);
-        const rawText = await response.text().catch(() => "");
-        const parsed = rawText ? (JSON.parse(rawText) as unknown) : {};
-        if (!response.ok) {
-          throw new Error(
-            `Kindful ${input.method} ${input.path} failed with HTTP ${response.status}: ${
-              rawText || "Request failed"
-            }`
-          );
+      for (let candidateIndex = 0; candidateIndex < requestAuthCandidates.length; candidateIndex += 1) {
+        await this.paceRequest();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+        const authHeaderValue =
+          this.authMode() === "api_key_header" ? requestAuthCandidates[candidateIndex] : undefined;
+        try {
+          const response = await fetch(url, {
+            method: input.method,
+            headers: this.buildHeaders(authHeaderValue),
+            body: input.method === "POST" ? JSON.stringify(input.body ?? {}) : undefined,
+            signal: controller.signal
+          });
+          clearTimeout(timeout);
+          const rawText = await response.text().catch(() => "");
+          const parsed = rawText ? (JSON.parse(rawText) as unknown) : {};
+          if (!response.ok) {
+            const is401 = response.status === 401;
+            const hasMoreAuthCandidates = candidateIndex < requestAuthCandidates.length - 1;
+            if (is401 && hasMoreAuthCandidates) {
+              continue;
+            }
+            const extraHint =
+              is401 && !hasMoreAuthCandidates
+                ? " Verify Application Token and environment (Sandbox vs Production)."
+                : "";
+            throw new Error(
+              `Kindful ${input.method} ${input.path} failed with HTTP ${response.status}: ${
+                rawText || "Request failed"
+              }.${extraHint}`
+            );
+          }
+          return parsed as T;
+        } catch (error) {
+          clearTimeout(timeout);
+          lastError =
+            error instanceof Error ? error : new Error(`Kindful request failed: ${String(error)}`);
+          if (candidateIndex < requestAuthCandidates.length - 1) {
+            continue;
+          }
         }
-        return parsed as T;
-      } catch (error) {
-        clearTimeout(timeout);
-        lastError =
-          error instanceof Error ? error : new Error(`Kindful request failed: ${String(error)}`);
-        if (attempt >= this.maxRetries) break;
-        await wait(this.backoffMs * 2 ** attempt);
       }
+      if (attempt >= this.maxRetries) break;
+      await wait(this.backoffMs * 2 ** attempt);
     }
     throw lastError ?? new Error("Kindful request failed.");
   }
