@@ -78,6 +78,7 @@ export function ContactsImportWizard() {
   const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = useState("");
+  const [mappingPreviewIndex, setMappingPreviewIndex] = useState(0);
 
   const [classification, setClassification] = useState<ContactClassificationInput>({
     contactType: "person",
@@ -183,12 +184,23 @@ export function ContactsImportWizard() {
     void loadMetadata();
   }, []);
 
+  useEffect(() => {
+    if (rows.length === 0 && mappingPreviewIndex !== 0) {
+      setMappingPreviewIndex(0);
+      return;
+    }
+    if (mappingPreviewIndex > rows.length - 1) {
+      setMappingPreviewIndex(Math.max(rows.length - 1, 0));
+    }
+  }, [rows, mappingPreviewIndex]);
+
   async function handleUpload(file: File | null) {
     if (!file) return;
     setError(null);
     setMessage(null);
     setRunResult(null);
     setCreatedFieldKeys([]);
+    setMappingPreviewIndex(0);
     setFileName(file.name);
     try {
       const lower = file.name.toLowerCase();
@@ -227,6 +239,7 @@ export function ContactsImportWizard() {
     setPreviewRows(parsed.rows.slice(0, 10));
     setSelectedSheet(parsed.selectedSheet);
     setMappings(buildSuggestedMappings(detectedHeaders));
+    setMappingPreviewIndex(0);
   }
 
   function applyTemplate(templateId: string) {
@@ -417,8 +430,24 @@ export function ContactsImportWizard() {
           duplicateHandling
         })
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.message ?? "Unable to run import.");
+      const rawPayload = await response.text();
+      let payload: Record<string, unknown> | null = null;
+      try {
+        payload = rawPayload ? (JSON.parse(rawPayload) as Record<string, unknown>) : null;
+      } catch {
+        payload = null;
+      }
+      if (!response.ok) {
+        const parts = [
+          toText(payload?.message) ||
+            toText(rawPayload) ||
+            "Unable to run import. The server did not return details.",
+          toText(payload?.details) ? `Details: ${toText(payload?.details)}` : "",
+          toText(payload?.hint) ? `Hint: ${toText(payload?.hint)}` : "",
+          toText(payload?.code) ? `Code: ${toText(payload?.code)}` : ""
+        ].filter(Boolean);
+        throw new Error(parts.join(" "));
+      }
       setRunResult(payload as Record<string, unknown>);
       setMessage("Import finished.");
     } catch (runError) {
@@ -604,6 +633,37 @@ export function ContactsImportWizard() {
               Save as Template
             </Button>
           </div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div>
+              <p className="text-sm font-medium text-slate-900">Mapping Record Preview</p>
+              <p className="text-xs text-slate-600">
+                Navigate source records to validate mapping values before import.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setMappingPreviewIndex((prev) => Math.max(prev - 1, 0))}
+                disabled={mappingPreviewIndex <= 0}
+              >
+                Previous
+              </Button>
+              <span className="text-xs text-slate-700">
+                Record {rows.length === 0 ? 0 : mappingPreviewIndex + 1} of {rows.length}
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  setMappingPreviewIndex((prev) => Math.min(prev + 1, Math.max(rows.length - 1, 0)))
+                }
+                disabled={rows.length === 0 || mappingPreviewIndex >= rows.length - 1}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
@@ -638,7 +698,7 @@ export function ContactsImportWizard() {
                     <tr key={mapping.sourceHeader} className="border-b border-slate-100">
                       <td className="py-2">{mapping.sourceHeader}</td>
                       <td className="py-2 text-slate-600">
-                        {toText(previewRows[0]?.[mapping.sourceHeader]) || "-"}
+                        {toText(rows[mappingPreviewIndex]?.[mapping.sourceHeader]) || "-"}
                       </td>
                       <td className="py-2">
                         <select

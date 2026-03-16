@@ -2,6 +2,25 @@ import { NextResponse } from "next/server";
 import { executeImportCenterJob } from "@/lib/import-center/execution-service";
 import { listImportCenterJobs } from "@/lib/import-center/contact-import-service";
 
+function errorResponse(error: unknown, fallback: string) {
+  const value = error as {
+    message?: string;
+    details?: string;
+    hint?: string;
+    code?: string;
+  };
+  const message = String(value?.message ?? "").trim() || fallback;
+  return NextResponse.json(
+    {
+      message,
+      details: value?.details ?? null,
+      hint: value?.hint ?? null,
+      code: value?.code ?? null
+    },
+    { status: 500 }
+  );
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -9,10 +28,7 @@ export async function GET(request: Request) {
     const jobs = await listImportCenterJobs(limit);
     return NextResponse.json({ jobs });
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Unable to load import history." },
-      { status: 500 }
-    );
+    return errorResponse(error, "Unable to load import history.");
   }
 }
 
@@ -31,9 +47,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Unable to execute import job." },
-      { status: 500 }
-    );
+    return errorResponse(error, "Unable to execute import job.");
   }
 }
