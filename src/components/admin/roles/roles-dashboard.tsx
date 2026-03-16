@@ -86,6 +86,34 @@ export function RolesDashboard({ roles }: { roles: RoleRow[] }) {
     return Array.from(moduleMap.values()).sort((a, b) => a.module.localeCompare(b.module));
   }, [roles]);
 
+  function downloadRolesByTableCsv() {
+    const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const header = ["Module / Table", ...roles.map((role) => role.name)];
+    const rowsForCsv = matrixRows.map((row) => {
+      const roleValues = roles.map((role) => {
+        const actions = Array.from(row.actionsByRole[role.key] ?? []).sort(
+          (a, b) =>
+            ACTION_ORDER.indexOf(a as (typeof ACTION_ORDER)[number]) -
+            ACTION_ORDER.indexOf(b as (typeof ACTION_ORDER)[number])
+        );
+        return actions.map((action) => actionLabel(action)).join("; ");
+      });
+      return [toTitle(row.module), ...roleValues];
+    });
+    const csv = [header, ...rowsForCsv]
+      .map((line) => line.map((cell) => escape(String(cell ?? ""))).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "roles-by-table.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
@@ -148,9 +176,14 @@ export function RolesDashboard({ roles }: { roles: RoleRow[] }) {
         </div>
       ) : (
         <section className="rounded-md border border-slate-200 p-4">
-          <p className="mb-3 text-sm text-slate-600">
-            Matrix view of module/table capabilities by role.
-          </p>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <p className="text-sm text-slate-600">
+              Matrix view of module/table capabilities by role.
+            </p>
+            <Button type="button" variant="secondary" onClick={downloadRolesByTableCsv}>
+              Download CSV
+            </Button>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-[980px] w-full text-left text-sm">
               <thead>
