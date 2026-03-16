@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -21,6 +21,8 @@ type TagNode = {
   sort_order?: number;
   children?: TagNode[];
 };
+
+export type TagsDashboardNode = TagNode;
 
 type JobRow = {
   id: string;
@@ -118,12 +120,6 @@ export function TagsDashboard({
     mappingStatus: "mapped" as "mapped" | "pending" | "error",
     isActive: true
   });
-
-  const tagMap = useMemo(() => {
-    const map = new Map<string, TagNode>();
-    for (const tag of tags) map.set(tag.id, tag);
-    return map;
-  }, [tags]);
 
   async function loadTaxonomy() {
     setLoadingTaxonomy(true);

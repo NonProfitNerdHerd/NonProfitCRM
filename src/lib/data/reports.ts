@@ -1037,7 +1037,7 @@ export async function getContactTagRollupSummary() {
     org_id: context.organizationId
   });
   if (error) throw error;
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: Record<string, unknown>) => ({
     tagId: text(row.tag_id),
     tagName: text(row.tag_name),
     tagPath: text(row.tag_path),

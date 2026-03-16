@@ -1,7 +1,7 @@
 import { Card, CardHeader } from "@/components/ui/card";
 import { requireAnyStaffPermission } from "@/lib/auth/guards";
 import { listTagDefinitions } from "@/lib/data/tags";
-import { TagsDashboard } from "@/components/admin/tags/tags-dashboard";
+import { TagsDashboard, type TagsDashboardNode } from "@/components/admin/tags/tags-dashboard";
 
 export default async function TagsAdminPage() {
   await requireAnyStaffPermission(["can_assign_contact_tags", "can_manage_contact_tags"]);
@@ -13,7 +13,10 @@ export default async function TagsAdminPage() {
         title="Contact Tags"
         subtitle="Manage taxonomy hierarchy, bulk tag jobs, and integration mappings"
       />
-      <TagsDashboard initialTree={initial.tree} initialTags={initial.tags} />
+      <TagsDashboard
+        initialTree={initial.tree as TagsDashboardNode[]}
+        initialTags={initial.tags as TagsDashboardNode[]}
+      />
     </Card>
   );
 }

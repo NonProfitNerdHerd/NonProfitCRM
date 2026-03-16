@@ -92,26 +92,6 @@ async function assertDataEntryCanEditContact(
   }
 }
 
-function applyModeToContactQuery(
-  query: any,
-  mode: ContactMode
-) {
-  let updated = query;
-  if (mode === "donors") {
-    updated = updated.eq("entity_type", "person").eq("tracking_status", "donor");
-  }
-  if (mode === "contacts" || mode === "personal") {
-    updated = updated.eq("entity_type", "person").in("tracking_status", ["lead", "non_lead"]);
-  }
-  if (mode === "donor_organizations") {
-    updated = updated.eq("entity_type", "organization").eq("tracking_status", "donor");
-  }
-  if (mode === "organizations") {
-    updated = updated.eq("entity_type", "organization").in("tracking_status", ["lead", "non_lead"]);
-  }
-  return updated;
-}
-
 async function resolveDescendantMap(
   organizationId: string,
   tagIds: string[],
@@ -469,7 +449,9 @@ export async function getTagUsage(tagId: string) {
     org_id: context.organizationId
   });
   if (rollupError) throw rollupError;
-  const rollup = (rollups ?? []).find((entry) => toText(entry.tag_id) === tagId);
+  const rollup = (rollups ?? []).find(
+    (entry: Record<string, unknown>) => toText(entry.tag_id) === tagId
+  );
 
   return {
     tag,
@@ -734,7 +716,18 @@ export async function resolveContactIdsForFilter(
     .order("last_name", { ascending: true })
     .limit(limit);
 
-  query = applyModeToContactQuery(query, mode);
+  if (mode === "donors") {
+    query = query.eq("entity_type", "person").eq("tracking_status", "donor");
+  }
+  if (mode === "contacts" || mode === "personal") {
+    query = query.eq("entity_type", "person").in("tracking_status", ["lead", "non_lead"]);
+  }
+  if (mode === "donor_organizations") {
+    query = query.eq("entity_type", "organization").eq("tracking_status", "donor");
+  }
+  if (mode === "organizations") {
+    query = query.eq("entity_type", "organization").in("tracking_status", ["lead", "non_lead"]);
+  }
 
   if (q) {
     const like = `%${q}%`;
