@@ -56,6 +56,12 @@ export function GivingFuelDonationsSetup({
   const [error, setError] = useState<string | null>(null);
   const [mappingEdits, setMappingEdits] = useState<Record<string, { targetId: string }>>({});
   const [savingMappingId, setSavingMappingId] = useState<string | null>(null);
+  const [resolvingErrorId, setResolvingErrorId] = useState<string | null>(null);
+  const [bulkResolving, setBulkResolving] = useState(false);
+  const [bulkResolveProgress, setBulkResolveProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [payloadViewer, setPayloadViewer] = useState<Record<string, unknown> | null>(null);
 
   const apiPaused = Boolean(data.apiPaused);
@@ -167,20 +173,77 @@ export function GivingFuelDonationsSetup({
     }
   }
 
+  async function resolveErrorById(errorId: string) {
+    const response = await fetch(
+      `/api/admin/integrations/${encodeURIComponent(integrationKey)}/errors/${encodeURIComponent(errorId)}/resolve`,
+      { method: "POST" }
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.message ?? "Unable to resolve error.");
+    return payload as { message?: string };
+  }
+
   async function resolveError(errorId: string) {
+    setResolvingErrorId(errorId);
     setMessage(null);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/admin/integrations/${encodeURIComponent(integrationKey)}/errors/${encodeURIComponent(errorId)}/resolve`,
-        { method: "POST" }
-      );
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.message ?? "Unable to resolve error.");
+      const payload = await resolveErrorById(errorId);
       await refreshDetail();
       setMessage(payload?.message ?? "Error marked as resolved.");
     } catch (resolveErrorValue) {
       setError(resolveErrorValue instanceof Error ? resolveErrorValue.message : "Unable to resolve error.");
+    } finally {
+      setResolvingErrorId(null);
+    }
+  }
+
+  async function resolveAllOpenDonationErrors() {
+    setMessage(null);
+    setError(null);
+    if (openDonationErrors.length === 0) {
+      setMessage("No open donation errors to resolve.");
+      return;
+    }
+
+    setBulkResolving(true);
+    setBulkResolveProgress({ done: 0, total: openDonationErrors.length });
+    let resolvedCount = 0;
+    let failedCount = 0;
+    try {
+      for (let index = 0; index < openDonationErrors.length; index += 1) {
+        const row = openDonationErrors[index];
+        const errorId = String(row.id ?? "");
+        setBulkResolveProgress({ done: index, total: openDonationErrors.length });
+        if (!errorId) {
+          failedCount += 1;
+          continue;
+        }
+        try {
+          await resolveErrorById(errorId);
+          resolvedCount += 1;
+        } catch {
+          failedCount += 1;
+        }
+      }
+      setBulkResolveProgress({ done: openDonationErrors.length, total: openDonationErrors.length });
+      await refreshDetail();
+      if (failedCount > 0) {
+        setError(
+          `Resolve All finished: ${resolvedCount} resolved, ${failedCount} failed. Failed items remain in the queue.`
+        );
+      } else {
+        setMessage(`Resolve All completed: ${resolvedCount} item(s) resolved.`);
+      }
+    } catch (bulkError) {
+      setError(
+        bulkError instanceof Error
+          ? bulkError.message
+          : "Unable to complete Resolve All for donation errors."
+      );
+    } finally {
+      setBulkResolving(false);
+      setBulkResolveProgress(null);
     }
   }
 
@@ -211,6 +274,10 @@ export function GivingFuelDonationsSetup({
   const donationErrors = useMemo(
     () => data.errors.filter((row) => String(row.entity_type ?? "").toLowerCase() === "donation"),
     [data.errors]
+  );
+  const openDonationErrors = useMemo(
+    () => donationErrors.filter((row) => String(row.status ?? "").toLowerCase() !== "resolved"),
+    [donationErrors]
   );
   const campaignNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -472,6 +539,24 @@ export function GivingFuelDonationsSetup({
                 forms are mapped.
               </p>
             ) : null}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-900">Donation Error Queue</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void resolveAllOpenDonationErrors()}
+                  disabled={bulkResolving || openDonationErrors.length === 0}
+                >
+                  {bulkResolving ? "Resolving All..." : "Resolve All Open"}
+                </Button>
+              </div>
+              {bulkResolveProgress ? (
+                <p className="text-xs text-slate-500">
+                  Resolving {bulkResolveProgress.done} of {bulkResolveProgress.total}...
+                </p>
+              ) : null}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -652,11 +737,17 @@ export function GivingFuelDonationsSetup({
                             type="button"
                             variant="secondary"
                             onClick={() => void resolveError(String(row.id))}
-                            disabled={String(row.status ?? "").toLowerCase() === "resolved"}
+                            disabled={
+                              bulkResolving ||
+                              resolvingErrorId === String(row.id) ||
+                              String(row.status ?? "").toLowerCase() === "resolved"
+                            }
                           >
                             {String(row.status ?? "").toLowerCase() === "resolved"
                               ? "Resolved"
-                              : "Resolve"}
+                              : resolvingErrorId === String(row.id)
+                                ? "Resolving..."
+                                : "Resolve"}
                           </Button>
                         </div>
                       </td>
