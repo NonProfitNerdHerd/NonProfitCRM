@@ -51,6 +51,7 @@ export function GivingFuelDonationsSetup({
   const [apiKey, setApiKey] = useState("");
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
   const [step3Tab, setStep3Tab] = useState<"errors" | "jobs">("errors");
+  const [donationErrorFilter, setDonationErrorFilter] = useState<"open" | "resolved">("open");
   const [loading, setLoading] = useState<"test" | "save" | "sync" | "detect" | null>(null);
   const [mappingLoading, setMappingLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -280,6 +281,12 @@ export function GivingFuelDonationsSetup({
     () => donationErrors.filter((row) => String(row.status ?? "").toLowerCase() !== "resolved"),
     [donationErrors]
   );
+  const filteredDonationErrors = useMemo(() => {
+    if (donationErrorFilter === "resolved") {
+      return donationErrors.filter((row) => String(row.status ?? "").toLowerCase() === "resolved");
+    }
+    return donationErrors.filter((row) => String(row.status ?? "").toLowerCase() !== "resolved");
+  }, [donationErrorFilter, donationErrors]);
   const campaignNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const campaign of mappingData?.campaigns ?? []) {
@@ -675,14 +682,30 @@ export function GivingFuelDonationsSetup({
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-900">Donation Error Queue</p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void resolveAllOpenDonationErrors()}
-                      disabled={bulkResolving || openDonationErrors.length === 0}
-                    >
-                      {bulkResolving ? "Resolving All..." : "Resolve All Open"}
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="text-xs font-medium uppercase tracking-wide text-slate-500" htmlFor="donation-error-filter">
+                        Status
+                      </label>
+                      <select
+                        id="donation-error-filter"
+                        className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                        value={donationErrorFilter}
+                        onChange={(event) =>
+                          setDonationErrorFilter(event.target.value as "open" | "resolved")
+                        }
+                      >
+                        <option value="open">Not Resolved</option>
+                        <option value="resolved">Resolved</option>
+                      </select>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void resolveAllOpenDonationErrors()}
+                        disabled={bulkResolving || openDonationErrors.length === 0}
+                      >
+                        {bulkResolving ? "Resolving All..." : "Resolve All Open"}
+                      </Button>
+                    </div>
                   </div>
                   {bulkResolveProgress ? (
                     <p className="text-xs text-slate-500">
@@ -702,7 +725,7 @@ export function GivingFuelDonationsSetup({
                       </tr>
                     </thead>
                     <tbody>
-                      {donationErrors.map((row) => (
+                      {filteredDonationErrors.map((row) => (
                         <tr key={String(row.id)} className="border-b border-slate-100">
                           <td className="py-2">{String(row.id ?? "-")}</td>
                           <td className="py-2">{String(row.source_record_id ?? "-")}</td>
@@ -739,10 +762,10 @@ export function GivingFuelDonationsSetup({
                           </td>
                         </tr>
                       ))}
-                      {donationErrors.length === 0 ? (
+                      {filteredDonationErrors.length === 0 ? (
                         <tr>
                           <td className="py-3 text-slate-500" colSpan={5}>
-                            No donation errors.
+                            No donation errors for this filter.
                           </td>
                         </tr>
                       ) : null}
