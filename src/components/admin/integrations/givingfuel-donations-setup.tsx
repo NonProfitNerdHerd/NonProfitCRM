@@ -50,6 +50,7 @@ export function GivingFuelDonationsSetup({
   const [mappingData, setMappingData] = useState<MappingPayload | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
+  const [step3Tab, setStep3Tab] = useState<"errors" | "jobs">("errors");
   const [loading, setLoading] = useState<"test" | "save" | "sync" | "detect" | null>(null);
   const [mappingLoading, setMappingLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -539,24 +540,6 @@ export function GivingFuelDonationsSetup({
                 forms are mapped.
               </p>
             ) : null}
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-slate-900">Donation Error Queue</p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => void resolveAllOpenDonationErrors()}
-                  disabled={bulkResolving || openDonationErrors.length === 0}
-                >
-                  {bulkResolving ? "Resolving All..." : "Resolve All Open"}
-                </Button>
-              </div>
-              {bulkResolveProgress ? (
-                <p className="text-xs text-slate-500">
-                  Resolving {bulkResolveProgress.done} of {bulkResolveProgress.total}...
-                </p>
-              ) : null}
-            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -670,99 +653,138 @@ export function GivingFuelDonationsSetup({
               </Button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-600">
-                    <th className="py-2">Job ID</th>
-                    <th className="py-2">Started</th>
-                    <th className="py-2">Completed</th>
-                    <th className="py-2">Status</th>
-                    <th className="py-2">Processed</th>
-                    <th className="py-2">Failed</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {donationJobs.map((job) => (
-                    <tr key={String(job.id)} className="border-b border-slate-100">
-                      <td className="py-2">{String(job.id ?? "-")}</td>
-                      <td className="py-2">{formatDateTime(job.started_date as string | null)}</td>
-                      <td className="py-2">{formatDateTime(job.completed_date as string | null)}</td>
-                      <td className="py-2">{String(job.status ?? "-")}</td>
-                      <td className="py-2">{String(job.records_processed ?? 0)}</td>
-                      <td className="py-2">{String(job.records_failed ?? 0)}</td>
-                    </tr>
-                  ))}
-                  {donationJobs.length === 0 ? (
-                    <tr>
-                      <td className="py-3 text-slate-500" colSpan={6}>
-                        No donation sync jobs yet.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+            <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+              <Button
+                type="button"
+                variant={step3Tab === "errors" ? "primary" : "secondary"}
+                onClick={() => setStep3Tab("errors")}
+              >
+                Error ID
+              </Button>
+              <Button
+                type="button"
+                variant={step3Tab === "jobs" ? "primary" : "secondary"}
+                onClick={() => setStep3Tab("jobs")}
+              >
+                Job ID
+              </Button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-600">
-                    <th className="py-2">Error ID</th>
-                    <th className="py-2">Source Record</th>
-                    <th className="py-2">Error</th>
-                    <th className="py-2">Status</th>
-                    <th className="py-2">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {donationErrors.map((row) => (
-                    <tr key={String(row.id)} className="border-b border-slate-100">
-                      <td className="py-2">{String(row.id ?? "-")}</td>
-                      <td className="py-2">{String(row.source_record_id ?? "-")}</td>
-                      <td className="py-2">{String(row.error_message ?? "-")}</td>
-                      <td className="py-2">{String(row.status ?? "-")}</td>
-                      <td className="py-2">
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            onClick={() =>
-                              setPayloadViewer((row.payload_json as Record<string, unknown>) ?? {})
-                            }
-                          >
-                            Open Payload
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            onClick={() => void resolveError(String(row.id))}
-                            disabled={
-                              bulkResolving ||
-                              resolvingErrorId === String(row.id) ||
-                              String(row.status ?? "").toLowerCase() === "resolved"
-                            }
-                          >
-                            {String(row.status ?? "").toLowerCase() === "resolved"
-                              ? "Resolved"
-                              : resolvingErrorId === String(row.id)
-                                ? "Resolving..."
-                                : "Resolve"}
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {donationErrors.length === 0 ? (
-                    <tr>
-                      <td className="py-3 text-slate-500" colSpan={5}>
-                        No donation errors.
-                      </td>
-                    </tr>
+            {step3Tab === "errors" ? (
+              <>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900">Donation Error Queue</p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void resolveAllOpenDonationErrors()}
+                      disabled={bulkResolving || openDonationErrors.length === 0}
+                    >
+                      {bulkResolving ? "Resolving All..." : "Resolve All Open"}
+                    </Button>
+                  </div>
+                  {bulkResolveProgress ? (
+                    <p className="text-xs text-slate-500">
+                      Resolving {bulkResolveProgress.done} of {bulkResolveProgress.total}...
+                    </p>
                   ) : null}
-                </tbody>
-              </table>
-            </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-600">
+                        <th className="py-2">Error ID</th>
+                        <th className="py-2">Source Record</th>
+                        <th className="py-2">Error</th>
+                        <th className="py-2">Status</th>
+                        <th className="py-2">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {donationErrors.map((row) => (
+                        <tr key={String(row.id)} className="border-b border-slate-100">
+                          <td className="py-2">{String(row.id ?? "-")}</td>
+                          <td className="py-2">{String(row.source_record_id ?? "-")}</td>
+                          <td className="py-2">{String(row.error_message ?? "-")}</td>
+                          <td className="py-2">{String(row.status ?? "-")}</td>
+                          <td className="py-2">
+                            <div className="flex flex-wrap gap-1">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() =>
+                                  setPayloadViewer((row.payload_json as Record<string, unknown>) ?? {})
+                                }
+                              >
+                                Open Payload
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void resolveError(String(row.id))}
+                                disabled={
+                                  bulkResolving ||
+                                  resolvingErrorId === String(row.id) ||
+                                  String(row.status ?? "").toLowerCase() === "resolved"
+                                }
+                              >
+                                {String(row.status ?? "").toLowerCase() === "resolved"
+                                  ? "Resolved"
+                                  : resolvingErrorId === String(row.id)
+                                    ? "Resolving..."
+                                    : "Resolve"}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {donationErrors.length === 0 ? (
+                        <tr>
+                          <td className="py-3 text-slate-500" colSpan={5}>
+                            No donation errors.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-600">
+                      <th className="py-2">Job ID</th>
+                      <th className="py-2">Started</th>
+                      <th className="py-2">Completed</th>
+                      <th className="py-2">Status</th>
+                      <th className="py-2">Processed</th>
+                      <th className="py-2">Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {donationJobs.map((job) => (
+                      <tr key={String(job.id)} className="border-b border-slate-100">
+                        <td className="py-2">{String(job.id ?? "-")}</td>
+                        <td className="py-2">{formatDateTime(job.started_date as string | null)}</td>
+                        <td className="py-2">{formatDateTime(job.completed_date as string | null)}</td>
+                        <td className="py-2">{String(job.status ?? "-")}</td>
+                        <td className="py-2">{String(job.records_processed ?? 0)}</td>
+                        <td className="py-2">{String(job.records_failed ?? 0)}</td>
+                      </tr>
+                    ))}
+                    {donationJobs.length === 0 ? (
+                      <tr>
+                        <td className="py-3 text-slate-500" colSpan={6}>
+                          No donation sync jobs yet.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         ) : null}
       </section>
