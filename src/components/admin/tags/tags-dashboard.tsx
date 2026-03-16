@@ -129,6 +129,19 @@ export function TagsDashboard({
     return map;
   }, [tags]);
 
+  const parentTagOptions = useMemo(() => {
+    return [...tags]
+      .sort((a, b) => a.path.localeCompare(b.path))
+      .map((tag) => {
+        const level = Math.max(Number(tag.level || 1), 1);
+        const prefix = `${"-".repeat(level)} `;
+        return {
+          id: tag.id,
+          label: `${prefix}${tag.name}`
+        };
+      });
+  }, [tags]);
+
   const pathPreview = useMemo(() => {
     const parentPath = form.parentTagId ? toText(tagById.get(form.parentTagId)?.path) : "";
     const name = toText(form.name);
@@ -979,11 +992,11 @@ export function TagsDashboard({
                   }
                 >
                   <option value="">Top-level</option>
-                  {tags
+                  {parentTagOptions
                     .filter((tag) => tag.id !== editingTagId)
                     .map((tag) => (
                       <option key={tag.id} value={tag.id}>
-                        {tag.path}
+                        {tag.label}
                       </option>
                     ))}
                 </select>
