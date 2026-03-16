@@ -1,11 +1,11 @@
 import { Card, CardHeader } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import { requireAdministratorRole } from "@/lib/auth/guards";
+import { requireStaffPermission } from "@/lib/auth/guards";
 import { ROLE_HIERARCHY_DESCRIPTIONS, roleOrderScore } from "@/lib/auth/role-hierarchy";
 import { RolesDashboard } from "@/components/admin/roles/roles-dashboard";
 
 export default async function RoleTemplatesPage() {
-  const context = await requireAdministratorRole();
+  const context = await requireStaffPermission("can_view_roles");
   const supabase = await createClient();
 
   const { data: templates } = await supabase
@@ -57,7 +57,7 @@ export default async function RoleTemplatesPage() {
     <Card>
       <CardHeader
         title="Roles"
-        subtitle="Administrator-only role hierarchy and capability matrix"
+        subtitle="Role hierarchy and capability matrix (view-only unless Administrator)"
       />
       <RolesDashboard roles={roles} />
     </Card>

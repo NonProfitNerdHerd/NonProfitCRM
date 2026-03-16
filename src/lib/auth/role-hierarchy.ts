@@ -1,5 +1,6 @@
 export const ROLE_HIERARCHY_ORDER = [
   "administrator",
+  "data_steward",
   "data_administrator",
   "executive_staff",
   "staff_pii",
@@ -13,6 +14,8 @@ export type CanonicalRoleKey = (typeof ROLE_HIERARCHY_ORDER)[number];
 export const ROLE_HIERARCHY_DESCRIPTIONS: Record<CanonicalRoleKey, string> = {
   administrator:
     "Full system access. Can manage users, roles, integrations, and all operational/financial modules.",
+  data_steward:
+    "Enhanced data operations role. Includes Staff PII capabilities plus integration setup and broad data edit/delete access. View-only for users and roles.",
   data_administrator:
     "High-privilege data operations role. Can manage integrations and mass-delete workflows, but cannot edit role definitions.",
   executive_staff:

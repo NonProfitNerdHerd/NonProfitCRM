@@ -38,6 +38,8 @@ export type PermissionKey =
   | "can_build_reports"
   | "can_export_csv"
   | "can_export_excel"
+  | "can_view_users"
+  | "can_view_roles"
   | "can_manage_users"
   | "can_manage_integrations"
   | "can_mass_delete_records"

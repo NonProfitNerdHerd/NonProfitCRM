@@ -1,21 +1,26 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { requireAdministratorRole } from "@/lib/auth/guards";
+import { requireStaffPermission } from "@/lib/auth/guards";
 import { listAdminUsersData } from "@/lib/data/admin-users";
 import { UsersManagement } from "@/components/admin/users-management";
 
 export default async function UserManagementPage() {
-  await requireAdministratorRole();
-  const { users, roles } = await listAdminUsersData();
+  await requireStaffPermission("can_view_users");
+  const { users, roles, canManageUsers } = await listAdminUsersData();
 
   return (
     <Card>
       <CardHeader
         title="User Management"
-        subtitle="Administrator-only: create users, assign roles, and manage active status"
+        subtitle={
+          canManageUsers
+            ? "Create users, assign roles, and manage active status"
+            : "Read-only view of users and role assignments"
+        }
       />
       <UsersManagement
         initialUsers={users}
         roles={roles}
+        canManageUsers={canManageUsers}
       />
     </Card>
   );

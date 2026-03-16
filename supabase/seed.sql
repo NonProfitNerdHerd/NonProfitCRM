@@ -25,6 +25,8 @@ values
   ('can_build_reports', 'Build Reports', 'Create and edit saved reports', 'reports'),
   ('can_export_csv', 'Export CSV', 'Export report data as CSV', 'reports'),
   ('can_export_excel', 'Export Excel', 'Export report data as Excel', 'reports'),
+  ('can_view_users', 'View Users', 'View organization users and their role assignments', 'admin'),
+  ('can_view_roles', 'View Roles', 'View role templates and capability matrix', 'admin'),
   ('can_manage_users', 'Manage Users', 'Manage organization users and role assignments', 'admin'),
   ('can_manage_org_settings', 'Manage Org Settings', 'Manage organization settings', 'admin'),
   ('can_view_audit_log', 'View Audit Log', 'Read audit log events', 'admin'),
@@ -44,6 +46,7 @@ values
   (null, 'data_entry', 'Data Entry', 'Operational data-entry access', true),
   (null, 'staff_non_pii', 'Staff Non-PII Access', 'Staff access without PII visibility', true),
   (null, 'staff_pii', 'Staff PII Access', 'Staff access including protected PII', true),
+  (null, 'data_steward', 'Data Steward', 'Enhanced data stewardship with integration setup and controlled delete access', true),
   (null, 'administrator', 'Administrator', 'Administrative access with governance controls', true),
   (null, 'executive_staff', 'Executive Staff', 'Leadership role with reporting and financial views', true)
 on conflict (key) where organization_id is null
@@ -461,6 +464,7 @@ with system_roles as (
   where organization_id is null
     and key in (
       'administrator',
+      'data_steward',
       'data_administrator',
       'executive_staff',
       'staff_pii',
@@ -502,6 +506,8 @@ with canonical_map as (
     'can_build_reports',
     'can_export_csv',
     'can_export_excel',
+    'can_view_users',
+    'can_view_roles',
     'can_manage_users',
     'can_manage_org_settings',
     'can_manage_role_templates',
@@ -511,6 +517,43 @@ with canonical_map as (
     'can_view_financial_summaries',
     'can_create_projects'
   ]) as permission_key
+  union all
+  select 'data_steward', unnest(array[
+    'can_view_dashboard',
+    'can_view_contacts',
+    'can_create_contacts',
+    'can_edit_contacts',
+    'can_delete_contacts',
+    'can_view_pii',
+    'can_view_sensitive_notes',
+    'can_view_sensitive_tasks',
+    'can_create_notes',
+    'can_edit_notes',
+    'can_delete_notes',
+    'can_create_tasks',
+    'can_edit_tasks',
+    'can_delete_tasks',
+    'can_view_donations',
+    'can_create_donations',
+    'can_edit_donations',
+    'can_create_campaigns',
+    'can_manage_memberships',
+    'can_view_member_records',
+    'can_view_communications',
+    'can_manage_communications',
+    'can_manage_imports',
+    'can_run_reports',
+    'can_build_reports',
+    'can_export_csv',
+    'can_export_excel',
+    'can_manage_integrations',
+    'can_mass_delete_records',
+    'can_view_users',
+    'can_view_roles',
+    'can_view_audit_log',
+    'can_view_financial_summaries',
+    'can_create_projects'
+  ])
   union all
   select 'data_administrator', unnest(array[
     'can_view_dashboard',
@@ -542,6 +585,8 @@ with canonical_map as (
     'can_export_excel',
     'can_manage_integrations',
     'can_mass_delete_records',
+    'can_view_users',
+    'can_view_roles',
     'can_view_audit_log',
     'can_view_financial_summaries',
     'can_create_projects'

@@ -39,10 +39,12 @@ function isValidEmail(email: string) {
 
 export function UsersManagement({
   initialUsers,
-  roles
+  roles,
+  canManageUsers = true
 }: {
   initialUsers: UserRow[];
   roles: RoleTemplate[];
+  canManageUsers?: boolean;
 }) {
   const [users, setUsers] = useState(initialUsers);
   const [search, setSearch] = useState("");
@@ -358,12 +360,16 @@ export function UsersManagement({
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Users</h3>
           <p className="text-xs text-slate-600">
-            View, create, and manage users and role assignments.
+            {canManageUsers
+              ? "View, create, and manage users and role assignments."
+              : "Read-only view of users and assigned roles."}
           </p>
         </div>
-        <Button type="button" onClick={() => setIsCreateOpen(true)}>
-          New User
-        </Button>
+        {canManageUsers ? (
+          <Button type="button" onClick={() => setIsCreateOpen(true)}>
+            New User
+          </Button>
+        ) : null}
       </section>
 
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
@@ -454,20 +460,22 @@ export function UsersManagement({
                 </div>
               </div>
 
-              <Button
-                type="button"
-                variant="secondary"
-                className="mt-3 w-full"
-                onClick={() => openEditModal(user)}
-              >
-                Edit User and Role
-              </Button>
+              {canManageUsers ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="mt-3 w-full"
+                  onClick={() => openEditModal(user)}
+                >
+                  Edit User and Role
+                </Button>
+              ) : null}
             </article>
           ))
         )}
       </section>
 
-      {isCreateOpen ? (
+      {isCreateOpen && canManageUsers ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
@@ -566,7 +574,7 @@ export function UsersManagement({
         </div>
       ) : null}
 
-      {editingUser ? (
+      {editingUser && canManageUsers ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">

@@ -9,6 +9,7 @@ export type SessionContext = {
 
 export type RoleKey =
   | "administrator"
+  | "data_steward"
   | "data_administrator"
   | "executive_staff"
   | "staff_pii"
@@ -119,7 +120,7 @@ export async function requireAdministratorRole(): Promise<SessionContext> {
 }
 
 export async function requireIntegrationManagerRole(): Promise<SessionContext> {
-  return requireRoleKeys(["administrator", "data_administrator"]);
+  return requireRoleKeys(["administrator", "data_steward", "data_administrator"]);
 }
 
 export async function requirePortalIdentity(): Promise<SessionContext> {
