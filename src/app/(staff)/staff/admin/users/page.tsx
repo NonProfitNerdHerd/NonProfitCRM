@@ -1,10 +1,10 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { requireStaffPermission } from "@/lib/auth/guards";
+import { requireAnyStaffPermission } from "@/lib/auth/guards";
 import { listAdminUsersData } from "@/lib/data/admin-users";
 import { UsersManagement } from "@/components/admin/users-management";
 
 export default async function UserManagementPage() {
-  await requireStaffPermission("can_view_users");
+  await requireAnyStaffPermission(["can_view_users", "can_manage_users"]);
   const { users, roles, canManageUsers } = await listAdminUsersData();
 
   return (

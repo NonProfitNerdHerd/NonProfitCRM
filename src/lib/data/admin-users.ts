@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireAdministratorRole, requireStaffPermission } from "@/lib/auth/guards";
+import {
+  requireAdministratorRole,
+  requireAnyStaffPermission
+} from "@/lib/auth/guards";
 import { ROLE_HIERARCHY_DESCRIPTIONS, roleOrderScore } from "@/lib/auth/role-hierarchy";
 import { logAuditEvent } from "@/lib/data/audit";
 
@@ -60,7 +63,10 @@ function validateRoleIds(roles: string[], roleRows: RoleTemplateRow[]) {
 }
 
 export async function listAdminUsersData() {
-  const context = await requireStaffPermission("can_view_users");
+  const context = await requireAnyStaffPermission([
+    "can_view_users",
+    "can_manage_users"
+  ]);
   const supabase = await createClient();
   const { data: canManageUsersRaw } = await supabase.rpc("has_permission", {
     org_id: context.organizationId,

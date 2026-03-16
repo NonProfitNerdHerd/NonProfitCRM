@@ -75,6 +75,26 @@ export async function requireStaffPermission(
   return context;
 }
 
+export async function requireAnyStaffPermission(
+  permissions: PermissionKey[]
+): Promise<SessionContext> {
+  const context = await requireSessionContext();
+  const supabase = await createClient();
+
+  for (const permission of permissions) {
+    const { data, error } = await supabase.rpc("has_permission", {
+      org_id: context.organizationId,
+      permission_key: permission
+    });
+    if (!error && Boolean(data)) {
+      return context;
+    }
+  }
+
+  redirect("/unauthorized");
+  return context;
+}
+
 export async function getPrimaryRoleKey(context?: SessionContext): Promise<RoleKey | null> {
   const resolvedContext = context ?? (await requireSessionContext());
   const supabase = await createClient();

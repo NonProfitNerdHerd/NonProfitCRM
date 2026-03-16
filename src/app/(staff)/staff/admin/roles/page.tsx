@@ -1,11 +1,14 @@
 import { Card, CardHeader } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import { requireStaffPermission } from "@/lib/auth/guards";
+import { requireAnyStaffPermission } from "@/lib/auth/guards";
 import { ROLE_HIERARCHY_DESCRIPTIONS, roleOrderScore } from "@/lib/auth/role-hierarchy";
 import { RolesDashboard } from "@/components/admin/roles/roles-dashboard";
 
 export default async function RoleTemplatesPage() {
-  const context = await requireStaffPermission("can_view_roles");
+  const context = await requireAnyStaffPermission([
+    "can_view_roles",
+    "can_manage_role_templates"
+  ]);
   const supabase = await createClient();
 
   const { data: templates } = await supabase
