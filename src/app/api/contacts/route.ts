@@ -3,7 +3,11 @@ import { contactSchema } from "@/lib/validation/contact";
 import { createContact } from "@/lib/data/contacts";
 import { assignTagsToContact, resolveContactIdsForFilter } from "@/lib/data/tags";
 import { logAuditEvent } from "@/lib/data/audit";
-import { requireSessionContext, requireStaffPermission } from "@/lib/auth/guards";
+import {
+  hasAnyStaffPermission,
+  requireSessionContext,
+  requireStaffPermission
+} from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 
 function parseTagIds(raw: string | null) {
@@ -64,17 +68,10 @@ export async function GET(request: Request) {
       { limit: 50000 }
     );
 
-    const [{ data: canAssign }, { data: canManage }] = await Promise.all([
-      supabase.rpc("has_permission", {
-        org_id: context.organizationId,
-        permission_key: "can_assign_contact_tags"
-      }),
-      supabase.rpc("has_permission", {
-        org_id: context.organizationId,
-        permission_key: "can_manage_contact_tags"
-      })
-    ]);
-    const canReadTags = Boolean(canAssign) || Boolean(canManage);
+    const canReadTags = await hasAnyStaffPermission(
+      ["can_assign_contact_tags", "can_manage_contact_tags"],
+      context
+    );
 
     const selectedIds = resolved.contactIds.slice(offset, offset + limit);
     if (selectedIds.length === 0) {

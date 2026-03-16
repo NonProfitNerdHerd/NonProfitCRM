@@ -61,35 +61,86 @@ export async function requireStaffPermission(
   permission: PermissionKey
 ): Promise<SessionContext> {
   const context = await requireSessionContext();
+  const allowed = await hasStaffPermission(permission, context);
+  if (!allowed) {
+    redirect("/unauthorized");
+  }
+  return context;
+}
+
+async function hasAllowedRoleKey(
+  context: SessionContext,
+  allowedRoleKeys: string[]
+): Promise<boolean> {
+  const primaryRoleKey = await getPrimaryRoleKey(context);
+  if (primaryRoleKey && allowedRoleKeys.includes(primaryRoleKey)) {
+    return true;
+  }
+
+  const supabase = await createClient();
+  const { data: additionalRoleRows, error } = await supabase
+    .from("organization_user_role_assignments")
+    .select("role_templates(key)")
+    .eq("organization_id", context.organizationId)
+    .eq("user_id", context.userId);
+  if (error) return false;
+
+  const additionalRoleKeys = (additionalRoleRows ?? [])
+    .map((row) => {
+      const roleTemplate = Array.isArray(row.role_templates)
+        ? row.role_templates[0]
+        : row.role_templates;
+      return String((roleTemplate as { key?: string } | null)?.key ?? "");
+    })
+    .filter(Boolean);
+  return additionalRoleKeys.some((key) => allowedRoleKeys.includes(key));
+}
+
+export async function isAdministrator(context?: SessionContext): Promise<boolean> {
+  const resolvedContext = context ?? (await requireSessionContext());
+  return hasAllowedRoleKey(resolvedContext, ["administrator"]);
+}
+
+export async function hasStaffPermission(
+  permission: PermissionKey,
+  context?: SessionContext
+): Promise<boolean> {
+  const resolvedContext = context ?? (await requireSessionContext());
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("has_permission", {
-    org_id: context.organizationId,
+    org_id: resolvedContext.organizationId,
     permission_key: permission
   });
 
-  if (error || !data) {
-    redirect("/unauthorized");
+  if (!error && Boolean(data)) {
+    return true;
   }
 
-  return context;
+  // Backward-compatible admin fallback for environments where new granular
+  // permissions have not fully propagated yet.
+  return isAdministrator(resolvedContext);
+}
+
+export async function hasAnyStaffPermission(
+  permissions: PermissionKey[],
+  context?: SessionContext
+): Promise<boolean> {
+  const resolvedContext = context ?? (await requireSessionContext());
+  for (const permission of permissions) {
+    if (await hasStaffPermission(permission, resolvedContext)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function requireAnyStaffPermission(
   permissions: PermissionKey[]
 ): Promise<SessionContext> {
   const context = await requireSessionContext();
-  const supabase = await createClient();
-
-  for (const permission of permissions) {
-    const { data, error } = await supabase.rpc("has_permission", {
-      org_id: context.organizationId,
-      permission_key: permission
-    });
-    if (!error && Boolean(data)) {
-      return context;
-    }
-  }
+  const allowed = await hasAnyStaffPermission(permissions, context);
+  if (allowed) return context;
 
   redirect("/unauthorized");
   return context;
@@ -108,28 +159,8 @@ export async function getPrimaryRoleKey(context?: SessionContext): Promise<RoleK
 
 export async function requireRoleKeys(allowedRoleKeys: string[]): Promise<SessionContext> {
   const context = await requireSessionContext();
-  const primaryRoleKey = await getPrimaryRoleKey(context);
-  if (primaryRoleKey && allowedRoleKeys.includes(primaryRoleKey)) {
+  if (await hasAllowedRoleKey(context, allowedRoleKeys)) {
     return context;
-  }
-  const supabase = await createClient();
-  const { data: additionalRoleRows, error } = await supabase
-    .from("organization_user_role_assignments")
-    .select("role_templates(key)")
-    .eq("organization_id", context.organizationId)
-    .eq("user_id", context.userId);
-  if (!error) {
-    const additionalRoleKeys = (additionalRoleRows ?? [])
-      .map((row) => {
-        const roleTemplate = Array.isArray(row.role_templates)
-          ? row.role_templates[0]
-          : row.role_templates;
-        return String((roleTemplate as { key?: string } | null)?.key ?? "");
-      })
-      .filter(Boolean);
-    if (additionalRoleKeys.some((key) => allowedRoleKeys.includes(key))) {
-      return context;
-    }
   }
   redirect("/unauthorized");
   return context;

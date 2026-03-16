@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assignTagsToContact, listContactTags, removeTagsFromContact } from "@/lib/data/tags";
-import { requireSessionContext } from "@/lib/auth/guards";
-import { createClient } from "@/lib/supabase/server";
+import { hasAnyStaffPermission, requireSessionContext } from "@/lib/auth/guards";
 
 const mutationSchema = z.object({
   tagIds: z.array(z.string().uuid()).min(1).max(100),
@@ -20,19 +19,12 @@ export async function GET(_request: Request, { params }: RouteProps) {
   try {
     const { id } = await params;
     const context = await requireSessionContext();
-    const supabase = await createClient();
-    const [{ data: canAssignData }, { data: canManageData }] = await Promise.all([
-      supabase.rpc("has_permission", {
-        org_id: context.organizationId,
-        permission_key: "can_assign_contact_tags"
-      }),
-      supabase.rpc("has_permission", {
-        org_id: context.organizationId,
-        permission_key: "can_manage_contact_tags"
-      })
-    ]);
+    const canAssign = await hasAnyStaffPermission(
+      ["can_assign_contact_tags", "can_manage_contact_tags"],
+      context
+    );
     const tags = await listContactTags(id);
-    return NextResponse.json({ tags, canAssign: Boolean(canAssignData) || Boolean(canManageData) });
+    return NextResponse.json({ tags, canAssign });
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Unable to load contact tags" },
