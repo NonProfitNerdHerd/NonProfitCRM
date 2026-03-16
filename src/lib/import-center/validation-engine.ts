@@ -1,7 +1,8 @@
 import {
   CONTACT_STANDARD_FIELDS,
   type ImportCenterMapping,
-  type ContactClassificationInput
+  type ContactClassificationInput,
+  type ReimportMatchSettings
 } from "@/lib/import-center/types";
 
 function toText(value: unknown) {
@@ -10,6 +11,11 @@ function toText(value: unknown) {
 
 function normalizePhone(value: unknown) {
   return toText(value).replace(/\D+/g, "");
+}
+
+export function isBlankImportValue(value: unknown) {
+  if (value === null || value === undefined) return true;
+  return toText(value) === "";
 }
 
 export function validateContactImportPayload(input: {
@@ -46,6 +52,64 @@ export function validateContactImportPayload(input: {
   }
 
   return errors;
+}
+
+export function validateRerunMatchingConfig(input: {
+  rows: Array<Record<string, unknown>>;
+  rerunMatching?: ReimportMatchSettings;
+  validDestinationFields: string[];
+}) {
+  const errors: string[] = [];
+  const rerun = input.rerunMatching;
+  if (!rerun?.enabled) return errors;
+
+  const sourceColumn = toText(rerun.sourceMatchColumn);
+  const destinationField = toText(rerun.destinationMatchField);
+  if (!sourceColumn) {
+    errors.push("Re-Import Matching source key column is required.");
+  } else {
+    const sourceExists = input.rows.length === 0 || sourceColumn in input.rows[0];
+    if (!sourceExists) {
+      errors.push(`Re-Import source column "${sourceColumn}" was not found in the uploaded file.`);
+    }
+  }
+
+  if (!destinationField) {
+    errors.push("Re-Import Matching destination CRM field is required.");
+  } else if (!input.validDestinationFields.includes(destinationField)) {
+    errors.push(`Re-Import destination field "${destinationField}" is not valid.`);
+  }
+
+  return errors;
+}
+
+export function buildRerunMatchingWarnings(input: {
+  rows: Array<Record<string, unknown>>;
+  rerunMatching?: ReimportMatchSettings;
+}) {
+  const rerun = input.rerunMatching;
+  if (!rerun?.enabled || !toText(rerun.sourceMatchColumn)) {
+    return {
+      blankKeyCount: 0,
+      duplicateKeyCount: 0
+    };
+  }
+
+  const sourceColumn = toText(rerun.sourceMatchColumn);
+  const seen = new Set<string>();
+  let blankKeyCount = 0;
+  let duplicateKeyCount = 0;
+  for (const row of input.rows) {
+    const value = toText(row[sourceColumn]);
+    if (!value) {
+      blankKeyCount += 1;
+      continue;
+    }
+    const normalized = value.toLowerCase();
+    if (seen.has(normalized)) duplicateKeyCount += 1;
+    else seen.add(normalized);
+  }
+  return { blankKeyCount, duplicateKeyCount };
 }
 
 export function detectInFileDuplicateWarnings(input: {

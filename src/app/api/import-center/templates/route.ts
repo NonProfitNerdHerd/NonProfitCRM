@@ -30,7 +30,16 @@ export async function POST(request: Request) {
         contactCategory: "lead"
       },
       tagDelimiter: payload.tagDelimiter ?? null,
-      duplicateHandling: payload.duplicateHandling ?? "skip"
+      duplicateHandling: payload.duplicateHandling ?? "skip",
+      rerunMatching: payload.rerunMatching ?? {
+        enabled: false,
+        sourceMatchColumn: null,
+        destinationMatchField: null,
+        onMatchBehavior: "update_blank_only",
+        onNoMatchBehavior: "create_new",
+        ignoreBlankOverwrites: true,
+        missingKeyBehavior: "skip_row"
+      }
     });
     return NextResponse.json(template);
   } catch (error) {

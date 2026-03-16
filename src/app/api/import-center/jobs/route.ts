@@ -50,17 +50,19 @@ export async function POST(request: Request) {
         classification: payload.classification,
         templateId: payload.templateId ?? null,
         tagDelimiter: payload.tagDelimiter ?? null,
-        duplicateHandling: payload.duplicateHandling ?? "skip"
+        duplicateHandling: payload.duplicateHandling ?? "skip",
+        rerunMatching: payload.rerunMatching ?? undefined
       });
     } else if (action === "chunk") {
       result = await processContactsImportChunk({
         jobId: payload.jobId,
         rows: payload.rows ?? [],
         rowOffset: Number(payload.rowOffset ?? 0),
-        mappings: payload.mappings ?? [],
-        classification: payload.classification,
+        mappings: payload.mappings ?? undefined,
+        classification: payload.classification ?? undefined,
         tagDelimiter: payload.tagDelimiter ?? null,
-        duplicateHandling: payload.duplicateHandling ?? "skip"
+        duplicateHandling: payload.duplicateHandling ?? undefined,
+        rerunMatching: payload.rerunMatching ?? undefined
       });
     } else if (action === "complete") {
       result = await completeContactsImportJob({

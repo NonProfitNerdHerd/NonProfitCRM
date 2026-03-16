@@ -14,7 +14,8 @@ import {
 import type {
   ContactClassificationInput,
   ContactStandardFieldDefinition,
-  ImportCenterMapping
+  ImportCenterMapping,
+  ReimportMatchSettings
 } from "@/lib/import-center/types";
 
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -87,6 +88,15 @@ export function ContactsImportWizard() {
   const [mappings, setMappings] = useState<ImportCenterMapping[]>([]);
   const [tagDelimiter, setTagDelimiter] = useState(";");
   const [duplicateHandling, setDuplicateHandling] = useState<"skip" | "flag">("skip");
+  const [rerunMatching, setRerunMatching] = useState<ReimportMatchSettings>({
+    enabled: false,
+    sourceMatchColumn: null,
+    destinationMatchField: null,
+    onMatchBehavior: "update_blank_only",
+    onNoMatchBehavior: "create_new",
+    ignoreBlankOverwrites: true,
+    missingKeyBehavior: "skip_row"
+  });
   const [createdFieldKeys, setCreatedFieldKeys] = useState<string[]>([]);
 
   const [runResult, setRunResult] = useState<Record<string, unknown> | null>(null);
@@ -122,6 +132,43 @@ export function ContactsImportWizard() {
         .filter(Boolean),
     [mappings]
   );
+
+  const destinationMatchOptions = useMemo(() => {
+    const standard = metadata.standardFields
+      .filter((field) => field.key !== "tags")
+      .map((field) => ({
+        value: field.key,
+        label: field.label
+      }));
+    const custom = customFields
+      .map((field) => ({
+        value: `custom:${toText(field.internal_key)}`,
+        label: `${toText(field.field_label)} (Custom)`
+      }))
+      .filter((entry) => toText(entry.value));
+    return [...standard, ...custom];
+  }, [metadata.standardFields, customFields]);
+
+  const rerunWarnings = useMemo(() => {
+    if (!rerunMatching.enabled || !toText(rerunMatching.sourceMatchColumn)) {
+      return { blankKeyCount: 0, duplicateKeyCount: 0 };
+    }
+    const sourceColumn = toText(rerunMatching.sourceMatchColumn);
+    const seen = new Set<string>();
+    let blankKeyCount = 0;
+    let duplicateKeyCount = 0;
+    for (const row of rows) {
+      const key = toText(row[sourceColumn]);
+      if (!key) {
+        blankKeyCount += 1;
+        continue;
+      }
+      const normalized = key.toLowerCase();
+      if (seen.has(normalized)) duplicateKeyCount += 1;
+      else seen.add(normalized);
+    }
+    return { blankKeyCount, duplicateKeyCount };
+  }, [rerunMatching, rows]);
 
   const duplicateWarnings = useMemo(() => {
     const emailMap = mappings.find(
@@ -248,9 +295,39 @@ export function ContactsImportWizard() {
     setMappingPreviewIndex(0);
   }
 
+  function validateRerunMatchingForCurrentFile() {
+    if (!selectedTemplateId || !rerunMatching.enabled) return null;
+    const sourceColumn = toText(rerunMatching.sourceMatchColumn);
+    const destinationField = toText(rerunMatching.destinationMatchField);
+    if (!sourceColumn) {
+      return "Re-Import Matching requires a source key column.";
+    }
+    if (!headers.includes(sourceColumn)) {
+      return `Re-Import source key column "${sourceColumn}" does not exist in the uploaded file.`;
+    }
+    if (!destinationField) {
+      return "Re-Import Matching requires a destination CRM match field.";
+    }
+    if (!destinationMatchOptions.some((option) => option.value === destinationField)) {
+      return `Destination CRM field "${destinationField}" is not valid.`;
+    }
+    return null;
+  }
+
   function applyTemplate(templateId: string) {
     setSelectedTemplateId(templateId);
-    if (!templateId) return;
+    if (!templateId) {
+      setRerunMatching({
+        enabled: false,
+        sourceMatchColumn: null,
+        destinationMatchField: null,
+        onMatchBehavior: "update_blank_only",
+        onNoMatchBehavior: "create_new",
+        ignoreBlankOverwrites: true,
+        missingKeyBehavior: "skip_row"
+      });
+      return;
+    }
     const template = metadata.templates.find((entry) => toText(entry.id) === templateId);
     if (!template) return;
 
@@ -260,6 +337,24 @@ export function ContactsImportWizard() {
       ? (template.mapping_configuration as ImportCenterMapping[])
       : [];
     const tagConfig = (template.tag_configuration ?? {}) as Record<string, unknown>;
+    const templateRerun = {
+      enabled: Boolean(template.rerun_matching_enabled),
+      sourceMatchColumn: toText(template.source_match_column) || null,
+      destinationMatchField: toText(template.destination_match_field) || null,
+      onMatchBehavior:
+        toText(template.on_match_behavior) === "skip_existing"
+          ? "skip_existing"
+          : toText(template.on_match_behavior) === "overwrite_existing"
+            ? "overwrite_existing"
+            : "update_blank_only",
+      onNoMatchBehavior:
+        toText(template.on_no_match_behavior) === "skip_row" ? "skip_row" : "create_new",
+      ignoreBlankOverwrites: true,
+      missingKeyBehavior:
+        toText(template.missing_key_behavior) === "treat_as_no_match"
+          ? "treat_as_no_match"
+          : "skip_row"
+    } satisfies ReimportMatchSettings;
 
     setClassification({
       contactType:
@@ -273,6 +368,7 @@ export function ContactsImportWizard() {
     });
     setDuplicateHandling(toText(template.duplicate_handling) === "flag" ? "flag" : "skip");
     setTagDelimiter(toText(tagConfig.delimiter) || ";");
+    setRerunMatching(templateRerun);
 
     if (headers.length === 0) {
       setMappings(templateMappings);
@@ -395,7 +491,8 @@ export function ContactsImportWizard() {
           mappings,
           classification,
           tagDelimiter: tagsMapped ? tagDelimiter : null,
-          duplicateHandling
+          duplicateHandling,
+          rerunMatching
         })
       });
       const payload = await response.json().catch(() => null);
@@ -424,6 +521,11 @@ export function ContactsImportWizard() {
     setMessage(null);
     setRunProgress(null);
     try {
+      const rerunError = validateRerunMatchingForCurrentFile();
+      if (rerunError) {
+        throw new Error(rerunError);
+      }
+
       const startResponse = await fetch("/api/import-center/jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -435,7 +537,8 @@ export function ContactsImportWizard() {
           classification,
           templateId: selectedTemplateId || null,
           tagDelimiter: tagsMapped ? tagDelimiter : null,
-          duplicateHandling
+          duplicateHandling,
+          rerunMatching
         })
       });
 
@@ -483,11 +586,7 @@ export function ContactsImportWizard() {
             action: "chunk",
             jobId,
             rows: chunkRows,
-            rowOffset,
-            mappings,
-            classification,
-            tagDelimiter: tagsMapped ? tagDelimiter : null,
-            duplicateHandling
+            rowOffset
           })
         });
 
@@ -666,6 +765,141 @@ export function ContactsImportWizard() {
                 ))}
               </select>
             </div>
+          </div>
+
+          {selectedTemplateId ? (
+            <div className="mt-4 rounded-md border border-slate-200 p-4">
+              <p className="text-sm font-semibold text-slate-900">Re-Import Matching</p>
+              <p className="mb-3 text-xs text-slate-600">
+                Configure how rerun imports intentionally match existing CRM records by a known key.
+              </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Is this a rerun / refresh import?
+                  </label>
+                  <select
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    value={rerunMatching.enabled ? "yes" : "no"}
+                    onChange={(event) =>
+                      setRerunMatching((prev) => ({
+                        ...prev,
+                        enabled: event.target.value === "yes"
+                      }))
+                    }
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                </div>
+              </div>
+
+              {rerunMatching.enabled ? (
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">Source key column</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={toText(rerunMatching.sourceMatchColumn)}
+                      onChange={(event) =>
+                        setRerunMatching((prev) => ({
+                          ...prev,
+                          sourceMatchColumn: event.target.value || null
+                        }))
+                      }
+                    >
+                      <option value="">-- Select source column --</option>
+                      {headers.map((header) => (
+                        <option key={header} value={header}>
+                          {header}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">Destination CRM field</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={toText(rerunMatching.destinationMatchField)}
+                      onChange={(event) =>
+                        setRerunMatching((prev) => ({
+                          ...prev,
+                          destinationMatchField: event.target.value || null
+                        }))
+                      }
+                    >
+                      <option value="">-- Select CRM field --</option>
+                      {destinationMatchOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">When a match is found</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={rerunMatching.onMatchBehavior}
+                      onChange={(event) =>
+                        setRerunMatching((prev) => ({
+                          ...prev,
+                          onMatchBehavior: event.target.value as ReimportMatchSettings["onMatchBehavior"]
+                        }))
+                      }
+                    >
+                      <option value="skip_existing">Skip Existing Record</option>
+                      <option value="overwrite_existing">Overwrite Existing Record</option>
+                      <option value="update_blank_only">Update Only Blank Fields</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">When no match is found</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={rerunMatching.onNoMatchBehavior}
+                      onChange={(event) =>
+                        setRerunMatching((prev) => ({
+                          ...prev,
+                          onNoMatchBehavior: event.target.value as ReimportMatchSettings["onNoMatchBehavior"]
+                        }))
+                      }
+                    >
+                      <option value="create_new">Create New Record</option>
+                      <option value="skip_row">Skip Row and Log It</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">
+                      Blank key handling (when key is empty)
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={rerunMatching.missingKeyBehavior}
+                      onChange={(event) =>
+                        setRerunMatching((prev) => ({
+                          ...prev,
+                          missingKeyBehavior:
+                            event.target.value as ReimportMatchSettings["missingKeyBehavior"]
+                        }))
+                      }
+                    >
+                      <option value="skip_row">Skip row and log</option>
+                      <option value="treat_as_no_match">Treat as no-match behavior</option>
+                    </select>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                    Blank overwrite protection is always enabled. Blank import values never erase
+                    existing populated CRM data.
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="mt-4 rounded-md border border-slate-200 p-4">
+            <p className="mb-3 text-sm font-semibold text-slate-900">Duplicate Handling</p>
+            <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium">Duplicate Handling</label>
               <select
@@ -711,11 +945,23 @@ export function ContactsImportWizard() {
               </select>
             </div>
           </div>
+          </div>
           <div className="mt-4 flex gap-2">
             <Button type="button" variant="secondary" onClick={() => setStep(1)}>
               Back
             </Button>
-            <Button type="button" onClick={() => setStep(3)}>
+            <Button
+              type="button"
+              onClick={() => {
+                const rerunError = validateRerunMatchingForCurrentFile();
+                if (rerunError) {
+                  setError(rerunError);
+                  return;
+                }
+                setError(null);
+                setStep(3);
+              }}
+            >
               Continue
             </Button>
           </div>
@@ -911,6 +1157,15 @@ export function ContactsImportWizard() {
             subtitle="Verify settings before creating contacts."
           />
           <div className="grid gap-3 md:grid-cols-2">
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              Template Selected:{" "}
+              {selectedTemplateId
+                ? toText(
+                    metadata.templates.find((template) => toText(template.id) === selectedTemplateId)
+                      ?.name
+                  ) || "Yes"
+                : "No"}
+            </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">File: {fileName || "-"}</p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">Total Rows: {rows.length}</p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
@@ -936,6 +1191,28 @@ export function ContactsImportWizard() {
               Tag Delimiter: {tagsMapped ? tagDelimiter : "N/A"}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              Re-Import Matching Enabled: {selectedTemplateId ? (rerunMatching.enabled ? "Yes" : "No") : "N/A"}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              Re-Import Source Key: {rerunMatching.enabled ? toText(rerunMatching.sourceMatchColumn) || "-" : "N/A"}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              Re-Import CRM Match Field:{" "}
+              {rerunMatching.enabled ? toText(rerunMatching.destinationMatchField) || "-" : "N/A"}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              On Match Behavior: {rerunMatching.enabled ? rerunMatching.onMatchBehavior : "N/A"}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              On No Match Behavior: {rerunMatching.enabled ? rerunMatching.onNoMatchBehavior : "N/A"}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              Blank Overwrite Protection Enabled: Yes
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              Duplicate Handling: {duplicateHandling === "flag" ? "Warn + Flag" : "Warn + Skip"}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
               Unique Tags Detected: {tagsMapped ? uniqueTagsDetected : 0}
             </p>
             <p className="rounded-md bg-amber-50 px-3 py-2 text-sm">
@@ -943,6 +1220,16 @@ export function ContactsImportWizard() {
             </p>
             <p className="rounded-md bg-amber-50 px-3 py-2 text-sm">
               Duplicate Warnings (name + phone): {duplicateWarnings.duplicateNamePhoneCount}
+            </p>
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm">
+              Re-Import Key Warnings (blank keys): {rerunMatching.enabled ? rerunWarnings.blankKeyCount : 0}
+            </p>
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm">
+              Re-Import Key Warnings (duplicate keys):{" "}
+              {rerunMatching.enabled ? rerunWarnings.duplicateKeyCount : 0}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              Multiple CRM key matches: validated during execution and logged as errors.
             </p>
           </div>
           {pendingNewFields.length > 0 ? (
@@ -989,6 +1276,13 @@ export function ContactsImportWizard() {
                 <p>Failed Rows: {toText(runResult.failedRows) || "0"}</p>
                 <p>Skipped Rows: {toText(runResult.skippedRows) || "0"}</p>
                 <p>Total New Tags Created: {toText(runResult.newTagsCreated) || "0"}</p>
+                <p>Matched Record Count: {toText(runResult.matchedRecordCount) || "0"}</p>
+                <p>Overwritten Record Count: {toText(runResult.overwrittenRecordCount) || "0"}</p>
+                <p>Blank-Only Update Count: {toText(runResult.blankOnlyUpdateCount) || "0"}</p>
+                <p>New Record Count: {toText(runResult.newRecordCount) || "0"}</p>
+                <p>Skipped Existing Count: {toText(runResult.skippedExistingCount) || "0"}</p>
+                <p>Missing Key Skip Count: {toText(runResult.missingKeySkipCount) || "0"}</p>
+                <p>Ambiguous Match Count: {toText(runResult.ambiguousMatchCount) || "0"}</p>
                 {(Number(runResult.failedRows ?? 0) > 0 || Number(runResult.skippedRows ?? 0) > 0) &&
                 toText(runResult.jobId) ? (
                   <a

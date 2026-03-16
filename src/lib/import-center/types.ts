@@ -17,6 +17,25 @@ export type ImportCenterMapping = {
   } | null;
 };
 
+export type ReimportOnMatchBehavior =
+  | "skip_existing"
+  | "overwrite_existing"
+  | "update_blank_only";
+
+export type ReimportOnNoMatchBehavior = "create_new" | "skip_row";
+
+export type ReimportMissingKeyBehavior = "skip_row" | "treat_as_no_match";
+
+export type ReimportMatchSettings = {
+  enabled: boolean;
+  sourceMatchColumn: string | null;
+  destinationMatchField: string | null;
+  onMatchBehavior: ReimportOnMatchBehavior;
+  onNoMatchBehavior: ReimportOnNoMatchBehavior;
+  ignoreBlankOverwrites: true;
+  missingKeyBehavior: ReimportMissingKeyBehavior;
+};
+
 export type ContactStandardFieldDefinition = {
   key: string;
   label: string;
@@ -56,6 +75,7 @@ export type ImportTemplatePayload = {
   classification: ContactClassificationInput;
   tagDelimiter?: string | null;
   duplicateHandling?: "skip" | "flag";
+  rerunMatching?: ReimportMatchSettings;
 };
 
 export type ContactImportRunInput = {
@@ -67,4 +87,5 @@ export type ContactImportRunInput = {
   templateId?: string | null;
   tagDelimiter?: string | null;
   duplicateHandling?: "skip" | "flag";
+  rerunMatching?: ReimportMatchSettings;
 };

@@ -18,6 +18,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
       classification: payload.classification,
       tagDelimiter: payload.tagDelimiter,
       duplicateHandling: payload.duplicateHandling,
+      rerunMatching: payload.rerunMatching,
       isActive: payload.isActive
     });
     return NextResponse.json(updated);

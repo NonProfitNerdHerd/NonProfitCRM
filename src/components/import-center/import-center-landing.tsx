@@ -165,6 +165,8 @@ export function ImportCenterLanding({
                 <th className="py-2">Failed</th>
                 <th className="py-2">Skipped</th>
                 <th className="py-2">New Tags</th>
+                <th className="py-2">Re-Import Matching</th>
+                <th className="py-2">Re-Import Results</th>
                 <th className="py-2">Started</th>
                 <th className="py-2">Completed</th>
               </tr>
@@ -180,13 +182,29 @@ export function ImportCenterLanding({
                   <td className="py-2">{toText(job.failed_rows) || "0"}</td>
                   <td className="py-2">{toText(job.skipped_rows) || "0"}</td>
                   <td className="py-2">{toText(job.new_tags_created) || "0"}</td>
+                  <td className="py-2">
+                    {Boolean(job.rerun_matching_enabled)
+                      ? `${toText(job.source_match_column) || "-"} -> ${
+                          toText(job.destination_match_field) || "-"
+                        }`
+                      : "Disabled"}
+                  </td>
+                  <td className="py-2 text-xs">
+                    Matched {toText(job.matched_record_count) || "0"} | Overwrite{" "}
+                    {toText(job.overwritten_record_count) || "0"} | Blank-only{" "}
+                    {toText(job.blank_only_update_count) || "0"} | New{" "}
+                    {toText(job.new_record_count) || "0"} | Skip-existing{" "}
+                    {toText(job.skipped_existing_count) || "0"} | Missing-key{" "}
+                    {toText(job.missing_key_skip_count) || "0"} | Ambiguous{" "}
+                    {toText(job.ambiguous_match_count) || "0"}
+                  </td>
                   <td className="py-2">{formatDate(job.started_at)}</td>
                   <td className="py-2">{formatDate(job.completed_at)}</td>
                 </tr>
               ))}
               {jobs.length === 0 ? (
                 <tr>
-                  <td className="py-3 text-slate-500" colSpan={10}>
+                  <td className="py-3 text-slate-500" colSpan={12}>
                     No import jobs have been run yet.
                   </td>
                 </tr>
