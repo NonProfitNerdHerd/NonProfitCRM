@@ -4,15 +4,21 @@ import { IntegrationLogService } from "@/lib/integrations/integration-log-servic
 import { WebconnexApiClient } from "@/lib/integrations/webconnex-api-client";
 
 type DonationSyncResult = {
+  retrieved: number;
   processed: number;
   created: number;
   updated: number;
   failed: number;
   cursor: string | null;
+  pagesProcessed: number;
+  pagingComplete: boolean;
+  totalExpected: number | null;
   skippedDuplicates: number;
   skippedUnmappedPages: number;
   missingContactMatches: number;
+  skipped: number;
   unmappedPageValues: string[];
+  completionNote: string;
 };
 
 type PageMappingRow = {
@@ -142,6 +148,7 @@ export class DonationSyncService {
       .donations ?? {};
     let cursor: string | null =
       (syncSettings.donationsCursor as string | null | undefined) ?? null;
+    let retrieved = 0;
     let processed = 0;
     let created = 0;
     const updated = 0;
@@ -152,6 +159,8 @@ export class DonationSyncService {
     let hasMore = true;
     let guard = 0;
     let pagesProcessed = 0;
+    let pagingComplete = true;
+    let completionNote = "Paging complete.";
     const unmappedPageValues = new Set<string>();
     const pageMappings = await resolveExistingPageMappings({
       organizationId: input.organizationId,
@@ -217,12 +226,49 @@ export class DonationSyncService {
 
     while (hasMore && guard < 10000) {
       guard += 1;
+      const startingCursor = cursor;
+      let page: Awaited<ReturnType<WebconnexApiClient["getTransactions"]>>;
+      try {
+        page = await input.apiClient.getTransactions({
+          startingAfter: cursor,
+          limit: 100
+        });
+      } catch (pageError) {
+        failed += 1;
+        pagingComplete = false;
+        completionNote = "Donations sync stopped because a page request failed.";
+        await input.logService.enqueueError({
+          organizationId: input.organizationId,
+          integrationConnectionId: input.connection.id,
+          jobId: input.job.id,
+          entityType: "integration",
+          payload: { startingAfter: startingCursor, limit: 100 },
+          errorMessage:
+            pageError instanceof Error ? pageError.message : "Donations page request failed."
+        });
+        break;
+      }
       pagesProcessed += 1;
-      const page = await input.apiClient.getTransactions({
-        startingAfter: cursor,
-        limit: 100
-      });
+      retrieved += page.records.length;
       hasMore = page.hasMore;
+      await input.logService.addSyncLog({
+        organizationId: input.organizationId,
+        integrationConnectionId: input.connection.id,
+        jobId: input.job.id,
+        entityType: "donations_page",
+        sourceRecordId: startingCursor,
+        status: "processed",
+        message: `Fetched donations page ${pagesProcessed}: ${page.records.length} record(s), hasMore=${String(page.hasMore)}, nextCursor=${page.nextCursor ?? "null"}`,
+        requestPayload: {
+          startingAfter: startingCursor,
+          limit: 100
+        },
+        responsePayload: {
+          recordCount: page.records.length,
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor
+        }
+      });
 
       for (const record of page.records) {
         processed += 1;
@@ -473,9 +519,27 @@ export class DonationSyncService {
 
       const nextCursor = page.nextCursor;
       const cursorUnchanged = Boolean(nextCursor && nextCursor === cursor);
+      const hadMore = hasMore;
       cursor = nextCursor;
       if (!hasMore || !cursor || cursorUnchanged) {
         hasMore = false;
+        if (cursorUnchanged) {
+          failed += 1;
+          pagingComplete = false;
+          completionNote = "Donations pagination ended early because cursor did not advance.";
+          await input.logService.enqueueError({
+            organizationId: input.organizationId,
+            integrationConnectionId: input.connection.id,
+            jobId: input.job.id,
+            entityType: "integration",
+            payload: { cursor: startingCursor, nextCursor: cursor },
+            errorMessage:
+              "Donations pagination stopped because cursor did not advance. Check API pagination response fields."
+          });
+        } else if (hadMore && !cursor) {
+          pagingComplete = false;
+          completionNote = "Donations pagination ended early because no cursor was returned.";
+        }
       }
 
       if (pagesProcessed % 5 === 0 && cursor) {
@@ -491,18 +555,67 @@ export class DonationSyncService {
           .eq("organization_id", input.organizationId)
           .eq("id", input.connection.id);
       }
+
+      await input.logService.updateJobProgress({
+        organizationId: input.organizationId,
+        jobId: input.job.id,
+        currentPage: pagesProcessed,
+        currentCursor: cursor,
+        totalRecordsExpected: null,
+        recordsRetrieved: retrieved,
+        recordsProcessed: processed,
+        recordsCreated: created,
+        recordsUpdated: updated,
+        recordsSkipped: skippedDuplicates + skippedUnmappedPages + missingContactMatches,
+        recordsFailed: failed,
+        statusDetail: `Syncing donations page ${pagesProcessed}${cursor ? ` (cursor ${cursor})` : ""}`
+      });
+    }
+    if (guard >= 10000 && hasMore) {
+      failed += 1;
+      pagingComplete = false;
+      completionNote = "Donations pagination guard limit reached before completion.";
     }
 
+    await input.logService.addSyncLog({
+      organizationId: input.organizationId,
+      integrationConnectionId: input.connection.id,
+      jobId: input.job.id,
+      entityType: "donations_summary",
+      status: "processed",
+      message: `Donations sync summary: pages=${pagesProcessed}, retrieved=${retrieved}, processed=${processed}, created=${created}, failed=${failed}, skippedDuplicates=${skippedDuplicates}, skippedUnmappedPages=${skippedUnmappedPages}, missingContactMatches=${missingContactMatches}, pagingComplete=${String(pagingComplete)}, nextCursor=${cursor ?? "null"}`,
+      responsePayload: {
+        pagesProcessed,
+        retrieved,
+        processed,
+        created,
+        updated,
+        failed,
+        skippedDuplicates,
+        skippedUnmappedPages,
+        missingContactMatches,
+        pagingComplete,
+        completionNote,
+        nextCursor: cursor
+      }
+    });
+
     return {
+      retrieved,
       processed,
       created,
       updated,
       failed,
       cursor,
+      pagesProcessed,
+      pagingComplete,
+      totalExpected: null,
       skippedDuplicates,
       skippedUnmappedPages,
       missingContactMatches,
-      unmappedPageValues: Array.from(unmappedPageValues).sort((a, b) => a.localeCompare(b))
+      skipped: skippedDuplicates + skippedUnmappedPages + missingContactMatches,
+      unmappedPageValues: Array.from(unmappedPageValues).sort((a, b) => a.localeCompare(b)),
+      completionNote
     };
   }
 }

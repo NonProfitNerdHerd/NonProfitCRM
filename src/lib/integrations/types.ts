@@ -46,11 +46,18 @@ export type IntegrationSyncJob = {
   completed_date: string | null;
   status: string;
   records_processed: number;
+  records_retrieved: number;
   records_created: number;
   records_updated: number;
+  records_skipped: number;
   records_failed: number;
+  total_records_expected: number | null;
+  current_cursor: string | null;
+  current_page: number | null;
   last_successful_cursor: string | null;
   last_successful_sync_date: string | null;
+  completed_successfully: boolean;
+  paging_complete: boolean;
   error_summary: string | null;
   triggered_by: string | null;
   triggered_by_type: string;

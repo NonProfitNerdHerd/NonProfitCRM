@@ -24,6 +24,14 @@ export class IntegrationLogService {
         sync_scope: input.syncScope,
         status: "running",
         started_date: new Date().toISOString(),
+        records_retrieved: 0,
+        records_processed: 0,
+        records_created: 0,
+        records_updated: 0,
+        records_skipped: 0,
+        records_failed: 0,
+        completed_successfully: false,
+        paging_complete: false,
         triggered_by: input.triggeredBy,
         triggered_by_type: input.triggeredByType ?? "manual"
       })
@@ -37,10 +45,16 @@ export class IntegrationLogService {
     organizationId: string;
     jobId: string;
     status: "completed" | "failed" | "completed_with_errors";
+    recordsRetrieved: number;
     recordsProcessed: number;
     recordsCreated: number;
     recordsUpdated: number;
+    recordsSkipped: number;
     recordsFailed: number;
+    totalRecordsExpected?: number | null;
+    currentPage?: number | null;
+    completedSuccessfully: boolean;
+    pagingComplete: boolean;
     cursor?: string | null;
     lastSuccessfulSyncDate?: string | null;
     errorSummary?: string | null;
@@ -56,14 +70,62 @@ export class IntegrationLogService {
         status: input.status,
         completed_date: completedDate,
         duration_ms: durationMs,
+        records_retrieved: input.recordsRetrieved,
         records_processed: input.recordsProcessed,
         records_created: input.recordsCreated,
         records_updated: input.recordsUpdated,
+        records_skipped: input.recordsSkipped,
         records_failed: input.recordsFailed,
+        total_records_expected: input.totalRecordsExpected ?? null,
+        current_page: input.currentPage ?? null,
+        current_cursor: input.cursor ?? null,
+        completed_successfully: input.completedSuccessfully,
+        paging_complete: input.pagingComplete,
         last_successful_cursor: input.cursor ?? null,
         last_successful_sync_date: input.lastSuccessfulSyncDate ?? null,
         error_summary: input.errorSummary ?? null
       })
+      .eq("organization_id", input.organizationId)
+      .eq("id", input.jobId);
+    if (error) throw error;
+  }
+
+  async updateJobProgress(input: {
+    organizationId: string;
+    jobId: string;
+    currentPage?: number | null;
+    currentCursor?: string | null;
+    totalRecordsExpected?: number | null;
+    recordsRetrieved?: number;
+    recordsProcessed?: number;
+    recordsCreated?: number;
+    recordsUpdated?: number;
+    recordsSkipped?: number;
+    recordsFailed?: number;
+    statusDetail?: string | null;
+  }) {
+    const supabase = await createIntegrationClient();
+    const updates: Record<string, unknown> = {};
+    if (typeof input.currentPage === "number" || input.currentPage === null) {
+      updates.current_page = input.currentPage;
+    }
+    if (typeof input.currentCursor === "string" || input.currentCursor === null) {
+      updates.current_cursor = input.currentCursor;
+    }
+    if (typeof input.totalRecordsExpected === "number" || input.totalRecordsExpected === null) {
+      updates.total_records_expected = input.totalRecordsExpected;
+    }
+    if (typeof input.recordsRetrieved === "number") updates.records_retrieved = input.recordsRetrieved;
+    if (typeof input.recordsProcessed === "number") updates.records_processed = input.recordsProcessed;
+    if (typeof input.recordsCreated === "number") updates.records_created = input.recordsCreated;
+    if (typeof input.recordsUpdated === "number") updates.records_updated = input.recordsUpdated;
+    if (typeof input.recordsSkipped === "number") updates.records_skipped = input.recordsSkipped;
+    if (typeof input.recordsFailed === "number") updates.records_failed = input.recordsFailed;
+    if (typeof input.statusDetail === "string") updates.error_summary = input.statusDetail;
+    if (Object.keys(updates).length === 0) return;
+    const { error } = await supabase
+      .from("integration_sync_jobs")
+      .update(updates)
       .eq("organization_id", input.organizationId)
       .eq("id", input.jobId);
     if (error) throw error;

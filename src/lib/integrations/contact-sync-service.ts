@@ -5,6 +5,7 @@ import { WebconnexApiClient } from "@/lib/integrations/webconnex-api-client";
 import { GIVINGFUEL_DEFAULT_PAGE_LIMIT } from "@/lib/integrations/givingfuel-contacts-config";
 
 type ContactSyncResult = {
+  retrieved: number;
   processed: number;
   created: number;
   updated: number;
@@ -12,6 +13,9 @@ type ContactSyncResult = {
   skipped: number;
   pagesProcessed: number;
   cursor: string | null;
+  pagingComplete: boolean;
+  totalExpected: number | null;
+  completionNote: string;
 };
 
 function readString(record: Record<string, unknown>, keys: string[]) {
@@ -237,6 +241,7 @@ export class ContactSyncService {
     const supabase = await createIntegrationClient();
     const syncSettings = { ...(input.connection.sync_settings_json ?? {}) } as Record<string, unknown>;
     let cursor: string | null = (syncSettings.contactsCursor as string | null | undefined) ?? null;
+    let retrieved = 0;
     let processed = 0;
     let created = 0;
     let updated = 0;
@@ -245,6 +250,8 @@ export class ContactSyncService {
     let hasMore = true;
     let pageGuard = 0;
     let pagesProcessed = 0;
+    let pagingComplete = true;
+    let completionNote = "Paging complete.";
 
     while (hasMore && pageGuard < 10000) {
       pageGuard += 1;
@@ -257,6 +264,8 @@ export class ContactSyncService {
         });
       } catch (pageError) {
         failed += 1;
+        pagingComplete = false;
+        completionNote = "Contacts sync stopped because a page request failed.";
         await input.logService.enqueueError({
           organizationId: input.organizationId,
           integrationConnectionId: input.connection.id,
@@ -269,6 +278,7 @@ export class ContactSyncService {
         break;
       }
       pagesProcessed += 1;
+      retrieved += page.records.length;
       hasMore = page.hasMore;
       await input.logService.addSyncLog({
         organizationId: input.organizationId,
@@ -378,12 +388,32 @@ export class ContactSyncService {
           });
         }
       }
+      await input.logService.updateJobProgress({
+        organizationId: input.organizationId,
+        jobId: input.job.id,
+        currentPage: pagesProcessed,
+        currentCursor: cursor,
+        totalRecordsExpected: null,
+        recordsRetrieved: retrieved,
+        recordsProcessed: processed,
+        recordsCreated: created,
+        recordsUpdated: updated,
+        recordsSkipped: skipped,
+        recordsFailed: failed,
+        statusDetail: `Syncing contacts page ${pagesProcessed}${cursor ? ` (cursor ${cursor})` : ""}`
+      });
+
       if (!hasMore) break;
       if (!cursor) {
         hasMore = false;
+        pagingComplete = false;
+        completionNote = "Contacts pagination ended early because no cursor was returned.";
       }
       if (startingCursor && cursor === startingCursor) {
         hasMore = false;
+        failed += 1;
+        pagingComplete = false;
+        completionNote = "Contacts pagination ended early because cursor did not advance.";
         await input.logService.enqueueError({
           organizationId: input.organizationId,
           integrationConnectionId: input.connection.id,
@@ -394,6 +424,12 @@ export class ContactSyncService {
             "Contacts pagination stopped because cursor did not advance. Check API pagination response fields."
         });
       }
+
+    }
+    if (pageGuard >= 10000 && hasMore) {
+      failed += 1;
+      pagingComplete = false;
+      completionNote = "Contacts pagination guard limit reached before completion.";
     }
 
     await input.logService.addSyncLog({
@@ -402,26 +438,33 @@ export class ContactSyncService {
       jobId: input.job.id,
       entityType: "contacts_summary",
       status: "processed",
-      message: `Contacts sync summary: pages=${pagesProcessed}, processed=${processed}, created=${created}, updated=${updated}, failed=${failed}, skipped=${skipped}, nextCursor=${cursor ?? "null"}`,
+      message: `Contacts sync summary: pages=${pagesProcessed}, retrieved=${retrieved}, processed=${processed}, created=${created}, updated=${updated}, failed=${failed}, skipped=${skipped}, pagingComplete=${String(pagingComplete)}, nextCursor=${cursor ?? "null"}`,
       responsePayload: {
         pagesProcessed,
+        retrieved,
         processed,
         created,
         updated,
         failed,
         skipped,
+        pagingComplete,
+        completionNote,
         nextCursor: cursor
       }
     });
 
     return {
+      retrieved,
       processed,
       created,
       updated,
       failed,
       skipped,
       pagesProcessed,
-      cursor
+      cursor,
+      pagingComplete,
+      totalExpected: null,
+      completionNote
     };
   }
 }

@@ -3,7 +3,7 @@ import { requireSessionContext } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 import {
   IntegrationConnection,
-  IntegrationDashboardItem,
+  IntegrationDefinition,
   IntegrationErrorQueueItem,
   IntegrationSyncJob,
   SyncScope
@@ -304,12 +304,122 @@ async function getDefinitionAndConnection(organizationId: string, userId: string
   return { definition, connection };
 }
 
-function summarizeLastResult(job: IntegrationSyncJob | null) {
-  if (!job) return "Never run";
-  if (job.status === "failed") return "Failed";
-  if (job.status === "completed_with_errors") return "Completed with errors";
-  if (job.status === "completed") return "Success";
-  return job.status;
+type IntegrationSyncHealth = "Fully Synced" | "Currently Working" | "Could Not Complete";
+
+function deriveIntegrationSyncStatus(input: {
+  jobs: IntegrationSyncJob[];
+  isEnabled: boolean;
+}) {
+  const activeJob =
+    input.jobs.find(
+      (job) => String(job.status ?? "").toLowerCase() === "running" && !job.completed_date
+    ) ?? null;
+  const latestJob = input.jobs[0] ?? null;
+  const referenceJob = activeJob ?? latestJob;
+  const lastSuccessfulJob =
+    input.jobs.find((job) => {
+      const completedSuccessfully = Boolean(
+        (job as unknown as { completed_successfully?: boolean }).completed_successfully
+      );
+      if (completedSuccessfully) return true;
+      return (
+        String(job.status ?? "").toLowerCase() === "completed" && Number(job.records_failed ?? 0) === 0
+      );
+    }) ?? null;
+
+  const jobCompletedSuccessfully = referenceJob
+    ? typeof (referenceJob as unknown as { completed_successfully?: unknown }).completed_successfully ===
+      "boolean"
+      ? Boolean((referenceJob as unknown as { completed_successfully?: boolean }).completed_successfully)
+      : String(referenceJob.status ?? "").toLowerCase() === "completed" &&
+        Number(referenceJob.records_failed ?? 0) === 0
+    : false;
+  const pagingComplete = referenceJob
+    ? typeof (referenceJob as unknown as { paging_complete?: unknown }).paging_complete === "boolean"
+      ? Boolean((referenceJob as unknown as { paging_complete?: boolean }).paging_complete)
+      : String(referenceJob.status ?? "").toLowerCase() === "completed"
+    : false;
+
+  let syncStatus: IntegrationSyncHealth = "Could Not Complete";
+  let syncStatusColor: "green" | "yellow" | "red" = "red";
+  if (activeJob) {
+    syncStatus = "Currently Working";
+    syncStatusColor = "yellow";
+  } else if (
+    referenceJob &&
+    jobCompletedSuccessfully &&
+    pagingComplete &&
+    Number(referenceJob.records_failed ?? 0) === 0
+  ) {
+    syncStatus = "Fully Synced";
+    syncStatusColor = "green";
+  }
+
+  const recordsProcessed = Number(referenceJob?.records_processed ?? 0);
+  const totalExpectedRaw = (referenceJob as unknown as { total_records_expected?: unknown })
+    ?.total_records_expected;
+  const totalRecordsExpected =
+    typeof totalExpectedRaw === "number" && Number.isFinite(totalExpectedRaw)
+      ? totalExpectedRaw
+      : null;
+  const currentPageRaw = (referenceJob as unknown as { current_page?: unknown })?.current_page;
+  const currentPage =
+    typeof currentPageRaw === "number" && Number.isFinite(currentPageRaw) ? currentPageRaw : null;
+  const currentCursorRaw = (referenceJob as unknown as { current_cursor?: unknown })?.current_cursor;
+  const currentCursor = typeof currentCursorRaw === "string" && currentCursorRaw.trim() ? currentCursorRaw : null;
+  const detailFromJob =
+    typeof referenceJob?.error_summary === "string" && referenceJob.error_summary.trim()
+      ? referenceJob.error_summary.trim()
+      : null;
+
+  let statusDetail = input.isEnabled
+    ? "No sync run has completed yet."
+    : "Disabled by administrator. Enable this integration to run sync.";
+  if (syncStatus === "Currently Working" && referenceJob) {
+    const pagePart = currentPage ? `page ${currentPage}` : "current page";
+    if (totalRecordsExpected !== null) {
+      statusDetail = `Syncing ${pagePart}: ${recordsProcessed.toLocaleString()} of ${totalRecordsExpected.toLocaleString()} processed.`;
+    } else {
+      statusDetail = `Syncing ${pagePart}: ${recordsProcessed.toLocaleString()} processed so far.`;
+    }
+  } else if (syncStatus === "Fully Synced" && referenceJob) {
+    if (totalRecordsExpected !== null) {
+      statusDetail = `Processed ${recordsProcessed.toLocaleString()} of ${totalRecordsExpected.toLocaleString()} records. Paging complete.`;
+    } else {
+      statusDetail = `Processed ${recordsProcessed.toLocaleString()} records. Paging complete.`;
+    }
+  } else if (referenceJob) {
+    statusDetail =
+      detailFromJob ??
+      "Sync stopped before processing all available records/pages. Review run details and retry.";
+    if (!input.isEnabled) {
+      statusDetail = `${statusDetail} Disabled by administrator.`;
+    }
+  }
+
+  return {
+    syncStatus,
+    syncStatusColor,
+    statusDetail,
+    activeRunId: activeJob?.id ?? null,
+    latestRunId: latestJob?.id ?? null,
+    lastSyncStartTime: latestJob?.started_date ?? null,
+    lastSyncEndTime: latestJob?.completed_date ?? null,
+    lastSuccessfulSyncTime: lastSuccessfulJob?.completed_date ?? null,
+    recordsRetrieved:
+      Number((referenceJob as unknown as { records_retrieved?: number })?.records_retrieved ?? 0) ||
+      Number(referenceJob?.records_processed ?? 0),
+    recordsProcessed,
+    recordsInserted: Number(referenceJob?.records_created ?? 0),
+    recordsUpdated: Number(referenceJob?.records_updated ?? 0),
+    recordsSkipped: Number((referenceJob as unknown as { records_skipped?: number })?.records_skipped ?? 0),
+    recordsFailed: Number(referenceJob?.records_failed ?? 0),
+    totalRecordsExpected,
+    currentPage,
+    currentCursor,
+    errorSummary: detailFromJob,
+    completedSuccessfully: syncStatus === "Fully Synced"
+  };
 }
 
 async function countUniqueLinkedContacts(input: {
@@ -350,7 +460,12 @@ export async function listIntegrationsForAdmin() {
   const context = await requireIntegrationsAdmin();
   try {
     const definitions = await registryService.listDefinitions();
-    const rows: IntegrationDashboardItem[] = [];
+    const rows: Array<{
+      definition: IntegrationDefinition;
+      connection: IntegrationConnection | null;
+      lastJob: IntegrationSyncJob | null;
+      jobs: IntegrationSyncJob[];
+    }> = [];
     for (const definition of definitions) {
       const connection = await configurationService.ensureConnection(
         context.organizationId,
@@ -362,7 +477,8 @@ export async function listIntegrationsForAdmin() {
       rows.push({
         definition,
         connection: safeConnection,
-        lastJob: jobs[0] ?? null
+        lastJob: jobs[0] ?? null,
+        jobs
       });
     }
     const existingKeys = new Set(rows.map((row) => row.definition.provider_key));
@@ -383,7 +499,8 @@ export async function listIntegrationsForAdmin() {
           updated_at: now
         },
         connection: null,
-        lastJob: null
+        lastJob: null,
+        jobs: []
       });
     }
     if (!existingKeys.has(GIVINGFUEL_DONATIONS_INTEGRATION_KEY)) {
@@ -402,11 +519,19 @@ export async function listIntegrationsForAdmin() {
           updated_at: now
         },
         connection: null,
-        lastJob: null
+        lastJob: null,
+        jobs: []
       });
     }
 
-    const failedJobs = rows.filter((row) => row.lastJob?.status === "failed").length;
+    const failedJobs = rows.filter((row) => {
+      const latest = row.jobs[0] ?? row.lastJob;
+      if (!latest) return false;
+      return (
+        String(latest.status ?? "").toLowerCase() === "failed" ||
+        String(latest.status ?? "").toLowerCase() === "completed_with_errors"
+      );
+    }).length;
     const enabled = rows.filter((row) => row.connection?.is_enabled).length;
     const last24hActivity = rows.reduce((acc, row) => {
       const started = row.lastJob?.started_date;
@@ -415,17 +540,39 @@ export async function listIntegrationsForAdmin() {
     }, 0);
 
     return {
-      integrations: rows.map((row) => ({
-        integrationKey: row.definition.provider_key,
-        name: row.connection?.name || row.definition.name,
-        providerType: integrationTileType(row.definition.provider_key),
-        description: row.definition.description,
-        status: row.connection?.is_enabled ? "Enabled" : "Disabled",
-        connectionStatus: row.connection?.connection_status ?? "Not Tested",
-        lastSyncDate: row.lastJob?.completed_date ?? null,
-        lastSyncResult: summarizeLastResult(row.lastJob),
-        isEnabled: Boolean(row.connection?.is_enabled)
-      })),
+      integrations: rows.map((row) => {
+        const syncStatus = deriveIntegrationSyncStatus({
+          jobs: row.jobs,
+          isEnabled: Boolean(row.connection?.is_enabled)
+        });
+        return {
+          integrationKey: row.definition.provider_key,
+          name: row.connection?.name || row.definition.name,
+          providerType: integrationTileType(row.definition.provider_key),
+          description: row.definition.description,
+          enabledStatus: row.connection?.is_enabled ? "Enabled" : "Disabled",
+          isEnabled: Boolean(row.connection?.is_enabled),
+          connectionStatus: row.connection?.connection_status ?? "Not Tested",
+          syncStatus: syncStatus.syncStatus,
+          syncStatusColor: syncStatus.syncStatusColor,
+          statusDetail: syncStatus.statusDetail,
+          runId: syncStatus.activeRunId ?? syncStatus.latestRunId,
+          lastSyncStartTime: syncStatus.lastSyncStartTime,
+          lastSyncEndTime: syncStatus.lastSyncEndTime,
+          lastSuccessfulSyncTime: syncStatus.lastSuccessfulSyncTime,
+          recordsRetrieved: syncStatus.recordsRetrieved,
+          recordsProcessed: syncStatus.recordsProcessed,
+          recordsInserted: syncStatus.recordsInserted,
+          recordsUpdated: syncStatus.recordsUpdated,
+          recordsSkipped: syncStatus.recordsSkipped,
+          recordsFailed: syncStatus.recordsFailed,
+          totalRecordsExpected: syncStatus.totalRecordsExpected,
+          currentPage: syncStatus.currentPage,
+          currentCursor: syncStatus.currentCursor,
+          errorSummary: syncStatus.errorSummary,
+          completedSuccessfully: syncStatus.completedSuccessfully
+        };
+      }),
       summary: {
         totalIntegrations: rows.length,
         enabledIntegrations: enabled,
@@ -444,11 +591,27 @@ export async function listIntegrationsForAdmin() {
           providerType: "Contacts",
           description:
             "Webconnex API synchronization is available after migration 202603130021 is applied.",
-          status: "Disabled",
+          enabledStatus: "Disabled",
           connectionStatus: "Not Tested",
-          lastSyncDate: null,
-          lastSyncResult: "Migration required",
-          isEnabled: false
+          isEnabled: false,
+          syncStatus: "Could Not Complete",
+          syncStatusColor: "red",
+          statusDetail: "Migration required",
+          runId: null,
+          lastSyncStartTime: null,
+          lastSyncEndTime: null,
+          lastSuccessfulSyncTime: null,
+          recordsRetrieved: 0,
+          recordsProcessed: 0,
+          recordsInserted: 0,
+          recordsUpdated: 0,
+          recordsSkipped: 0,
+          recordsFailed: 0,
+          totalRecordsExpected: null,
+          currentPage: null,
+          currentCursor: null,
+          errorSummary: "Migration required",
+          completedSuccessfully: false
         },
         {
           integrationKey: GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
@@ -456,11 +619,27 @@ export async function listIntegrationsForAdmin() {
           providerType: "Donations",
           description:
             "GivingFuel Donations API synchronization is available after migration 202603130021 is applied.",
-          status: "Disabled",
+          enabledStatus: "Disabled",
           connectionStatus: "Not Tested",
-          lastSyncDate: null,
-          lastSyncResult: "Migration required",
-          isEnabled: false
+          isEnabled: false,
+          syncStatus: "Could Not Complete",
+          syncStatusColor: "red",
+          statusDetail: "Migration required",
+          runId: null,
+          lastSyncStartTime: null,
+          lastSyncEndTime: null,
+          lastSuccessfulSyncTime: null,
+          recordsRetrieved: 0,
+          recordsProcessed: 0,
+          recordsInserted: 0,
+          recordsUpdated: 0,
+          recordsSkipped: 0,
+          recordsFailed: 0,
+          totalRecordsExpected: null,
+          currentPage: null,
+          currentCursor: null,
+          errorSummary: "Migration required",
+          completedSuccessfully: false
         }
       ],
       summary: {
@@ -894,10 +1073,16 @@ export async function resolveIntegrationError(integrationKey: string, errorId: s
           organizationId: context.organizationId,
           jobId: retryJob.id,
           status: "completed",
+          recordsRetrieved: 1,
           recordsProcessed: 1,
           recordsCreated: retried.created,
           recordsUpdated: retried.updated,
+          recordsSkipped: 0,
           recordsFailed: 0,
+          totalRecordsExpected: 1,
+          currentPage: 1,
+          completedSuccessfully: true,
+          pagingComplete: true,
           cursor: null,
           lastSuccessfulSyncDate: new Date().toISOString(),
           errorSummary: null,
@@ -943,10 +1128,16 @@ export async function resolveIntegrationError(integrationKey: string, errorId: s
           organizationId: context.organizationId,
           jobId: retryJob.id,
           status: "failed",
+          recordsRetrieved: 1,
           recordsProcessed: 1,
           recordsCreated: 0,
           recordsUpdated: 0,
+          recordsSkipped: 0,
           recordsFailed: 1,
+          totalRecordsExpected: 1,
+          currentPage: 1,
+          completedSuccessfully: false,
+          pagingComplete: false,
           cursor: null,
           lastSuccessfulSyncDate: null,
           errorSummary: retryMessage,

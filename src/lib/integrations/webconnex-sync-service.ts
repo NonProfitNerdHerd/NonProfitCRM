@@ -17,10 +17,14 @@ import { decryptIntegrationSecret } from "@/lib/integrations/secrets";
 type SyncExecutionResult = {
   jobId: string;
   status: "completed" | "failed" | "completed_with_errors";
+  recordsRetrieved: number;
   recordsProcessed: number;
   recordsCreated: number;
   recordsUpdated: number;
+  recordsSkipped: number;
   recordsFailed: number;
+  pagingComplete: boolean;
+  completedSuccessfully: boolean;
   errorSummary?: string | null;
 };
 
@@ -239,12 +243,47 @@ export class WebconnexSyncService {
     const syncSettings = { ...(input.connection.sync_settings_json ?? {}) };
     const client = this.buildClient(input.connection);
     let recordsProcessed = 0;
+    let recordsRetrieved = 0;
     let recordsCreated = 0;
     let recordsUpdated = 0;
+    let recordsSkipped = 0;
     let recordsFailed = 0;
     let status: "completed" | "failed" | "completed_with_errors" = "completed";
     let errorSummary: string | null = null;
     let finalCursor: string | null = null;
+    let currentPage: number | null = 0;
+    let totalRecordsExpected: number | null = null;
+    let pagingComplete = true;
+    let completionDetail = "Sync running.";
+
+    await supabase
+      .from("integration_connections")
+      .update({
+        sync_settings_json: {
+          ...syncSettings,
+          integrationRuntimeState: {
+            syncStatus: "currently_working",
+            runId: job.id,
+            startedAt: job.started_date,
+            completedAt: null,
+            statusDetail: "Sync started.",
+            recordsRetrieved: 0,
+            recordsProcessed: 0,
+            recordsCreated: 0,
+            recordsUpdated: 0,
+            recordsSkipped: 0,
+            recordsFailed: 0,
+            currentPage: 0,
+            currentCursor: null,
+            totalRecordsExpected: null,
+            pagingComplete: false,
+            completedSuccessfully: false
+          }
+        },
+        updated_by: input.userId
+      })
+      .eq("organization_id", input.organizationId)
+      .eq("id", input.connection.id);
 
     try {
       if (!input.connection.is_enabled && input.jobType === "scheduled") {
@@ -268,19 +307,28 @@ export class WebconnexSyncService {
           apiClient: client,
           logService: this.logService
         });
+        recordsRetrieved += contactsResult.retrieved;
         recordsProcessed += contactsResult.processed;
         recordsCreated += contactsResult.created;
         recordsUpdated += contactsResult.updated;
+        recordsSkipped += contactsResult.skipped;
         recordsFailed += contactsResult.failed;
         syncSettings.contactsCursor = contactsResult.cursor;
         finalCursor = contactsResult.cursor;
+        pagingComplete = pagingComplete && contactsResult.pagingComplete;
+        completionDetail = contactsResult.completionNote;
+        currentPage = contactsResult.pagesProcessed;
+        totalRecordsExpected = contactsResult.totalExpected;
         syncSettings.lastContactsSyncSummary = {
           pagesProcessed: contactsResult.pagesProcessed,
+          retrieved: contactsResult.retrieved,
           processed: contactsResult.processed,
           created: contactsResult.created,
           updated: contactsResult.updated,
           failed: contactsResult.failed,
           skipped: contactsResult.skipped,
+          pagingComplete: contactsResult.pagingComplete,
+          completionNote: contactsResult.completionNote,
           finishedAt: new Date().toISOString()
         };
       }
@@ -293,21 +341,35 @@ export class WebconnexSyncService {
           apiClient: client,
           logService: this.logService
         });
+        recordsRetrieved += donationsResult.retrieved;
         recordsProcessed += donationsResult.processed;
         recordsCreated += donationsResult.created;
         recordsUpdated += donationsResult.updated;
+        recordsSkipped += donationsResult.skipped;
         recordsFailed += donationsResult.failed;
         syncSettings.donationsCursor = donationsResult.cursor;
         finalCursor = donationsResult.cursor;
+        pagingComplete = pagingComplete && donationsResult.pagingComplete;
+        completionDetail = donationsResult.completionNote;
+        currentPage =
+          typeof currentPage === "number"
+            ? currentPage + donationsResult.pagesProcessed
+            : donationsResult.pagesProcessed;
+        totalRecordsExpected = donationsResult.totalExpected;
         syncSettings.lastDonationsSyncSummary = {
+          pagesProcessed: donationsResult.pagesProcessed,
+          retrieved: donationsResult.retrieved,
           processed: donationsResult.processed,
           created: donationsResult.created,
           updated: donationsResult.updated,
           failed: donationsResult.failed,
+          skipped: donationsResult.skipped,
           skippedDuplicates: donationsResult.skippedDuplicates,
           skippedUnmappedPages: donationsResult.skippedUnmappedPages,
           missingContactMatches: donationsResult.missingContactMatches,
           unmappedPageValues: donationsResult.unmappedPageValues,
+          pagingComplete: donationsResult.pagingComplete,
+          completionNote: donationsResult.completionNote,
           finishedAt: new Date().toISOString()
         };
       }
@@ -319,20 +381,26 @@ export class WebconnexSyncService {
         .from("integration_connections")
         .update({
           sync_settings_json: syncSettings,
-          connection_status: recordsFailed > 0 ? "connected_with_errors" : "connected",
+          connection_status: recordsFailed > 0 || !pagingComplete ? "connected_with_errors" : "connected",
           updated_by: input.userId
         })
         .eq("organization_id", input.organizationId)
         .eq("id", input.connection.id);
 
-      status = recordsFailed > 0 ? "completed_with_errors" : "completed";
+      status = recordsFailed > 0 || !pagingComplete ? "completed_with_errors" : "completed";
       if (status === "completed_with_errors") {
-        errorSummary = `${recordsFailed} record(s) failed during sync. Check Error Queue for details.`;
+        if (recordsFailed > 0) {
+          errorSummary = `${recordsFailed} record(s) failed during sync. Check Error Queue for details.`;
+        } else {
+          errorSummary = "Sync ended before processing all available pages/records.";
+        }
       }
     } catch (error) {
       status = "failed";
       errorSummary = error instanceof Error ? error.message : "Webconnex sync failed.";
       recordsFailed += 1;
+      pagingComplete = false;
+      completionDetail = "Sync failed before completion.";
       await this.logService.enqueueError({
         organizationId: input.organizationId,
         integrationConnectionId: input.connection.id,
@@ -358,27 +426,76 @@ export class WebconnexSyncService {
       organizationId: input.organizationId,
       jobId: job.id,
       status,
+      recordsRetrieved,
       recordsProcessed,
       recordsCreated,
       recordsUpdated,
+      recordsSkipped,
       recordsFailed,
+      totalRecordsExpected,
+      currentPage,
+      completedSuccessfully: status === "completed" && pagingComplete && recordsFailed === 0,
+      pagingComplete,
       cursor: finalCursor,
       lastSuccessfulSyncDate:
         status === "completed" || status === "completed_with_errors"
           ? new Date().toISOString()
           : null,
-      errorSummary,
+      errorSummary: errorSummary ?? completionDetail,
       startedDate: job.started_date
     });
+
+    await supabase
+      .from("integration_connections")
+      .update({
+        sync_settings_json: {
+          ...syncSettings,
+          integrationRuntimeState: {
+            syncStatus:
+              status === "completed" && pagingComplete && recordsFailed === 0
+                ? "fully_synced"
+                : "could_not_complete",
+            runId: job.id,
+            startedAt: job.started_date,
+            completedAt: new Date().toISOString(),
+            statusDetail:
+              status === "completed" && pagingComplete && recordsFailed === 0
+                ? "Completed all available pages/records."
+                : errorSummary ?? completionDetail,
+            recordsRetrieved,
+            recordsProcessed,
+            recordsCreated,
+            recordsUpdated,
+            recordsSkipped,
+            recordsFailed,
+            currentPage,
+            currentCursor: finalCursor,
+            totalRecordsExpected,
+            pagingComplete,
+            completedSuccessfully: status === "completed" && pagingComplete && recordsFailed === 0
+          },
+          lastSuccessfulSyncDate:
+            status === "completed" || status === "completed_with_errors"
+              ? new Date().toISOString()
+              : syncSettings.lastSuccessfulSyncDate ?? null
+        },
+        updated_by: input.userId
+      })
+      .eq("organization_id", input.organizationId)
+      .eq("id", input.connection.id);
 
     return {
       jobId: job.id,
       status,
+      recordsRetrieved,
       recordsProcessed,
       recordsCreated,
       recordsUpdated,
+      recordsSkipped,
       recordsFailed,
-      errorSummary
+      pagingComplete,
+      completedSuccessfully: status === "completed" && pagingComplete && recordsFailed === 0,
+      errorSummary: errorSummary ?? completionDetail
     };
   }
 }
