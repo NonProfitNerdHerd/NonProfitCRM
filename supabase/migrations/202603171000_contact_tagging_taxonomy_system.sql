@@ -518,7 +518,7 @@ stable
 security definer
 set search_path = public
 as $$
-  with direct_counts as (
+  with recursive direct_counts as (
     select
       t.id as tag_id,
       count(distinct ct.contact_id) as contact_count
@@ -605,7 +605,7 @@ create policy tags_select on public.tags
   using (
     app.has_active_membership(organization_id)
     and (
-      or app.has_permission(organization_id, 'can_assign_contact_tags')
+      app.has_permission(organization_id, 'can_assign_contact_tags')
       or app.has_permission(organization_id, 'can_manage_contact_tags')
       or app.has_permission(organization_id, 'can_bulk_tag_contacts')
     )
