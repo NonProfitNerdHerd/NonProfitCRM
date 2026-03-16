@@ -437,6 +437,311 @@ export async function runContactsImport(input: ContactImportRunInput) {
   };
 }
 
+export async function startContactsImportJob(input: {
+  fileName: string;
+  totalRows: number;
+  mappings: ImportCenterMapping[];
+  classification: ContactClassificationInput;
+  templateId?: string | null;
+  tagDelimiter?: string | null;
+  duplicateHandling?: "skip" | "flag";
+}) {
+  const context = await requireImportCenterAccess();
+  const supabase = await createClient();
+  const tagDelimiter = toText(input.tagDelimiter) || ";";
+
+  const { data: job, error } = await supabase
+    .from("import_center_jobs")
+    .insert({
+      organization_id: context.organizationId,
+      import_type: "contacts",
+      file_name: input.fileName,
+      template_used: input.templateId ?? null,
+      uploaded_by: context.userId,
+      started_at: new Date().toISOString(),
+      status: "running",
+      total_rows: input.totalRows,
+      mapping_configuration_snapshot: {
+        mappings: input.mappings,
+        summary: mappingSummary(input.mappings)
+      },
+      classification_snapshot: input.classification,
+      tag_configuration: { delimiter: tagDelimiter },
+      duplicate_handling: input.duplicateHandling ?? "skip"
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  return { jobId: String(job.id) };
+}
+
+export async function processContactsImportChunk(input: {
+  jobId: string;
+  rows: Array<Record<string, unknown>>;
+  rowOffset: number;
+  mappings: ImportCenterMapping[];
+  classification: ContactClassificationInput;
+  tagDelimiter?: string | null;
+  duplicateHandling?: "skip" | "flag";
+}) {
+  const context = await requireImportCenterAccess();
+  const supabase = await createClient();
+  const tagDelimiter = toText(input.tagDelimiter) || ";";
+  const duplicateHandling = input.duplicateHandling ?? "skip";
+
+  const { data: job, error: jobError } = await supabase
+    .from("import_center_jobs")
+    .select("id,status,successful_rows,failed_rows,skipped_rows,new_tags_created,total_rows")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.jobId)
+    .single();
+  if (jobError) throw jobError;
+  if (toText(job.status).startsWith("completed")) {
+    throw new Error("This import job is already completed.");
+  }
+
+  let successfulRows = 0;
+  let failedRows = 0;
+  let skippedRows = 0;
+  let newTagsCreated = 0;
+  const tagCache = new Map<string, string>();
+  const createdTagTracker = new Set<string>();
+  const customFieldIdMap = await ensureCustomFieldIdMap(input.mappings);
+
+  for (const [index, row] of input.rows.entries()) {
+    const rowIndex = input.rowOffset + index + 1;
+    try {
+      const mapped = mapRowToTargets(row, input.mappings);
+      const firstName = toText(mapped.standard.first_name);
+      const lastName = toText(mapped.standard.last_name);
+      if (!firstName || !lastName) {
+        skippedRows += 1;
+        await appendImportCenterRowError({
+          organizationId: context.organizationId,
+          jobId: input.jobId,
+          rowIndex,
+          errorMessage: "First Name and Last Name are required.",
+          rawRow: row
+        });
+        continue;
+      }
+
+      const duplicate = await resolveContactDuplicate({
+        organizationId: context.organizationId,
+        row,
+        standard: mapped.standard,
+        mappings: input.mappings
+      });
+      if (duplicate.duplicate) {
+        skippedRows += 1;
+        await appendImportCenterRowError({
+          organizationId: context.organizationId,
+          jobId: input.jobId,
+          rowIndex,
+          errorMessage:
+            duplicateHandling === "flag"
+              ? `Flagged duplicate: ${duplicate.reason}`
+              : `Skipped duplicate: ${duplicate.reason}`,
+          rawRow: row
+        });
+        continue;
+      }
+
+      const contactPayload = {
+        organization_id: context.organizationId,
+        first_name: firstName,
+        last_name: lastName,
+        preferred_name: toText(mapped.standard.preferred_name) || null,
+        organization_name:
+          input.classification.contactType === "organization"
+            ? toText(mapped.standard.organization_name) || `${firstName} ${lastName}`
+            : toText(mapped.standard.organization_name) || null,
+        entity_type: input.classification.contactType,
+        tracking_status: input.classification.contactCategory,
+        donor_status: donorStatusForCategory(input.classification.contactCategory),
+        email: toText(mapped.standard.email).toLowerCase() || null,
+        alternate_email: toText(mapped.standard.alternate_email).toLowerCase() || null,
+        phone: toText(mapped.standard.phone) || null,
+        mobile_number: toText(mapped.standard.mobile_number) || null,
+        alternate_phone: toText(mapped.standard.alternate_phone) || null,
+        address_line_1: toText(mapped.standard.address_line_1) || null,
+        address_line_2: toText(mapped.standard.address_line_2) || null,
+        city: toText(mapped.standard.city) || null,
+        state: toText(mapped.standard.state) || null,
+        postal_code: toText(mapped.standard.postal_code) || null,
+        mailing_address_line_1: toText(mapped.standard.mailing_address_line_1) || null,
+        mailing_address_line_2: toText(mapped.standard.mailing_address_line_2) || null,
+        mailing_city: toText(mapped.standard.mailing_city) || null,
+        mailing_state: toText(mapped.standard.mailing_state) || null,
+        mailing_postal_code: toText(mapped.standard.mailing_postal_code) || null,
+        formal_letter_name: toText(mapped.standard.formal_letter_name) || null,
+        external_source: "import_center",
+        external_source_id: toText(mapped.standard.external_source_id).toLowerCase() || null,
+        created_by: context.userId,
+        updated_by: context.userId
+      };
+
+      let contactId = duplicate.existingId;
+      if (contactId && duplicate.byExternalId) {
+        const { error: updateError } = await supabase
+          .from("contacts")
+          .update(contactPayload)
+          .eq("organization_id", context.organizationId)
+          .eq("id", contactId);
+        if (updateError) throw updateError;
+      } else {
+        const { data: created, error: insertError } = await supabase
+          .from("contacts")
+          .insert(contactPayload)
+          .select("id")
+          .single();
+        if (insertError) throw insertError;
+        contactId = String(created.id);
+      }
+
+      for (const [internalKey, rawValue] of Object.entries(mapped.custom)) {
+        const fieldId = customFieldIdMap.get(internalKey);
+        if (!fieldId) continue;
+        const valueText = toText(rawValue);
+        if (!valueText) continue;
+        const { error: fieldValueError } = await supabase.from("contact_custom_field_values").upsert(
+          {
+            organization_id: context.organizationId,
+            contact_id: contactId,
+            custom_field_id: fieldId,
+            value_text: valueText,
+            value_json: { value: valueText },
+            created_by: context.userId
+          },
+          {
+            onConflict: "organization_id,contact_id,custom_field_id"
+          }
+        );
+        if (fieldValueError) throw fieldValueError;
+      }
+
+      const tags = parseTagsFromCell(mapped.tagsValue, tagDelimiter);
+      if (tags.length > 0) {
+        const ensured = await ensureContactTags({
+          organizationId: context.organizationId,
+          userId: context.userId,
+          tagNames: tags,
+          cache: tagCache,
+          createdTracker: createdTagTracker
+        });
+        newTagsCreated += ensured.createdCount;
+
+        if (ensured.tagIds.length > 0) {
+          const tagRows = ensured.tagIds.map((tagId) => ({
+            organization_id: context.organizationId,
+            contact_id: contactId,
+            tag_id: tagId,
+            assigned_by: context.userId,
+            assignment_source: "import" as const
+          }));
+          const { error: tagAssignError } = await supabase.from("contact_tags").upsert(tagRows, {
+            onConflict: "organization_id,contact_id,tag_id",
+            ignoreDuplicates: true
+          });
+          if (tagAssignError) throw tagAssignError;
+        }
+      }
+
+      successfulRows += 1;
+    } catch (error) {
+      failedRows += 1;
+      await appendImportCenterRowError({
+        organizationId: context.organizationId,
+        jobId: input.jobId,
+        rowIndex,
+        errorMessage:
+          error instanceof Error ? error.message : "Unexpected error while importing contact row.",
+        rawRow: row
+      });
+    }
+  }
+
+  const cumulative = {
+    successfulRows: Number(job.successful_rows ?? 0) + successfulRows,
+    failedRows: Number(job.failed_rows ?? 0) + failedRows,
+    skippedRows: Number(job.skipped_rows ?? 0) + skippedRows,
+    newTagsCreated: Number(job.new_tags_created ?? 0) + newTagsCreated
+  };
+
+  const { error: updateError } = await supabase
+    .from("import_center_jobs")
+    .update({
+      status: "running",
+      successful_rows: cumulative.successfulRows,
+      failed_rows: cumulative.failedRows,
+      skipped_rows: cumulative.skippedRows,
+      new_tags_created: cumulative.newTagsCreated,
+      updated_at: new Date().toISOString()
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.jobId);
+  if (updateError) throw updateError;
+
+  return {
+    jobId: input.jobId,
+    chunk: { successfulRows, failedRows, skippedRows, newTagsCreated },
+    cumulative
+  };
+}
+
+export async function completeContactsImportJob(input: { jobId: string }) {
+  const context = await requireImportCenterAccess();
+  const supabase = await createClient();
+
+  const { data: job, error: jobError } = await supabase
+    .from("import_center_jobs")
+    .select("id,total_rows,successful_rows,failed_rows,skipped_rows,new_tags_created")
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.jobId)
+    .single();
+  if (jobError) throw jobError;
+
+  const failedRows = Number(job.failed_rows ?? 0);
+  const skippedRows = Number(job.skipped_rows ?? 0);
+  const status = failedRows > 0 ? "completed_with_errors" : "completed";
+
+  const { error: finalizeError } = await supabase
+    .from("import_center_jobs")
+    .update({
+      status,
+      completed_at: new Date().toISOString(),
+      error_log_location: failedRows + skippedRows > 0 ? `import_center_job_errors:${input.jobId}` : null
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("id", input.jobId);
+  if (finalizeError) throw finalizeError;
+
+  await logImportCenterAudit({
+    organizationId: context.organizationId,
+    userId: context.userId,
+    actionType: "import_center_contacts_run",
+    targetEntityType: "import_center_jobs",
+    targetEntityId: input.jobId,
+    metadata: {
+      totalRows: Number(job.total_rows ?? 0),
+      successfulRows: Number(job.successful_rows ?? 0),
+      failedRows,
+      skippedRows,
+      newTagsCreated: Number(job.new_tags_created ?? 0)
+    }
+  });
+
+  return {
+    jobId: input.jobId,
+    totalRows: Number(job.total_rows ?? 0),
+    successfulRows: Number(job.successful_rows ?? 0),
+    failedRows,
+    skippedRows,
+    newTagsCreated: Number(job.new_tags_created ?? 0)
+  };
+}
+
 export async function listImportCenterJobErrors(jobId: string) {
   const context = await requireImportCenterAccess();
   const supabase = await createClient();
