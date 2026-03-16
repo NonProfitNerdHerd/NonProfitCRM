@@ -37,14 +37,15 @@ export function LineChart({
 }) {
   const width = 860;
   const height =
-    size === "expanded" ? 460 : size === "mini" ? 150 : size === "compact" ? 180 : 300;
+    size === "expanded" ? 460 : size === "mini" ? 150 : size === "compact" ? 320 : 300;
   const left = 58;
   const right = 18;
   const top = size === "expanded" ? 24 : 22;
-  const bottom = 56;
+  const bottom = size === "compact" ? 138 : 56;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const axisFontSize = size === "expanded" ? 13 : size === "mini" ? 11 : 12;
+  const xTickFontSize = size === "compact" ? 44 : axisFontSize;
   const titleClass =
     size === "expanded" ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900";
   const containerHeight =
@@ -53,7 +54,7 @@ export function LineChart({
       : size === "mini"
         ? "h-[170px]"
         : size === "compact"
-          ? "h-[240px]"
+          ? "h-[380px]"
           : "h-[400px]";
   const svgHeightClass =
     size === "expanded"
@@ -61,7 +62,7 @@ export function LineChart({
       : size === "mini"
         ? "h-[95px]"
         : size === "compact"
-          ? "h-[150px]"
+          ? "h-[295px]"
           : "h-[300px]";
 
   const pointCount = Math.max(...series.map((s) => s.points.length), 0);
@@ -98,7 +99,8 @@ export function LineChart({
   }
 
   const xLabels = series[0]?.points.map((point) => point.label) ?? [];
-  const labelStep = Math.max(1, Math.ceil(pointCount / 6));
+  const labelStep =
+    size === "compact" ? Math.max(1, Math.ceil(pointCount / 3)) : Math.max(1, Math.ceil(pointCount / 6));
 
   return (
     <div className={`flex ${containerHeight} flex-col rounded-md border border-slate-200 p-4`}>
@@ -162,7 +164,7 @@ export function LineChart({
               x={x}
               y={top + plotHeight + 18}
               textAnchor="middle"
-              fontSize={axisFontSize}
+              fontSize={xTickFontSize}
               fill="#64748B"
             >
               {label}

@@ -45,11 +45,11 @@ export function PieChart({
 }) {
   const total = slices.reduce((sum, slice) => sum + slice.amount, 0);
   const width = 520;
-  const height = size === "expanded" ? 400 : 220;
-  const radius = size === "expanded" ? 120 : 70;
-  const cx = size === "expanded" ? 180 : 120;
+  const height = size === "expanded" ? 400 : 180;
+  const radius = size === "expanded" ? 120 : 60;
+  const cx = size === "expanded" ? 180 : width / 2;
   const cy = height / 2;
-  const containerHeight = size === "expanded" ? "h-[620px]" : "h-[240px]";
+  const containerHeight = size === "expanded" ? "h-[620px]" : "h-[300px]";
   const legendText = size === "expanded" ? "text-sm" : "text-xs";
 
   if (total <= 0 || slices.length === 0) {
@@ -102,8 +102,11 @@ export function PieChart({
         ) : null}
       </div>
 
-      <div className="flex flex-1 gap-4">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-1/2 min-w-[220px]">
+      <div className={`flex min-h-0 flex-1 ${size === "expanded" ? "gap-4" : "flex-col gap-3"}`}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className={size === "expanded" ? "w-1/2 min-w-[220px]" : "mx-auto h-[150px] w-full"}
+        >
           {paths.map((slice) => (
             <path key={slice.label} d={slice.path} fill={slice.color} stroke="#fff" strokeWidth="1.5" />
           ))}
@@ -126,7 +129,7 @@ export function PieChart({
           })}
         </svg>
 
-        <div className={`flex-1 overflow-auto ${legendText}`}>
+        <div className={`min-w-0 flex-1 overflow-auto ${legendText}`}>
           <div className="space-y-2">
             {paths.map((slice) => (
               <div key={`${slice.label}-legend`} className="rounded-md border border-slate-100 p-2">
@@ -136,7 +139,7 @@ export function PieChart({
                       className="inline-block h-2.5 w-2.5 rounded-full"
                       style={{ backgroundColor: slice.color }}
                     />
-                    <span className="font-medium text-slate-800">{slice.label}</span>
+                    <span className="font-medium text-slate-800 break-words">{slice.label}</span>
                   </div>
                   <span className="text-slate-500">{slice.percentage.toFixed(1)}%</span>
                 </div>

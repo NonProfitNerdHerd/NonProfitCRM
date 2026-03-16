@@ -153,7 +153,7 @@ export function FinancialAnalyticsDashboard({
             valueFormatter={(value) => formatCurrency(value)}
           />
         </div>
-        <section className="flex h-[240px] flex-col justify-between rounded-md border border-slate-200 p-4">
+        <section className="flex h-[300px] flex-col justify-between rounded-md border border-slate-200 p-4">
           <div>
             <p className="text-sm font-semibold text-slate-900">Average Donation Amount</p>
             <p className="mt-1 text-xs text-slate-500">
