@@ -18,6 +18,16 @@ type ContactSyncResult = {
   completionNote: string;
 };
 
+function isExternalIdSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("contact_external_ids") || message.includes("resolve_contact_by_external_id");
+}
+
 function readString(record: Record<string, unknown>, keys: string[]) {
   const readByPath = (path: string) => {
     if (!path.includes(".")) return record[path];
@@ -98,15 +108,29 @@ export class ContactSyncService {
       "dateCreated"
     ]);
 
-    const { data: existingRef } = await input.supabase
-      .from("contact_external_references")
-      .select("id, contact_id")
-      .eq("organization_id", input.organizationId)
-      .in("source_system", ["givingfuel", "webconnex"])
-      .eq("external_record_id", externalId)
-      .maybeSingle();
-
-    let contactId = (existingRef?.contact_id as string | undefined) ?? null;
+    let contactId: string | null = null;
+    const resolveByExternal = await input.supabase.rpc("resolve_contact_by_external_id", {
+      org_id: input.organizationId,
+      source: "givingfuel",
+      external: externalId
+    });
+    if (!resolveByExternal.error && resolveByExternal.data) {
+      contactId = String(resolveByExternal.data);
+    }
+    if (resolveByExternal.error && !isExternalIdSchemaMissingError(resolveByExternal.error)) {
+      throw resolveByExternal.error;
+    }
+    if (!contactId) {
+      const { data: existingRef, error: existingRefError } = await input.supabase
+        .from("contact_external_references")
+        .select("id, contact_id")
+        .eq("organization_id", input.organizationId)
+        .in("source_system", ["givingfuel", "webconnex"])
+        .eq("external_record_id", externalId)
+        .maybeSingle();
+      if (existingRefError) throw existingRefError;
+      contactId = (existingRef?.contact_id as string | undefined) ?? null;
+    }
     let actionTaken = "updated";
     const normalizedEntityType = "person";
     const normalizedOrganizationName = null;
@@ -188,6 +212,22 @@ export class ContactSyncService {
       { onConflict: "organization_id,source_system,external_record_id" }
     );
     if (refError) throw refError;
+
+    const { error: externalIdError } = await input.supabase.from("contact_external_ids").upsert(
+      {
+        organization_id: input.organizationId,
+        contact_id: contactId,
+        source_system: "givingfuel",
+        external_id: externalId,
+        external_type: "contact",
+        is_primary: true,
+        is_active: true
+      },
+      { onConflict: "organization_id,source_system,external_id" }
+    );
+    if (externalIdError && !isExternalIdSchemaMissingError(externalIdError)) {
+      throw externalIdError;
+    }
 
     return {
       externalId,

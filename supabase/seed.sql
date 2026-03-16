@@ -22,6 +22,12 @@ values
     'Run bulk tag assignment and removal jobs',
     'contacts'
   ),
+  (
+    'can_merge_contacts',
+    'Merge Contacts',
+    'Review duplicate contacts and execute safe contact merge operations',
+    'contacts'
+  ),
   ('can_view_pii', 'View PII', 'View protected PII fields and records', 'security'),
   ('can_view_sensitive_notes', 'View Sensitive Notes', 'Read restricted note records', 'notes'),
   ('can_view_sensitive_tasks', 'View Sensitive Tasks', 'Read restricted task records', 'tasks'),
@@ -505,6 +511,7 @@ with canonical_map as (
     'can_manage_contact_tags',
     'can_assign_contact_tags',
     'can_bulk_tag_contacts',
+    'can_merge_contacts',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
@@ -548,6 +555,7 @@ with canonical_map as (
     'can_manage_contact_tags',
     'can_assign_contact_tags',
     'can_bulk_tag_contacts',
+    'can_merge_contacts',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',
@@ -588,6 +596,7 @@ with canonical_map as (
     'can_manage_contact_tags',
     'can_assign_contact_tags',
     'can_bulk_tag_contacts',
+    'can_merge_contacts',
     'can_view_pii',
     'can_view_sensitive_notes',
     'can_view_sensitive_tasks',

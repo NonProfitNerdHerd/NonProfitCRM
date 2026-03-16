@@ -115,6 +115,16 @@ function toStringCandidates(value: unknown, fallback: string[]) {
   return fallback;
 }
 
+function isExternalIdSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("contact_external_ids") || message.includes("resolve_contact_by_external_id");
+}
+
 async function resolveExistingPageMappings(input: {
   organizationId: string;
   connectionId: string;
@@ -210,16 +220,33 @@ export class DonationSyncService {
       if (contactResolutionCache.has(normalized)) {
         return contactResolutionCache.get(normalized) ?? null;
       }
-      const { data: contactRef, error } = await supabase
-        .from("contact_external_references")
-        .select("contact_id")
-        .eq("organization_id", input.organizationId)
-        .in("source_system", ["givingfuel", "webconnex"])
-        .eq("external_record_id", normalized)
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      const resolved = (contactRef?.contact_id as string | undefined) ?? null;
+
+      let resolved: string | null = null;
+      const rpc = await supabase.rpc("resolve_contact_by_external_id", {
+        org_id: input.organizationId,
+        source: "givingfuel",
+        external: normalized
+      });
+      if (!rpc.error && rpc.data) {
+        resolved = String(rpc.data);
+      }
+      if (rpc.error && !isExternalIdSchemaMissingError(rpc.error)) {
+        throw rpc.error;
+      }
+
+      if (!resolved) {
+        const { data: contactRef, error } = await supabase
+          .from("contact_external_references")
+          .select("contact_id")
+          .eq("organization_id", input.organizationId)
+          .in("source_system", ["givingfuel", "webconnex"])
+          .eq("external_record_id", normalized)
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+        resolved = (contactRef?.contact_id as string | undefined) ?? null;
+      }
+
       contactResolutionCache.set(normalized, resolved);
       return resolved;
     }

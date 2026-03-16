@@ -74,6 +74,7 @@ const menu: MenuItem[] = [
       { href: "/staff/admin/users", label: "Users" },
       { href: "/staff/admin/roles", label: "Roles" },
       { href: "/staff/admin/tags", label: "Tags" },
+      { href: "/staff/admin/contacts/merge", label: "Contact Merge" },
       { href: "/staff/admin/integrations", label: "Integrations" }
     ]
   }

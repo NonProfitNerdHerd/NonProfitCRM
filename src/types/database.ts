@@ -21,6 +21,7 @@ export type PermissionKey =
   | "can_manage_contact_tags"
   | "can_assign_contact_tags"
   | "can_bulk_tag_contacts"
+  | "can_merge_contacts"
   | "can_view_pii"
   | "can_view_sensitive_notes"
   | "can_view_sensitive_tasks"

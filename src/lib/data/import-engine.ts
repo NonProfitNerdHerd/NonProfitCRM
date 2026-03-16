@@ -100,6 +100,16 @@ function isMissingImportStagingSchema(error: unknown) {
   );
 }
 
+function isExternalIdSchemaMissing(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("contact_external_ids") || message.includes("resolve_contact_by_external_id");
+}
+
 function normalizeMappedRow(entityType: ImportEntityType, mappedRow: Record<string, unknown>) {
   const config = IMPORT_ENTITY_CONFIG[entityType];
   const normalized: Record<string, unknown> = {};
@@ -172,6 +182,22 @@ async function resolveRelationship(
   const supabase = await createClient();
   const relatedEntity = toEntityType(rule.relatedEntity as string);
   const relatedTable = destinationTableForEntity(relatedEntity);
+  if (rule.relatedField === "external_source_id" && relatedEntity === "contact") {
+    const rpc = await supabase.rpc("resolve_contact_by_external_id", {
+      org_id: organizationId,
+      source: sourcePlatform,
+      external: value
+    });
+    if (!rpc.error && rpc.data) {
+      return { type: "resolved" as const, id: String(rpc.data) };
+    }
+    if (rpc.error && !isExternalIdSchemaMissing(rpc.error)) {
+      return {
+        type: "error" as const,
+        message: `Relationship lookup failed for ${relationshipKey}.`
+      };
+    }
+  }
   let query = supabase.from(relatedTable).select("id").eq("organization_id", organizationId);
   if (rule.relatedField === "external_source_id") {
     query = query.eq("source_platform", sourcePlatform).eq("external_source_id", value);
@@ -216,6 +242,31 @@ async function findExistingByMatch(params: {
   for (const field of params.matchBy) {
     const value = params.normalizedRow[field];
     if (!text(value)) continue;
+    if (params.entityType === "contact" && field === "external_source_id") {
+      const externalId = text(value).toLowerCase();
+      const sourceSystem = text(params.sourcePlatform).toLowerCase();
+      try {
+        const { data: externalMatch, error: externalError } = await supabase
+          .from("contact_external_ids")
+          .select("contact_id")
+          .eq("organization_id", params.organizationId)
+          .eq("source_system", sourceSystem)
+          .eq("external_id", externalId)
+          .eq("is_active", true)
+          .limit(2);
+        if (externalError && !isExternalIdSchemaMissing(externalError)) {
+          throw externalError;
+        }
+        if (externalMatch && externalMatch.length > 0) {
+          return externalMatch.map((row) => ({
+            id: row.contact_id as string,
+            matchField: field
+          }));
+        }
+      } catch {
+        // Fall back to legacy matching below.
+      }
+    }
     let query = supabase.from(table).select("id").eq("organization_id", params.organizationId);
     if (field === "external_source_id") {
       query = query.eq("source_platform", params.sourcePlatform).eq("external_source_id", text(value));
@@ -233,6 +284,37 @@ async function findExistingByMatch(params: {
     }
   }
   return [];
+}
+
+async function upsertContactExternalId(input: {
+  organizationId: string;
+  contactId: string;
+  sourceSystem: string;
+  externalId: string;
+  userId: string;
+}) {
+  const supabase = await createClient();
+  const sourceSystem = text(input.sourceSystem).toLowerCase();
+  const externalId = text(input.externalId).toLowerCase();
+  if (!sourceSystem || !externalId) return;
+
+  const { error } = await supabase.from("contact_external_ids").upsert(
+    {
+      organization_id: input.organizationId,
+      contact_id: input.contactId,
+      source_system: sourceSystem,
+      external_id: externalId,
+      external_type: "import",
+      is_primary: true,
+      is_active: true,
+      updated_by: input.userId,
+      created_by: input.userId
+    },
+    { onConflict: "organization_id,source_system,external_id" }
+  );
+  if (error && !isExternalIdSchemaMissing(error)) {
+    throw error;
+  }
 }
 
 export async function stageImportBatch(input: {
@@ -906,6 +988,20 @@ export async function commitImportBatch(input: {
           })
           .eq("organization_id", context.organizationId)
           .eq("id", row.id);
+
+        if (entityType === "contact") {
+          const preparedPayload = prepared.payload as Record<string, unknown>;
+          const externalSourceId = text(preparedPayload.external_source_id);
+          if (externalSourceId) {
+            await upsertContactExternalId({
+              organizationId: context.organizationId,
+              contactId: existingId,
+              sourceSystem: text(job.source_platform),
+              externalId: externalSourceId,
+              userId: context.userId
+            });
+          }
+        }
         updated += 1;
       } else {
         const { data: after, error: insertError } = await supabase
@@ -936,6 +1032,21 @@ export async function commitImportBatch(input: {
           })
           .eq("organization_id", context.organizationId)
           .eq("id", row.id);
+
+        if (entityType === "contact") {
+          const preparedPayload = prepared.payload as Record<string, unknown>;
+          const externalSourceId = text(preparedPayload.external_source_id);
+          const insertedContactId = text(after?.id);
+          if (externalSourceId && insertedContactId) {
+            await upsertContactExternalId({
+              organizationId: context.organizationId,
+              contactId: insertedContactId,
+              sourceSystem: text(job.source_platform),
+              externalId: externalSourceId,
+              userId: context.userId
+            });
+          }
+        }
         inserted += 1;
       }
     } catch (error) {
