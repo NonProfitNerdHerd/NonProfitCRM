@@ -13,7 +13,7 @@ type MenuItem = {
   children?: Array<{ href: string; label: string }>;
 };
 
-const menu: MenuItem[] = [
+const BASE_MENU: MenuItem[] = [
   {
     id: "dashboard",
     href: "/staff/dashboard",
@@ -80,8 +80,26 @@ const menu: MenuItem[] = [
   }
 ];
 
-export function StaffSidebar() {
+export function StaffSidebar({
+  canAccessImportCenter
+}: {
+  canAccessImportCenter?: boolean;
+}) {
   const pathname = usePathname();
+  const menu = [
+    ...BASE_MENU,
+    ...(canAccessImportCenter
+      ? ([
+          {
+            id: "import-center",
+            href: "/staff/import-center",
+            label: "Import Center",
+            matches: (path: string) => path.startsWith("/staff/import-center"),
+            children: [{ href: "/staff/import-center/contacts", label: "Contacts Import" }]
+          } satisfies MenuItem
+        ] as MenuItem[])
+      : [])
+  ];
 
   return (
     <aside className="sticky top-0 h-screen w-64 border-r border-slate-200 bg-white px-4 py-6">

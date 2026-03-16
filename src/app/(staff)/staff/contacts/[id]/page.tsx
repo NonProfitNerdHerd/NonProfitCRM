@@ -70,6 +70,19 @@ export default async function ContactDetailPage({ params }: PageProps) {
               )}
             </div>
           </div>
+          {profile.customFields.length > 0 ? (
+            <div className="md:col-span-2">
+              <p className="text-slate-500">Custom Fields</p>
+              <div className="mt-1 grid gap-1 md:grid-cols-2">
+                {profile.customFields.map((entry) => (
+                  <p key={`${String(entry.internalKey)}-${String(entry.label)}`}>
+                    <span className="font-medium text-slate-700">{String(entry.label)}:</span>{" "}
+                    <span className="text-slate-900">{String(entry.value || "-")}</span>
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </Card>
       <Card>

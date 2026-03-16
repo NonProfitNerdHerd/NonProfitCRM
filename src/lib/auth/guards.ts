@@ -96,6 +96,14 @@ async function hasAllowedRoleKey(
   return additionalRoleKeys.some((key) => allowedRoleKeys.includes(key));
 }
 
+export async function hasRoleKeys(
+  allowedRoleKeys: string[],
+  context?: SessionContext
+): Promise<boolean> {
+  const resolvedContext = context ?? (await requireSessionContext());
+  return hasAllowedRoleKey(resolvedContext, allowedRoleKeys);
+}
+
 export async function isAdministrator(context?: SessionContext): Promise<boolean> {
   const resolvedContext = context ?? (await requireSessionContext());
   return hasAllowedRoleKey(resolvedContext, ["administrator"]);
@@ -172,6 +180,10 @@ export async function requireAdministratorRole(): Promise<SessionContext> {
 
 export async function requireIntegrationManagerRole(): Promise<SessionContext> {
   return requireRoleKeys(["administrator", "data_steward", "data_administrator"]);
+}
+
+export async function requireImportCenterAccess(): Promise<SessionContext> {
+  return requireRoleKeys(["administrator", "data_steward"]);
 }
 
 export async function requirePortalIdentity(): Promise<SessionContext> {

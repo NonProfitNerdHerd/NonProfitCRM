@@ -56,6 +56,16 @@ function isDonationOrgSchemaError(error: unknown) {
   return message.includes("crm_organization_id") || message.includes("crm_organizations");
 }
 
+function isContactCustomFieldsSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("contact_custom_field_values") || message.includes("contact_custom_fields");
+}
+
 function normalizeLegacyContactClassification(record: Record<string, unknown>): Record<string, unknown> {
   const donorStatus = String(record.donor_status ?? "").toLowerCase();
   const organizationName = String(record.organization_name ?? "").trim();
@@ -245,6 +255,37 @@ export async function getContactProfileData(contactId: string) {
   if (membershipsError) throw membershipsError;
   if (campaignsError) throw campaignsError;
 
+  let customFields: Array<Record<string, unknown>> = [];
+  const customFieldsResult = await supabase
+    .from("contact_custom_field_values")
+    .select(
+      "value_text,contact_custom_fields(field_label,internal_key,display_order,data_type,is_active)"
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: true });
+  if (customFieldsResult.error) {
+    if (!isContactCustomFieldsSchemaError(customFieldsResult.error)) {
+      throw customFieldsResult.error;
+    }
+  } else {
+    customFields = (customFieldsResult.data ?? [])
+      .map((row) => {
+        const field = Array.isArray(row.contact_custom_fields)
+          ? row.contact_custom_fields[0]
+          : row.contact_custom_fields;
+        return {
+          label: String((field as Record<string, unknown> | null)?.field_label ?? ""),
+          internalKey: String((field as Record<string, unknown> | null)?.internal_key ?? ""),
+          dataType: String((field as Record<string, unknown> | null)?.data_type ?? "text"),
+          displayOrder: Number((field as Record<string, unknown> | null)?.display_order ?? 0),
+          value: String(row.value_text ?? "")
+        };
+      })
+      .filter((entry) => entry.label)
+      .sort((a, b) => a.displayOrder - b.displayOrder);
+  }
+
   return {
     contact,
     emails: emails ?? [],
@@ -255,6 +296,7 @@ export async function getContactProfileData(contactId: string) {
     tasks: tasks ?? [],
     memberships: memberships ?? [],
     campaigns: campaigns ?? [],
+    customFields,
     activity,
     taskUrgency: taskUrgencyColor(tasks ?? [])
   };
