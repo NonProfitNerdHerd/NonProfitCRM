@@ -30,6 +30,17 @@ import {
 } from "@/lib/integrations/kindful-config";
 import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 
+function normalizeKindfulBaseUrl(value: string | undefined | null) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return raw;
+  try {
+    const parsed = new URL(raw);
+    return parsed.origin.replace(/\/+$/, "");
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
+}
+
 const DEFAULT_WEBCONNEX_FIELD_MAPPING = {
   contacts: {
     externalContactId: "id",
@@ -290,7 +301,9 @@ export class IntegrationConfigurationService {
       .from("integration_connections")
       .update({
         name: input.payload.name ?? current.name,
-        base_url: input.payload.baseUrl ?? current.base_url,
+        base_url: isKindfulIntegrationKey(input.definition.provider_key)
+          ? normalizeKindfulBaseUrl(input.payload.baseUrl ?? current.base_url)
+          : input.payload.baseUrl ?? current.base_url,
         auth_type: input.payload.authType ?? current.auth_type,
         api_key_reference: nextApiKeyReference,
         is_enabled: input.payload.isEnabled ?? current.is_enabled,

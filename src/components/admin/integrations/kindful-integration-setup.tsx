@@ -360,12 +360,18 @@ export function KindfulIntegrationSetup({
         <section className="space-y-3 rounded-md border border-slate-200 p-4">
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Kindful Base URL">
-              <Input
-                value={settingsForm.baseUrl}
-                onChange={(event) =>
-                  setSettingsForm((prev) => ({ ...prev, baseUrl: event.target.value }))
-                }
-              />
+              <div className="space-y-1">
+                <Input
+                  value={settingsForm.baseUrl}
+                  onChange={(event) =>
+                    setSettingsForm((prev) => ({ ...prev, baseUrl: event.target.value }))
+                  }
+                />
+                <p className="text-xs text-slate-500">
+                  Use root host only (example: https://app.kindful.com). Do not include endpoint
+                  paths like /api/v1/imports.
+                </p>
+              </div>
             </Field>
             <Field label="Application Token">
               <Input

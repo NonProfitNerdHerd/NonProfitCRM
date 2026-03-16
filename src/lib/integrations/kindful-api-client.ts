@@ -112,6 +112,18 @@ function asObject(payload: unknown) {
   return {};
 }
 
+function normalizeBaseUrl(baseUrl: string) {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed);
+    // Operators sometimes paste a full endpoint URL; normalize to host root.
+    return parsed.origin.replace(/\/+$/, "");
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
+}
+
 export class KindfulApiClient {
   private baseUrl: string;
   private authType: string;
@@ -133,7 +145,7 @@ export class KindfulApiClient {
   private lastRequestAt = 0;
 
   constructor(config: KindfulClientConfig) {
-    this.baseUrl = (config.baseUrl || "").replace(/\/+$/, "");
+    this.baseUrl = normalizeBaseUrl(config.baseUrl || "");
     this.authType = (config.authType || "api_key_header").toLowerCase().trim();
     this.token = config.applicationToken?.trim();
     this.timeoutMs = config.timeoutMs ?? 30000;
@@ -328,10 +340,49 @@ export class KindfulApiClient {
   }
 
   async getSyncStatus() {
-    return this.request<Record<string, unknown>>({
-      method: "GET",
-      path: this.syncStatusPath
-    });
+    const candidates = Array.from(
+      new Set(
+        [
+          this.syncStatusPath,
+          "/admin/oauth2/api/v1/imports/stats",
+          "/api/v1/imports/stats",
+          "/admin/oauth2/api/v1/imports",
+          "/api/v1/imports"
+        ]
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0)
+      )
+    );
+    let last404Error: Error | null = null;
+    let lastError: Error | null = null;
+    for (const path of candidates) {
+      try {
+        const payload = await this.request<unknown>({
+          method: "GET",
+          path
+        });
+        const normalized = asObject(payload);
+        return Object.keys(normalized).length > 0
+          ? normalized
+          : { sync_status_path_used: path, payload };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("HTTP 404")) {
+          last404Error = error instanceof Error ? error : new Error(message);
+          continue;
+        }
+        lastError = error instanceof Error ? error : new Error(message);
+      }
+    }
+    if (lastError) throw lastError;
+    if (last404Error) {
+      throw new Error(
+        `Kindful sync status endpoint was not found for base URL ${this.baseUrl}. Tried: ${candidates.join(
+          ", "
+        )}. Save base URL as just the root host (for example: https://app.kindful.com).`
+      );
+    }
+    throw new Error("Kindful sync status request failed.");
   }
 
   async getImportStatus(jobId: string) {
