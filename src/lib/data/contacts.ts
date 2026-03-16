@@ -64,6 +64,22 @@ function isClassificationSchemaMissingError(error: unknown) {
   );
 }
 
+function isTaggingSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("contact_tags") ||
+    message.includes("relation") ||
+    message.includes("does not exist") ||
+    message.includes("tags(") ||
+    message.includes("collect_descendant_tag_ids")
+  );
+}
+
 function normalizeLegacyClassification(row: Record<string, unknown>) {
   const organizationName = String(row.organization_name ?? "").trim();
   const donorStatus = String(row.donor_status ?? "").toLowerCase();
@@ -121,6 +137,9 @@ async function attachAssignedTags(
         ""
     ).toLowerCase();
     if (message.includes("permission") || message.includes("row-level security")) {
+      return rows.map((row) => ({ ...row, assigned_tags: [], tag_paths: [] }));
+    }
+    if (isTaggingSchemaMissingError(error)) {
       return rows.map((row) => ({ ...row, assigned_tags: [], tag_paths: [] }));
     }
     throw error;
