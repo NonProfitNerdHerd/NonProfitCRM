@@ -37,6 +37,17 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function formatApiError(payload: unknown, fallback: string) {
+  const value = (payload ?? {}) as {
+    message?: string;
+    details?: string | null;
+    hint?: string | null;
+    code?: string | null;
+  };
+  const parts = [value.message, value.details, value.hint, value.code].filter(Boolean);
+  return parts.length > 0 ? parts.join(" • ") : fallback;
+}
+
 export function UsersManagement({
   initialUsers,
   roles,
@@ -222,7 +233,7 @@ export function UsersManagement({
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      setError(payload?.message ?? "Failed to create user.");
+      setError(formatApiError(payload, "Failed to create user."));
       setCreating(false);
       return;
     }
@@ -287,7 +298,7 @@ export function UsersManagement({
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      setError(payload?.message ?? "Failed to update user.");
+      setError(formatApiError(payload, "Failed to update user."));
       setSavingUserId(null);
       return;
     }
@@ -310,7 +321,7 @@ export function UsersManagement({
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      setError(payload?.message ?? "Failed to reset password.");
+      setError(formatApiError(payload, "Failed to reset password."));
       setSavingUserId(null);
       return;
     }

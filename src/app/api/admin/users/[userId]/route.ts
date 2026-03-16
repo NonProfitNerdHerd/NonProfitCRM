@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { updateAdminUser } from "@/lib/data/admin-users";
+import { apiErrorResponse } from "@/app/api/admin/users/_errors";
 
 type RouteProps = {
   params: Promise<{ userId: string }>;
@@ -31,9 +32,6 @@ export async function PATCH(request: Request, { params }: RouteProps) {
     await updateAdminUser({ ...parsed.data, userId });
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to update user" },
-      { status: 500 }
-    );
+    return apiErrorResponse(error, "Failed to update user");
   }
 }

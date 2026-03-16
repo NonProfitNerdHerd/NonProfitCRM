@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminUser, listAdminUsersData } from "@/lib/data/admin-users";
+import { apiErrorResponse } from "@/app/api/admin/users/_errors";
 
 const createUserSchema = z.object({
   firstName: z.string().min(1),
@@ -17,10 +18,7 @@ export async function GET() {
     const data = await listAdminUsersData();
     return NextResponse.json(data);
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to load users" },
-      { status: 500 }
-    );
+    return apiErrorResponse(error, "Failed to load users");
   }
 }
 
@@ -38,9 +36,6 @@ export async function POST(request: Request) {
     const result = await createAdminUser(parsed.data);
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Failed to create user" },
-      { status: 500 }
-    );
+    return apiErrorResponse(error, "Failed to create user");
   }
 }

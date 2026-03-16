@@ -40,7 +40,7 @@ async function getAllowedRoles(organizationId: string) {
     .select("id, key, name, description")
     .or(`organization_id.is.null,organization_id.eq.${organizationId}`)
     .order("name", { ascending: true });
-  if (error) throw error;
+  throwIfDataError(error, "Failed to load available roles.");
   const canonical = new Map<string, RoleTemplateRow>();
   const additional: RoleTemplateRow[] = [];
   for (const row of (data ?? []) as RoleTemplateRow[]) {
@@ -82,6 +82,19 @@ function toFriendlyProvisionError(error: unknown) {
   return message || "Failed to provision user account.";
 }
 
+function formatDataError(error: unknown, fallback: string) {
+  const value = error as { message?: string; details?: string; hint?: string; code?: string };
+  const message = [value?.message, value?.details, value?.hint, value?.code]
+    .filter(Boolean)
+    .join(" ");
+  return message || fallback;
+}
+
+function throwIfDataError(error: unknown, fallback: string) {
+  if (!error) return;
+  throw new Error(formatDataError(error, fallback));
+}
+
 export async function listAdminUsersData() {
   const context = await requireAnyStaffPermission([
     "can_view_users",
@@ -107,8 +120,8 @@ export async function listAdminUsersData() {
       .eq("organization_id", context.organizationId)
   ]);
 
-  if (membershipsResult.error) throw membershipsResult.error;
-  if (extraRolesResult.error) throw extraRolesResult.error;
+  throwIfDataError(membershipsResult.error, "Failed to load organization memberships.");
+  throwIfDataError(extraRolesResult.error, "Failed to load additional role assignments.");
 
   const memberships = membershipsResult.data ?? [];
   const userIds = memberships.map((membership) => membership.user_id as string);
@@ -124,7 +137,7 @@ export async function listAdminUsersData() {
           .from("profiles")
           .select("id, first_name, last_name, display_name, email, username, is_active")
           .in("id", userIds);
-        if (adminProfilesResult.error) throw adminProfilesResult.error;
+        throwIfDataError(adminProfilesResult.error, "Failed to load profile records.");
         profilesData = (adminProfilesResult.data ?? []) as Array<Record<string, unknown>>;
       } catch {
         // Keep the page usable even if neither RPC nor admin key are available.
@@ -244,8 +257,11 @@ export async function createAdminUser(input: {
         display_name: displayName
       }
     });
-    if (createError) throw createError;
-    userId = createdUser.user.id;
+    throwIfDataError(createError, "Failed to create auth user.");
+    userId = String(createdUser?.user?.id ?? "");
+    if (!userId) {
+      throw new Error("Auth user was not returned after creation.");
+    }
   } else {
     const publicAuthClient = createPublicServerClient();
     const { data: createdUser, error: signUpError } = await publicAuthClient.auth.signUp({
@@ -279,7 +295,7 @@ export async function createAdminUser(input: {
     is_active: input.isActive,
     must_change_password: true
   });
-  if (profileError) throw profileError;
+  throwIfDataError(profileError, "Failed to save user profile.");
 
   const { error: membershipError } = await supabase.from("organization_memberships").upsert(
     {
@@ -290,7 +306,7 @@ export async function createAdminUser(input: {
     },
     { onConflict: "organization_id,user_id" }
   );
-  if (membershipError) throw membershipError;
+  throwIfDataError(membershipError, "Failed to create organization membership.");
 
   if (additionalRoleIds.length > 0) {
     const { error: additionalRolesError } = await supabase
@@ -304,7 +320,7 @@ export async function createAdminUser(input: {
         })),
         { onConflict: "organization_id,user_id,role_template_id" }
       );
-    if (additionalRolesError) throw additionalRolesError;
+    throwIfDataError(additionalRolesError, "Failed to save additional role assignments.");
   }
 
   await logAuditEvent({
@@ -353,7 +369,7 @@ export async function updateAdminUser(input: {
     is_active: input.isActive,
     must_change_password: null
   });
-  if (profileError) throw profileError;
+  throwIfDataError(profileError, "Failed to update user profile.");
 
   const { error: membershipError } = await supabase.from("organization_memberships").upsert(
     {
@@ -364,14 +380,14 @@ export async function updateAdminUser(input: {
     },
     { onConflict: "organization_id,user_id" }
   );
-  if (membershipError) throw membershipError;
+  throwIfDataError(membershipError, "Failed to update organization membership.");
 
   const { error: deleteError } = await supabase
     .from("organization_user_role_assignments")
     .delete()
     .eq("organization_id", context.organizationId)
     .eq("user_id", input.userId);
-  if (deleteError) throw deleteError;
+  throwIfDataError(deleteError, "Failed to update role assignments.");
 
   if (additionalRoleIds.length > 0) {
     const { error: insertError } = await supabase
@@ -384,7 +400,7 @@ export async function updateAdminUser(input: {
           created_by: context.userId
         }))
       );
-    if (insertError) throw insertError;
+    throwIfDataError(insertError, "Failed to save role assignments.");
   }
 
   await logAuditEvent({
@@ -411,7 +427,7 @@ export async function resetAdminUserPassword(userId: string) {
     .eq("organization_id", context.organizationId)
     .eq("user_id", userId)
     .maybeSingle();
-  if (membershipError) throw membershipError;
+  throwIfDataError(membershipError, "User membership lookup failed.");
   if (!membership) {
     throw new Error("User is not a member of this organization.");
   }
@@ -419,13 +435,13 @@ export async function resetAdminUserPassword(userId: string) {
   const { error: resetError } = await adminClient.auth.admin.updateUserById(userId, {
     password: temporaryPassword
   });
-  if (resetError) throw resetError;
+  throwIfDataError(resetError, "Failed to reset user password.");
 
   const { error: profileError } = await adminClient
     .from("profiles")
     .update({ must_change_password: true, is_active: true })
     .eq("id", userId);
-  if (profileError) throw profileError;
+  throwIfDataError(profileError, "Failed to mark password reset flags.");
 
   await logAuditEvent({
     organizationId: context.organizationId,
