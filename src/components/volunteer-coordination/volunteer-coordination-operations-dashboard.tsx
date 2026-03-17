@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -17,8 +18,6 @@ type EventSortKey =
   | "assignedVolunteers"
   | "waitlistCount"
   | "substituteCount";
-
-type OverviewTab = "upcoming" | "hours";
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -72,7 +71,6 @@ export function VolunteerCoordinationOperationsDashboard() {
   const [toDateFilter, setToDateFilter] = useState("");
   const [sortBy, setSortBy] = useState<EventSortKey>("eventDate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [activeTab, setActiveTab] = useState<OverviewTab>("upcoming");
 
   useEffect(() => {
     void loadData();
@@ -248,14 +246,6 @@ export function VolunteerCoordinationOperationsDashboard() {
     return filtered;
   }, [eventRows, eventSearch, statusFilter, fromDateFilter, toDateFilter, sortBy, sortDirection]);
 
-  const upcomingRows = useMemo(
-    () =>
-      filteredSortedRows
-        .filter((row) => row.eventDate >= new Date().toISOString().slice(0, 10))
-        .sort((a, b) => a.eventDate.localeCompare(b.eventDate)),
-    [filteredSortedRows]
-  );
-
   const volunteersByLifetime = useMemo(() => {
     const rows = volunteers.map((volunteer) => {
       const contact = (Array.isArray(volunteer.contacts)
@@ -376,7 +366,14 @@ export function VolunteerCoordinationOperationsDashboard() {
               ) : (
                 filteredSortedRows.map((row) => (
                   <tr key={row.id} className="border-t border-slate-200">
-                    <td className="px-3 py-2 font-medium text-slate-900">{row.eventName}</td>
+                    <td className="px-3 py-2 font-medium text-slate-900">
+                      <Link
+                        href={`/staff/volunteer-coordination/events-roles?eventId=${encodeURIComponent(row.id)}`}
+                        className="text-sky-700 hover:text-sky-900 hover:underline"
+                      >
+                        {row.eventName}
+                      </Link>
+                    </td>
                     <td className="px-3 py-2 text-slate-700">{row.eventDate}</td>
                     <td className="px-3 py-2">
                       <span className={`rounded px-2 py-1 text-xs font-medium ${statusPillClass(row.eventStatus)}`}>
@@ -401,86 +398,42 @@ export function VolunteerCoordinationOperationsDashboard() {
       </section>
 
       <section className="space-y-3 rounded-md border border-slate-200 p-3">
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant={activeTab === "upcoming" ? "primary" : "secondary"} onClick={() => setActiveTab("upcoming")}>
-            Upcoming Events
-          </Button>
-          <Button type="button" variant={activeTab === "hours" ? "primary" : "secondary"} onClick={() => setActiveTab("hours")}>
-            Volunteers by Lifetime Hours
-          </Button>
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Volunteers by Lifetime Hours</h3>
+          <p className="text-xs text-slate-600">Top volunteer contribution and recency snapshot.</p>
         </div>
-
-        {activeTab === "upcoming" ? (
-          <div className="overflow-x-auto rounded-md border border-slate-200">
-            <table className="min-w-full border-collapse text-left text-sm">
-              <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+        <div className="overflow-x-auto rounded-md border border-slate-200">
+          <table className="min-w-full border-collapse text-left text-sm">
+            <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+              <tr>
+                <th className="px-3 py-2 font-medium">Volunteer Name</th>
+                <th className="px-3 py-2 font-medium">Lifetime Hours</th>
+                <th className="px-3 py-2 font-medium">YTD Hours</th>
+                <th className="px-3 py-2 font-medium">Last Served Date</th>
+                <th className="px-3 py-2 font-medium">Current Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {volunteersByLifetime.length === 0 ? (
                 <tr>
-                  <th className="px-3 py-2 font-medium">Date</th>
-                  <th className="px-3 py-2 font-medium">Event Name</th>
-                  <th className="px-3 py-2 font-medium">Location</th>
-                  <th className="px-3 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Staffing Summary</th>
+                  <td className="px-3 py-4 text-sm text-slate-500" colSpan={5}>
+                    No volunteer records available.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {upcomingRows.length === 0 ? (
-                  <tr>
-                    <td className="px-3 py-4 text-sm text-slate-500" colSpan={5}>
-                      No upcoming events.
-                    </td>
+              ) : (
+                volunteersByLifetime.map((row) => (
+                  <tr key={row.id} className="border-t border-slate-200">
+                    <td className="px-3 py-2 font-medium text-slate-900">{row.volunteerName}</td>
+                    <td className="px-3 py-2 text-slate-700">{row.lifetimeHours.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-slate-700">{row.ytdHours.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-slate-700">{row.lastServedDate || "—"}</td>
+                    <td className="px-3 py-2 text-slate-700">{row.status || "—"}</td>
                   </tr>
-                ) : (
-                  upcomingRows.map((row) => (
-                    <tr key={`upcoming-${row.id}`} className="border-t border-slate-200">
-                      <td className="px-3 py-2 text-slate-700">{row.eventDate}</td>
-                      <td className="px-3 py-2 font-medium text-slate-900">{row.eventName}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.location || "—"}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.eventStatus}</td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {row.assignedVolunteers} assigned | {row.openRoles} open roles | {row.openShifts} open shifts
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        {activeTab === "hours" ? (
-          <div className="overflow-x-auto rounded-md border border-slate-200">
-            <table className="min-w-full border-collapse text-left text-sm">
-              <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Volunteer Name</th>
-                  <th className="px-3 py-2 font-medium">Lifetime Hours</th>
-                  <th className="px-3 py-2 font-medium">YTD Hours</th>
-                  <th className="px-3 py-2 font-medium">Last Served Date</th>
-                  <th className="px-3 py-2 font-medium">Current Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {volunteersByLifetime.length === 0 ? (
-                  <tr>
-                    <td className="px-3 py-4 text-sm text-slate-500" colSpan={5}>
-                      No volunteer records available.
-                    </td>
-                  </tr>
-                ) : (
-                  volunteersByLifetime.map((row) => (
-                    <tr key={row.id} className="border-t border-slate-200">
-                      <td className="px-3 py-2 font-medium text-slate-900">{row.volunteerName}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.lifetimeHours.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.ytdHours.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.lastServedDate || "—"}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.status || "—"}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   );

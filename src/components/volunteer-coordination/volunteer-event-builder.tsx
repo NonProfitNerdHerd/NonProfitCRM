@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -110,6 +111,7 @@ type CandidateRecommendation = {
 };
 
 export function VolunteerEventBuilder() {
+  const searchParams = useSearchParams();
   const [step, setStep] = useState<BuilderStep>(1);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -230,6 +232,7 @@ export function VolunteerEventBuilder() {
     priorityOrder: "1",
     notes: ""
   });
+  const requestedEventId = toText(searchParams.get("eventId"));
 
   useEffect(() => {
     void loadData();
@@ -352,6 +355,15 @@ export function VolunteerEventBuilder() {
     () => events.find((event) => toText(event.id) === currentEventId) ?? null,
     [events, currentEventId]
   );
+
+  useEffect(() => {
+    if (!requestedEventId) return;
+    if (requestedEventId === currentEventId) return;
+    const existing = events.find((event) => toText(event.id) === requestedEventId);
+    if (!existing) return;
+    setFormFromEvent(existing);
+    setStep(1);
+  }, [requestedEventId, events, currentEventId]);
 
   const currentRoles = useMemo(
     () => eventRoles.filter((role) => toText(role.event_id) === currentEventId),
@@ -789,13 +801,47 @@ export function VolunteerEventBuilder() {
     setSubmitting(true);
     setError(null);
     setMessage(null);
+    let ok = true;
     try {
       await action();
     } catch (actionError) {
+      ok = false;
       setError(actionError instanceof Error ? actionError.message : "Action failed.");
     } finally {
       setSubmitting(false);
     }
+    return ok;
+  }
+
+  async function commitEventAfterStep4() {
+    if (!currentEventId) throw new Error("Save Step 1 first to create the event.");
+    if (currentShifts.length === 0) {
+      throw new Error("Add at least one shift in Step 4 before moving to staffing.");
+    }
+    const nextStatus = normalizeText(eventForm.eventStatus) === "draft" ? "recruiting" : eventForm.eventStatus;
+    await postJson("/api/volunteer-coordination/events", {
+      id: currentEventId,
+      eventName: eventForm.eventName,
+      eventType: eventForm.eventType || null,
+      programDepartment: eventForm.programDepartment || null,
+      eventStatus: nextStatus || "recruiting",
+      eventDate: eventForm.eventDate,
+      startTime: eventForm.startTime,
+      endTime: eventForm.endTime,
+      location: eventForm.location || null,
+      coordinatorUserId: eventForm.coordinatorUserId || null,
+      eventDescription: eventForm.eventDescription || null,
+      familyFriendly: eventForm.familyFriendly,
+      groupAllowed: eventForm.groupAllowed,
+      minorAllowed: eventForm.minorAllowed,
+      mealOptions: eventForm.mealOffered ? splitCsv(eventForm.mealOptions || "Meal Offered") : [],
+      tshirtOptions: eventForm.tshirtOffered ? splitCsv(eventForm.tshirtOptions || "T-Shirt Offered") : [],
+      notes: eventForm.notes || null,
+      seriesId: recurrenceForm.seriesId || null
+    });
+    setEventForm((prev) => ({ ...prev, eventStatus: nextStatus || "recruiting" }));
+    setMessage("Step 4 complete. Event is committed and ready for staffing (Steps 5 and 6).");
+    await loadData();
   }
 
   const staffingContext = useMemo(() => {
@@ -1052,17 +1098,19 @@ export function VolunteerEventBuilder() {
   }
 
   async function nextStep() {
+    let canAdvance = true;
     if (step === 1) {
-      await runStepAction(saveEventStep);
+      canAdvance = await runStepAction(saveEventStep);
     } else if (step === 2) {
-      await runStepAction(saveRecurrenceStep);
+      canAdvance = await runStepAction(saveRecurrenceStep);
     } else if (step === 3) {
       setMessage("Step 3 complete. Add one or more roles, then continue.");
     } else if (step === 4) {
-      setMessage("Step 4 complete. Add one or more shifts, then continue.");
+      canAdvance = await runStepAction(commitEventAfterStep4);
     } else if (step === 5) {
       setMessage("Step 5 complete. Proceed to waitlist/substitute setup.");
     }
+    if (!canAdvance) return;
     setStep((prev) => (Math.min(6, prev + 1) as BuilderStep));
   }
 
