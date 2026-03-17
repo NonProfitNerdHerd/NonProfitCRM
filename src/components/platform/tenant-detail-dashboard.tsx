@@ -177,6 +177,16 @@ export function TenantDetailDashboard({
       last_5_years: "5Y",
       last_10_years: "10Y"
     };
+    const trendDisplayMap: Record<string, string> = {
+      last_30_days: "Last 30 Days",
+      last_60_days: "Last 60 Days",
+      last_90_days: "Last 90 Days",
+      last_120_days: "Last 120 Days",
+      last_1_year: "Last 1 Year",
+      last_3_years: "Last 3 Years",
+      last_5_years: "Last 5 Years",
+      last_10_years: "Last 10 Years"
+    };
     const trendRaw = Array.isArray(stats?.donationTrend)
       ? (stats.donationTrend as Array<Record<string, unknown>>)
       : [];
@@ -190,6 +200,11 @@ export function TenantDetailDashboard({
       label: trendLabelMap[key],
       y: trendMap.get(key) ?? 0
     }));
+    const trendBreakdown = trendOrder.map((key) => ({
+      key,
+      label: trendDisplayMap[key],
+      amount: trendMap.get(key) ?? 0
+    }));
 
     return {
       donors: toNumber(contactCounts.donors),
@@ -199,7 +214,8 @@ export function TenantDetailDashboard({
       totalUsers: toNumber(stats?.totalUsers),
       activeCampaigns: toNumber(stats?.activeCampaigns),
       roleRows: orderedRoleRows,
-      trendPoints
+      trendPoints,
+      trendBreakdown
     };
   }, [stats]);
 
@@ -400,6 +416,18 @@ export function TenantDetailDashboard({
                 }
               ]}
             />
+
+            <section className="rounded-md border border-slate-200 p-3">
+              <p className="mb-2 text-sm font-semibold text-slate-900">Total Raised by Time Window</p>
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                {statsSummary.trendBreakdown.map((entry) => (
+                  <div key={entry.key} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">{entry.label}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{formatCurrency(entry.amount)}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
 
             <section className="rounded-md border border-slate-200 p-3">
               <p className="mb-2 text-sm font-semibold text-slate-900">Users by Role</p>

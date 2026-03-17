@@ -1,17 +1,19 @@
 import { Card, CardHeader } from "@/components/ui/card";
 import { requirePlatformAdminAccess } from "@/lib/auth/guards";
+import { listBackupTiers } from "@/lib/data/platform-admin";
 import { TenantQuickCreate } from "@/components/platform/tenant-quick-create";
 
 export default async function PlatformTenantQuickCreatePage() {
   await requirePlatformAdminAccess();
+  const backupTiers = await listBackupTiers();
 
   return (
     <Card>
       <CardHeader
         title="Create New Tenant"
-        subtitle="Quick-create a tenant with basic contact information and get the new tenant path."
+        subtitle="Provision a tenant and then open the tenant detail or tenant console."
       />
-      <TenantQuickCreate />
+      <TenantQuickCreate backupTiers={backupTiers} />
     </Card>
   );
 }

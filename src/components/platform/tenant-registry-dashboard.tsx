@@ -27,23 +27,6 @@ export function TenantRegistryDashboard({
   const [backupTierId, setBackupTierId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const [createForm, setCreateForm] = useState({
-    organizationName: "",
-    slug: "",
-    primaryContactName: "",
-    primaryContactEmail: "",
-    primaryContactPhone: "",
-    planPackage: "standard",
-    enabledModulesCsv: "contacts,financial,projects,memberships,reports,import_center",
-    onboardingStage: "new",
-    backupTierId: toText(backupTiers.find((tier) => toText(tier.key) === "standard")?.id),
-    firstTenantAdminEmail: "",
-    saveMode: "draft" as "draft" | "active",
-    appliedTemplate: "default_nonprofit",
-    internalNotes: ""
-  });
 
   const planOptions = useMemo(
     () => Array.from(new Set(initialTenants.map((tenant) => toText(tenant.plan_package)).filter(Boolean))),
@@ -70,42 +53,6 @@ export function TenantRegistryDashboard({
     setLoading(false);
   }
 
-  async function createTenant(event: React.FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-    setMessage(null);
-    const response = await fetch("/api/platform/tenants", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(createForm)
-    });
-    const payload = (await response.json().catch(() => null)) as
-      | { message?: string; tenant?: TenantRow }
-      | null;
-    if (!response.ok) {
-      setError(toText(payload?.message) || "Unable to create tenant.");
-      setLoading(false);
-      return;
-    }
-    setMessage(
-      createForm.saveMode === "active"
-        ? "Tenant created and activated."
-        : "Tenant provisioning draft created."
-    );
-    setCreateForm((prev) => ({
-      ...prev,
-      organizationName: "",
-      slug: "",
-      primaryContactName: "",
-      primaryContactEmail: "",
-      primaryContactPhone: "",
-      firstTenantAdminEmail: "",
-      internalNotes: ""
-    }));
-    await loadTenants();
-  }
-
   return (
     <div className="space-y-4">
       <section className="rounded-md border border-slate-200 bg-white p-4">
@@ -115,7 +62,7 @@ export function TenantRegistryDashboard({
             href="/platform/admin/tenants/new"
             className="inline-flex rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
           >
-            Quick Create Tenant
+            New Tenant
           </Link>
         </div>
         <div className="grid gap-2 md:grid-cols-6">
@@ -178,99 +125,6 @@ export function TenantRegistryDashboard({
           </Button>
         </div>
       </section>
-
-      <section className="rounded-md border border-slate-200 bg-white p-4">
-        <p className="mb-3 text-sm font-semibold text-slate-900">Tenant Provisioning</p>
-        <form className="space-y-3" onSubmit={createTenant}>
-          <div className="grid gap-2 md:grid-cols-3">
-            <Input
-              value={createForm.organizationName}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, organizationName: event.target.value }))
-              }
-              placeholder="Organization name"
-              required
-            />
-            <Input
-              value={createForm.slug}
-              onChange={(event) => setCreateForm((prev) => ({ ...prev, slug: event.target.value }))}
-              placeholder="tenant slug"
-              required
-            />
-            <select
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={createForm.saveMode}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, saveMode: event.target.value as "draft" | "active" }))
-              }
-            >
-              <option value="draft">Save Draft</option>
-              <option value="active">Activate</option>
-            </select>
-            <Input
-              value={createForm.primaryContactName}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, primaryContactName: event.target.value }))
-              }
-              placeholder="Primary contact name"
-            />
-            <Input
-              type="email"
-              value={createForm.primaryContactEmail}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, primaryContactEmail: event.target.value }))
-              }
-              placeholder="Primary contact email"
-            />
-            <Input
-              value={createForm.primaryContactPhone}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, primaryContactPhone: event.target.value }))
-              }
-              placeholder="Primary contact phone"
-            />
-            <Input
-              value={createForm.firstTenantAdminEmail}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, firstTenantAdminEmail: event.target.value }))
-              }
-              placeholder="First tenant admin email"
-            />
-            <Input
-              value={createForm.enabledModulesCsv}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, enabledModulesCsv: event.target.value }))
-              }
-              placeholder="Modules CSV"
-            />
-            <select
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={createForm.backupTierId}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, backupTierId: event.target.value }))
-              }
-            >
-              <option value="">Select backup tier</option>
-              {backupTiers.map((tier) => (
-                <option key={toText(tier.id)} value={toText(tier.id)}>
-                  {toText(tier.name)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <textarea
-            className="min-h-16 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            value={createForm.internalNotes}
-            onChange={(event) => setCreateForm((prev) => ({ ...prev, internalNotes: event.target.value }))}
-            placeholder="Internal provisioning notes"
-          />
-          <Button type="submit" disabled={loading}>
-            {loading ? "Saving..." : createForm.saveMode === "active" ? "Create & Activate" : "Save Draft"}
-          </Button>
-        </form>
-      </section>
-
-      {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
       <section className="rounded-md border border-slate-200 bg-white p-4">
