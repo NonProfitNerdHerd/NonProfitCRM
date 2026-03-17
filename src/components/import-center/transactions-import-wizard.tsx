@@ -6,7 +6,7 @@ import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader } from "@/components/ui/card";
-import { normalizeHeader } from "@/lib/import-center/field-mapping-engine";
+import { normalizeHeader, sanitizeInternalKey } from "@/lib/import-center/field-mapping-engine";
 import type {
   ImportCenterMapping,
   TransactionImportConfig,
@@ -178,6 +178,8 @@ export function TransactionsImportWizard() {
 
   const [templates, setTemplates] = useState<Array<Record<string, unknown>>>([]);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  const [customFields, setCustomFields] = useState<Array<Record<string, unknown>>>([]);
+  const [createdFieldKeys, setCreatedFieldKeys] = useState<string[]>([]);
 
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [fileName, setFileName] = useState("");
@@ -230,10 +232,20 @@ export function TransactionsImportWizard() {
     return campaignSourceValues.filter((value) => !config.campaignValueMap[value.toLowerCase()]).length;
   }, [campaignSourceValues, config.campaignValueMap]);
 
+  const pendingNewFields = useMemo(
+    () =>
+      mappings
+        .filter((mapping) => mapping.targetType === "custom" && mapping.createField)
+        .map((mapping) => toText(mapping.createField?.label || mapping.sourceHeader))
+        .filter(Boolean),
+    [mappings]
+  );
+
   const mappingSummary = useMemo(() => {
     const standard = mappings.filter((mapping) => mapping.targetType === "standard").length;
+    const custom = mappings.filter((mapping) => mapping.targetType === "custom").length;
     const unmapped = mappings.filter((mapping) => mapping.targetType === "unmapped").length;
-    return { standard, unmapped };
+    return { standard, custom, unmapped };
   }, [mappings]);
 
   useEffect(() => {
@@ -285,6 +297,11 @@ export function TransactionsImportWizard() {
           ...TRANSACTION_CONTACT_MATCH_FIELDS.map((field) => ({ key: field.key, label: field.label })),
           ...customMatchFields
         ]);
+        setCustomFields(
+          ((metadataPayload?.customFields ?? []) as Array<Record<string, unknown>>).filter(
+            (field) => toText(field.module) === "contacts" && Boolean(field.is_active)
+          )
+        );
       } catch (bootstrapError) {
         setError(
           bootstrapError instanceof Error ? bootstrapError.message : "Unable to load transaction import data."
@@ -309,6 +326,7 @@ export function TransactionsImportWizard() {
     setError(null);
     setMessage(null);
     setRunResult(null);
+    setCreatedFieldKeys([]);
     setMappingPreviewIndex(0);
     setFileName(file.name);
     try {
@@ -383,7 +401,8 @@ export function TransactionsImportWizard() {
           ? {
               sourceHeader: mapping.sourceHeader,
               targetType: override.targetType,
-              targetKey: override.targetKey
+              targetKey: override.targetKey,
+              createField: override.createField ?? null
             }
           : mapping;
       })
@@ -396,13 +415,30 @@ export function TransactionsImportWizard() {
       prev.map((mapping, mappingIndex) => {
         if (mappingIndex !== index) return mapping;
         if (encoded === "unmapped") {
-          return { ...mapping, targetType: "unmapped", targetKey: null };
+          return { ...mapping, targetType: "unmapped", targetKey: null, createField: null };
+        }
+        if (encoded === "create_custom") {
+          return {
+            ...mapping,
+            targetType: "custom",
+            targetKey: sanitizeInternalKey(mapping.sourceHeader),
+            createField: { label: mapping.sourceHeader, dataType: "text" }
+          };
         }
         if (encoded.startsWith("standard:")) {
           return {
             ...mapping,
             targetType: "standard",
-            targetKey: encoded.replace("standard:", "")
+            targetKey: encoded.replace("standard:", ""),
+            createField: null
+          };
+        }
+        if (encoded.startsWith("custom:")) {
+          return {
+            ...mapping,
+            targetType: "custom",
+            targetKey: encoded.replace("custom:", ""),
+            createField: null
           };
         }
         return mapping;
@@ -452,6 +488,49 @@ export function TransactionsImportWizard() {
       return `Create "${normalized.replace("create:", "")}"`;
     }
     return normalized;
+  }
+
+  async function createCustomFieldForMapping(index: number) {
+    const mapping = mappings[index];
+    if (!mapping || mapping.targetType !== "custom") return;
+    const label = toText(mapping.createField?.label || mapping.sourceHeader);
+    const internalKey = toText(mapping.targetKey || sanitizeInternalKey(label));
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/import-center/custom-fields", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          label,
+          internalKey,
+          dataType: mapping.createField?.dataType ?? "text"
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(toText(payload?.message) || "Unable to create custom field.");
+      }
+      setCustomFields((prev) => [...prev, payload as Record<string, unknown>]);
+      setCreatedFieldKeys((prev) => Array.from(new Set([...prev, internalKey])));
+      setMappings((prev) =>
+        prev.map((entry, entryIndex) =>
+          entryIndex === index
+            ? { ...entry, targetType: "custom", targetKey: internalKey, createField: null }
+            : entry
+        )
+      );
+      setMessage(`Custom field "${label}" created.`);
+    } catch (customFieldError) {
+      setError(
+        customFieldError instanceof Error
+          ? customFieldError.message
+          : "Unable to create custom field."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   function validateStep2() {
@@ -627,7 +706,8 @@ export function TransactionsImportWizard() {
 
   function mappingSelectOptions(
     transactionFields: TransactionStandardFieldDefinition[],
-    contactFields: TransactionStandardFieldDefinition[]
+    contactFields: TransactionStandardFieldDefinition[],
+    existingCustomFields: Array<Record<string, unknown>>
   ) {
     return (
       <>
@@ -646,6 +726,14 @@ export function TransactionsImportWizard() {
             </option>
           ))}
         </optgroup>
+        <optgroup label="Contact Custom Fields">
+          {existingCustomFields.map((field) => (
+            <option key={`custom-${toText(field.id)}`} value={`custom:${toText(field.internal_key)}`}>
+              {toText(field.field_label)}
+            </option>
+          ))}
+        </optgroup>
+        <option value="create_custom">Create New Contact Custom Field</option>
       </>
     );
   }
@@ -1063,6 +1151,7 @@ export function TransactionsImportWizard() {
                   <th className="py-2">Source Header</th>
                   <th className="py-2">Sample Value</th>
                   <th className="py-2">Mapping</th>
+                  <th className="py-2">Custom Field Setup</th>
                 </tr>
               </thead>
               <tbody>
@@ -1072,7 +1161,16 @@ export function TransactionsImportWizard() {
                       ? "unmapped"
                       : mapping.targetType === "standard"
                         ? `standard:${mapping.targetKey ?? ""}`
-                        : "unmapped";
+                        : mapping.targetType === "custom"
+                          ? `custom:${mapping.targetKey ?? ""}`
+                          : "unmapped";
+                  const hasPersistedCustomField =
+                    mapping.targetType === "custom" &&
+                    customFields.some(
+                      (field) =>
+                        toText(field.internal_key).toLowerCase() ===
+                        toText(mapping.targetKey).toLowerCase()
+                    );
                   return (
                     <tr key={mapping.sourceHeader} className="border-b border-slate-100">
                       <td className="py-2">{mapping.sourceHeader}</td>
@@ -1085,8 +1183,53 @@ export function TransactionsImportWizard() {
                           value={encodedValue}
                           onChange={(event) => updateMapping(index, event.target.value)}
                         >
-                          {mappingSelectOptions(TRANSACTION_STANDARD_FIELDS, TRANSACTION_CONTACT_CREATE_FIELDS)}
+                          {mappingSelectOptions(
+                            TRANSACTION_STANDARD_FIELDS,
+                            TRANSACTION_CONTACT_CREATE_FIELDS,
+                            customFields
+                          )}
                         </select>
+                      </td>
+                      <td className="py-2">
+                        {mapping.targetType === "custom" && !hasPersistedCustomField ? (
+                          <div className="space-y-2">
+                            <Input
+                              value={toText(mapping.createField?.label || mapping.sourceHeader)}
+                              onChange={(event) =>
+                                setMappings((prev) =>
+                                  prev.map((entry, entryIndex) =>
+                                    entryIndex === index
+                                      ? {
+                                          ...entry,
+                                          targetType: "custom",
+                                          targetKey: sanitizeInternalKey(event.target.value),
+                                          createField: {
+                                            label: event.target.value || mapping.sourceHeader,
+                                            dataType: "text"
+                                          }
+                                        }
+                                      : entry
+                                  )
+                                )
+                              }
+                              placeholder="Field label"
+                            />
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={loading}
+                              onClick={() => void createCustomFieldForMapping(index)}
+                            >
+                              Create New Field
+                            </Button>
+                          </div>
+                        ) : mapping.targetType === "custom" ? (
+                          <span className="text-xs text-slate-600">Mapped to existing custom field.</span>
+                        ) : mapping.targetType === "standard" ? (
+                          <span className="text-xs text-blue-700">Standard mapping</span>
+                        ) : (
+                          <span className="text-xs text-slate-500">Not mapped</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1152,7 +1295,14 @@ export function TransactionsImportWizard() {
               Campaign Values Unmapped: {missingCampaignMappingsCount}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-              Mapping Summary: {mappingSummary.standard} mapped, {mappingSummary.unmapped} unmapped
+              Mapping Summary: {mappingSummary.standard} standard, {mappingSummary.custom} custom,{" "}
+              {mappingSummary.unmapped} unmapped
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              New Fields Created: {createdFieldKeys.length}
+            </p>
+            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              New Fields Pending Creation: {pendingNewFields.length}
             </p>
           </div>
           {campaignSourceValues.length > 0 ? (

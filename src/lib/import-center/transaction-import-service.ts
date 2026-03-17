@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireImportCenterAccess } from "@/lib/auth/guards";
-import { mappingSummary } from "@/lib/import-center/field-mapping-engine";
+import { mappingSummary, sanitizeInternalKey } from "@/lib/import-center/field-mapping-engine";
 import { appendImportCenterRowError, logImportCenterAudit } from "@/lib/import-center/logging-service";
+import { createContactCustomField, listContactCustomFields } from "@/lib/import-center/custom-fields-service";
 import type { ImportCenterMapping, TransactionImportConfig } from "@/lib/import-center/types";
 
 function toText(value: unknown) {
@@ -120,9 +121,14 @@ function parseCampaignAction(action: string) {
 function mapTransactionRowToTargets(row: Record<string, unknown>, mappings: ImportCenterMapping[]) {
   const transaction: Record<string, unknown> = {};
   const contact: Record<string, unknown> = {};
+  const custom: Record<string, unknown> = {};
 
   for (const mapping of mappings) {
     if (mapping.targetType === "unmapped" || !mapping.targetKey) continue;
+    if (mapping.targetType === "custom") {
+      custom[toText(mapping.targetKey)] = row[mapping.sourceHeader];
+      continue;
+    }
     if (mapping.targetType !== "standard") continue;
 
     const value = row[mapping.sourceHeader];
@@ -135,7 +141,33 @@ function mapTransactionRowToTargets(row: Record<string, unknown>, mappings: Impo
     }
   }
 
-  return { transaction, contact };
+  return { transaction, contact, custom };
+}
+
+async function ensureCustomFieldIdMap(mappings: ImportCenterMapping[]) {
+  const fieldMap = new Map<string, string>();
+  const customMappings = mappings.filter((mapping) => mapping.targetType === "custom");
+  if (!customMappings.length) return fieldMap;
+
+  const existingFields = await listContactCustomFields();
+  for (const field of existingFields) {
+    fieldMap.set(String(field.internal_key), String(field.id));
+  }
+
+  for (const mapping of customMappings) {
+    const targetKey = toText(mapping.targetKey);
+    if (!targetKey && !mapping.createField) continue;
+    const internalKey = targetKey || sanitizeInternalKey(mapping.createField?.label ?? mapping.sourceHeader);
+    if (fieldMap.has(internalKey)) continue;
+    const created = await createContactCustomField({
+      label: mapping.createField?.label ?? mapping.sourceHeader,
+      internalKey,
+      dataType: mapping.createField?.dataType ?? "text"
+    });
+    fieldMap.set(internalKey, String(created.id));
+  }
+
+  return fieldMap;
 }
 
 function validateTransactionImportPayload(input: {
@@ -349,6 +381,34 @@ async function createContactForTransaction(input: {
   return String(data.id);
 }
 
+async function applyMappedCustomValues(input: {
+  organizationId: string;
+  userId: string;
+  contactId: string;
+  mappedCustom: Record<string, unknown>;
+  customFieldIdMap: Map<string, string>;
+}) {
+  const supabase = await createClient();
+  for (const [internalKey, rawValue] of Object.entries(input.mappedCustom)) {
+    const fieldId = input.customFieldIdMap.get(internalKey);
+    if (!fieldId) continue;
+    const valueText = toText(rawValue);
+    if (!valueText) continue;
+    const { error } = await supabase.from("contact_custom_field_values").upsert(
+      {
+        organization_id: input.organizationId,
+        contact_id: input.contactId,
+        custom_field_id: fieldId,
+        value_text: valueText,
+        value_json: { value: valueText },
+        created_by: input.userId
+      },
+      { onConflict: "organization_id,contact_id,custom_field_id" }
+    );
+    if (error) throw error;
+  }
+}
+
 export async function startTransactionsImportJob(input: {
   fileName: string;
   totalRows: number;
@@ -437,6 +497,7 @@ export async function processTransactionsImportChunk(input: {
   if (payloadValidationErrors.length > 0) {
     throw new Error(payloadValidationErrors.join(" "));
   }
+  const customFieldIdMap = await ensureCustomFieldIdMap(mappings);
 
   const campaignIdSet = new Set<string>();
   for (const action of Object.values(config.campaignValueMap)) {
@@ -589,6 +650,14 @@ export async function processTransactionsImportChunk(input: {
         });
         createdContactCount += 1;
       }
+
+      await applyMappedCustomValues({
+        organizationId: context.organizationId,
+        userId: context.userId,
+        contactId,
+        mappedCustom: mapped.custom,
+        customFieldIdMap
+      });
 
       const rawCampaignValue = toText(row[toText(config.campaignSourceColumn)]);
       if (!rawCampaignValue) {
