@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getMailBuilderPreview } from "@/lib/data/mail-builder";
 
 const previewSchema = z.object({
-  segment: z.enum(["persons", "organizations", "all"]),
+  segment: z.enum(["donors", "donor_organizations", "all"]),
   activityType: z.enum(["all", "transactions"]),
   transactionsFrom: z.string().trim().optional().nullable(),
   transactionsTo: z.string().trim().optional().nullable(),

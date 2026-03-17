@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 
 type MailStep = 1 | 2 | 3 | 4 | 5 | 6;
-type ContactSegment = "persons" | "organizations" | "all";
+type ContactSegment = "donors" | "donor_organizations" | "all";
 type ActivityType = "all" | "transactions";
 type PaperSize = "letter" | "a4" | "label_4x6";
 
@@ -109,7 +109,7 @@ function applyTemplate(templateBody: string, recipient: MailRecipient) {
 }
 
 const STEP_TITLES: Array<{ key: MailStep; label: string }> = [
-  { key: 1, label: "Step 1 - Select Persons, Organizations, or All Contacts" },
+  { key: 1, label: "Step 1 - Select Donors, Donor Organizations, or All Contacts" },
   { key: 2, label: "Step 2 - Activity Filter (Transactions + Date Range)" },
   { key: 3, label: "Step 3 - Further Filter by Tag" },
   { key: 4, label: "Step 4 - Select / Build Template" },
@@ -125,7 +125,7 @@ export function MailBuilderWizard() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const [segment, setSegment] = useState<ContactSegment>("all");
+  const [segment, setSegment] = useState<ContactSegment>("donors");
   const [activityType, setActivityType] = useState<ActivityType>("all");
   const [transactionsFrom, setTransactionsFrom] = useState("");
   const [transactionsTo, setTransactionsTo] = useState("");
@@ -441,16 +441,16 @@ export function MailBuilderWizard() {
             <p className="text-sm font-medium text-slate-700">Select recipient segment</p>
             <div className="grid gap-2 md:grid-cols-3">
               <label className="flex items-center gap-2 rounded-md border border-slate-200 p-3 text-sm">
-                <input type="radio" checked={segment === "persons"} onChange={() => setSegment("persons")} />
-                Persons
+                <input type="radio" checked={segment === "donors"} onChange={() => setSegment("donors")} />
+                Donors
               </label>
               <label className="flex items-center gap-2 rounded-md border border-slate-200 p-3 text-sm">
                 <input
                   type="radio"
-                  checked={segment === "organizations"}
-                  onChange={() => setSegment("organizations")}
+                  checked={segment === "donor_organizations"}
+                  onChange={() => setSegment("donor_organizations")}
                 />
-                Organizations
+                Donor Organizations
               </label>
               <label className="flex items-center gap-2 rounded-md border border-slate-200 p-3 text-sm">
                 <input type="radio" checked={segment === "all"} onChange={() => setSegment("all")} />

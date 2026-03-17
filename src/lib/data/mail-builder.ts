@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireAnyStaffPermission, requireStaffPermission } from "@/lib/auth/guards";
 
-type ContactSegment = "persons" | "organizations" | "all";
+type ContactSegment = "donors" | "donor_organizations" | "all";
 type ActivityType = "all" | "transactions";
 
 function toText(value: unknown) {
@@ -25,6 +25,12 @@ function parseDate(value: unknown) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function inferredEntityType(row: Record<string, unknown>) {
+  const explicit = normalizeLower(row.entity_type);
+  if (explicit === "person" || explicit === "organization") return explicit;
+  return toText(row.organization_name) ? "organization" : "person";
+}
+
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
@@ -46,6 +52,15 @@ function isMissingMailingColumnError(error: unknown) {
     message.includes("mailing_city") ||
     message.includes("mailing_state") ||
     message.includes("mailing_postal_code")
+  );
+}
+
+function isClassificationSchemaMissingError(error: unknown) {
+  const message = errorMessage(error, "").toLowerCase();
+  return (
+    message.includes("tracking_status") ||
+    message.includes("donor_status") ||
+    message.includes("entity_type")
   );
 }
 
@@ -142,9 +157,9 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
   const normalizedTagId = toText(input.tagId);
 
   const enrichedContactSelect =
-    "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,address_line_1,address_line_2,city,state,postal_code,mailing_address_line_1,mailing_address_line_2,mailing_city,mailing_state,mailing_postal_code";
+    "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,donor_status,address_line_1,address_line_2,city,state,postal_code,mailing_address_line_1,mailing_address_line_2,mailing_city,mailing_state,mailing_postal_code";
   const legacyContactSelect =
-    "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,address_line_1,address_line_2,city,state,postal_code";
+    "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,donor_status,address_line_1,address_line_2,city,state,postal_code";
 
   let contactQuery = supabase
     .from("contacts_safe_view")
@@ -153,16 +168,19 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     .order("last_name", { ascending: true })
     .limit(50000);
 
-  if (segment === "persons") {
+  if (segment === "donors") {
     contactQuery = contactQuery.eq("entity_type", "person");
-  } else if (segment === "organizations") {
+  } else if (segment === "donor_organizations") {
     contactQuery = contactQuery.eq("entity_type", "organization");
   }
 
   const contactResult = await contactQuery;
   let contacts = (contactResult.data ?? null) as Array<Record<string, unknown>> | null;
   let contactsError = contactResult.error;
-  if (contactsError && isMissingMailingColumnError(contactsError)) {
+  if (
+    contactsError &&
+    (isMissingMailingColumnError(contactsError) || isClassificationSchemaMissingError(contactsError))
+  ) {
     const fallbackResult = await supabase
       .from("contacts_safe_view")
       .select(legacyContactSelect)
@@ -177,7 +195,21 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
   }
 
   const contactRows = (contacts ?? []) as Array<Record<string, unknown>>;
-  const contactIds = contactRows.map((row) => toText(row.id)).filter(Boolean);
+  const normalizedContactRows = contactRows.filter((row) => {
+    const entityType = inferredEntityType(row);
+    const trackingStatus = normalizeLower(row.tracking_status);
+    const donorStatus = normalizeLower(row.donor_status);
+    const isDonorFlag = trackingStatus === "donor" || donorStatus === "active" || donorStatus === "lapsed";
+    const allowByTransactionMode = activityType === "transactions";
+    if (segment === "donors") {
+      return entityType === "person" && (allowByTransactionMode || isDonorFlag);
+    }
+    if (segment === "donor_organizations") {
+      return entityType === "organization" && (allowByTransactionMode || isDonorFlag);
+    }
+    return true;
+  });
+  const contactIds = normalizedContactRows.map((row) => toText(row.id)).filter(Boolean);
   if (contactIds.length === 0) {
     return { recipients: [], totalCount: 0 };
   }
@@ -210,7 +242,7 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     tagFilteredIds = new Set((taggedContacts ?? []).map((row) => toText(row.contact_id)).filter(Boolean));
   }
 
-  const filteredContactsByTag = contactRows.filter((row) => tagFilteredIds.has(toText(row.id)));
+  const filteredContactsByTag = normalizedContactRows.filter((row) => tagFilteredIds.has(toText(row.id)));
   const filteredContactIds = filteredContactsByTag.map((row) => toText(row.id)).filter(Boolean);
   if (filteredContactIds.length === 0) {
     return { recipients: [], totalCount: 0 };
@@ -260,7 +292,7 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     .map((row) => {
       const contactId = toText(row.id);
       const rollup = transactionRollup.get(contactId) ?? { count: 0, total: 0, lastDate: "" };
-      const entityType = normalizeLower(row.entity_type) === "organization" ? "organization" : "person";
+      const entityType = inferredEntityType(row);
       const firstName = toText(row.first_name);
       const lastName = toText(row.last_name);
       const organizationName = toText(row.organization_name);
