@@ -168,6 +168,19 @@ async function findContactMatchesByField(input: {
     if (fieldError) throw fieldError;
     if (!field?.id) return [];
 
+    const exactResult = await supabase
+      .from("contact_custom_field_values")
+      .select("contact_id,value_text")
+      .eq("organization_id", input.organizationId)
+      .eq("custom_field_id", String(field.id))
+      .eq("value_text", keyValue)
+      .limit(5);
+    if (exactResult.error) throw exactResult.error;
+    const exactMatches = Array.from(
+      new Set((exactResult.data ?? []).map((row) => String(row.contact_id)))
+    );
+    if (exactMatches.length > 0) return exactMatches;
+
     const { data: valueRows, error: valuesError } = await supabase
       .from("contact_custom_field_values")
       .select("contact_id,value_text")
@@ -177,6 +190,17 @@ async function findContactMatchesByField(input: {
       .limit(5);
     if (valuesError) throw valuesError;
     return Array.from(new Set((valueRows ?? []).map((row) => String(row.contact_id))));
+  }
+
+  const exactResult = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("organization_id", input.organizationId)
+    .eq(destinationField, keyValue)
+    .limit(5);
+  if (exactResult.error) throw exactResult.error;
+  if ((exactResult.data ?? []).length > 0) {
+    return (exactResult.data ?? []).map((row) => String(row.id));
   }
 
   const { data, error } = await supabase
@@ -243,6 +267,17 @@ async function resolveContactDuplicate(input: {
   const supabase = await createClient();
   const externalId = toText(input.standard.external_source_id).toLowerCase();
   if (externalId) {
+    const { data: externalExactMatch } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("organization_id", input.organizationId)
+      .eq("external_source", "import_center")
+      .eq("external_source_id", externalId)
+      .maybeSingle();
+    if (externalExactMatch?.id) {
+      return { duplicate: false, existingId: String(externalExactMatch.id), byExternalId: true };
+    }
+
     const { data: externalMatch } = await supabase
       .from("contacts")
       .select("id")
@@ -261,6 +296,17 @@ async function resolveContactDuplicate(input: {
   if (emailMapping) {
     const email = toText(input.row[emailMapping.sourceHeader]).toLowerCase();
     if (email) {
+      const { data: emailExactMatch } = await supabase
+        .from("contacts")
+        .select("id")
+        .eq("organization_id", input.organizationId)
+        .eq("email", email)
+        .limit(1)
+        .maybeSingle();
+      if (emailExactMatch?.id) {
+        return { duplicate: true, existingId: String(emailExactMatch.id), reason: "Duplicate email match" };
+      }
+
       const { data: emailMatch } = await supabase
         .from("contacts")
         .select("id")
@@ -278,6 +324,24 @@ async function resolveContactDuplicate(input: {
   const lastName = toText(input.standard.last_name).toLowerCase();
   const phone = normalizePhone(input.standard.phone);
   if (firstName && lastName && phone) {
+    const exactCandidatesResult = await supabase
+      .from("contacts")
+      .select("id,phone")
+      .eq("organization_id", input.organizationId)
+      .eq("first_name", firstName)
+      .eq("last_name", lastName)
+      .limit(25);
+    if (exactCandidatesResult.error) throw exactCandidatesResult.error;
+    const exactCandidates = exactCandidatesResult.data ?? [];
+    const matchFromExact = exactCandidates.find((row) => normalizePhone(row.phone) === phone);
+    if (matchFromExact?.id) {
+      return {
+        duplicate: true,
+        existingId: String(matchFromExact.id),
+        reason: "Duplicate first + last + phone match"
+      };
+    }
+
     const { data: candidates } = await supabase
       .from("contacts")
       .select("id,phone")
