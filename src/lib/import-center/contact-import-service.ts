@@ -134,6 +134,15 @@ function normalizeRerunMatchSettings(input?: Partial<ReimportMatchSettings> | nu
   };
 }
 
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  if (size <= 0) return [items];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function validDestinationMatchFields(customFields: Array<Record<string, unknown>>) {
   const standard = CONTACT_STANDARD_FIELDS.filter((field) => field.key !== "tags").map(
     (field) => field.key
@@ -149,6 +158,7 @@ async function findContactMatchesByField(input: {
   organizationId: string;
   destinationField: string;
   keyValue: string;
+  customFieldIdCache?: Map<string, string | null>;
 }) {
   const supabase = await createClient();
   const destinationField = toText(input.destinationField);
@@ -157,22 +167,27 @@ async function findContactMatchesByField(input: {
 
   if (destinationField.startsWith("custom:")) {
     const internalKey = destinationField.replace("custom:", "");
-    const { data: field, error: fieldError } = await supabase
-      .from("contact_custom_fields")
-      .select("id")
-      .eq("organization_id", input.organizationId)
-      .eq("module", "contacts")
-      .eq("internal_key", internalKey)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (fieldError) throw fieldError;
-    if (!field?.id) return [];
+    let fieldId = input.customFieldIdCache?.get(internalKey) ?? null;
+    if (!fieldId) {
+      const { data: field, error: fieldError } = await supabase
+        .from("contact_custom_fields")
+        .select("id")
+        .eq("organization_id", input.organizationId)
+        .eq("module", "contacts")
+        .eq("internal_key", internalKey)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (fieldError) throw fieldError;
+      fieldId = field?.id ? String(field.id) : null;
+      input.customFieldIdCache?.set(internalKey, fieldId);
+    }
+    if (!fieldId) return [];
 
     const exactResult = await supabase
       .from("contact_custom_field_values")
       .select("contact_id,value_text")
       .eq("organization_id", input.organizationId)
-      .eq("custom_field_id", String(field.id))
+      .eq("custom_field_id", fieldId)
       .eq("value_text", keyValue)
       .limit(5);
     if (exactResult.error) throw exactResult.error;
@@ -185,7 +200,7 @@ async function findContactMatchesByField(input: {
       .from("contact_custom_field_values")
       .select("contact_id,value_text")
       .eq("organization_id", input.organizationId)
-      .eq("custom_field_id", String(field.id))
+      .eq("custom_field_id", fieldId)
       .ilike("value_text", keyValue)
       .limit(5);
     if (valuesError) throw valuesError;
@@ -211,6 +226,94 @@ async function findContactMatchesByField(input: {
     .limit(5);
   if (error) throw error;
   return (data ?? []).map((row) => String(row.id));
+}
+
+async function buildRerunMatchPrefetch(input: {
+  organizationId: string;
+  rows: Array<Record<string, unknown>>;
+  rerun: ReimportMatchSettings;
+}) {
+  const sourceColumn = toText(input.rerun.sourceMatchColumn);
+  const destinationField = toText(input.rerun.destinationMatchField);
+  const prefetch = new Map<string, string[]>();
+  if (!input.rerun.enabled || !sourceColumn || !destinationField) return prefetch;
+
+  const normalizedKeys = Array.from(
+    new Set(
+      input.rows
+        .map((row) => normalizeMatchValue(destinationField, row[sourceColumn]))
+        .filter(Boolean)
+    )
+  );
+  if (normalizedKeys.length === 0) return prefetch;
+
+  // Phone values are normalized in-memory, so direct column "in" lookups are unreliable.
+  if (
+    destinationField === "phone" ||
+    destinationField === "mobile_number" ||
+    destinationField === "alternate_phone"
+  ) {
+    return prefetch;
+  }
+
+  const pushMatch = (normalizedKey: string, contactId: string) => {
+    if (!normalizedKey || !contactId) return;
+    if (!prefetch.has(normalizedKey)) prefetch.set(normalizedKey, []);
+    const current = prefetch.get(normalizedKey) ?? [];
+    if (!current.includes(contactId)) current.push(contactId);
+    prefetch.set(normalizedKey, current);
+  };
+
+  const supabase = await createClient();
+  if (destinationField.startsWith("custom:")) {
+    const internalKey = destinationField.replace("custom:", "");
+    const { data: field, error: fieldError } = await supabase
+      .from("contact_custom_fields")
+      .select("id")
+      .eq("organization_id", input.organizationId)
+      .eq("module", "contacts")
+      .eq("internal_key", internalKey)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (fieldError) throw fieldError;
+    if (!field?.id) return prefetch;
+
+    for (const batch of chunkArray(normalizedKeys, 500)) {
+      const { data: valueRows, error: valuesError } = await supabase
+        .from("contact_custom_field_values")
+        .select("contact_id,value_text")
+        .eq("organization_id", input.organizationId)
+        .eq("custom_field_id", String(field.id))
+        .in("value_text", batch)
+        .limit(200000);
+      if (valuesError) throw valuesError;
+      for (const row of valueRows ?? []) {
+        pushMatch(
+          normalizeMatchValue(destinationField, row.value_text),
+          toText(row.contact_id)
+        );
+      }
+    }
+    return prefetch;
+  }
+
+  for (const batch of chunkArray(normalizedKeys, 500)) {
+    const { data, error } = await supabase
+      .from("contacts")
+      .select(`id,${destinationField}`)
+      .eq("organization_id", input.organizationId)
+      .in(destinationField, batch)
+      .limit(200000);
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+    for (const record of rows) {
+      pushMatch(
+        normalizeMatchValue(destinationField, record[destinationField]),
+        toText(record.id)
+      );
+    }
+  }
+  return prefetch;
 }
 
 function buildUpdatedStandardPayload(input: {
@@ -656,6 +759,12 @@ export async function processContactsImportChunk(input: {
   const tagCache = new Map<string, string>();
   const createdTagTracker = new Set<string>();
   const customFieldIdMap = await ensureCustomFieldIdMap(mappings);
+  const rerunPrefetch = await buildRerunMatchPrefetch({
+    organizationId: context.organizationId,
+    rows: input.rows,
+    rerun
+  });
+  const rerunCustomFieldIdCache = new Map<string, string | null>();
 
   async function applyMappedCustomValues(params: {
     contactId: string;
@@ -777,7 +886,8 @@ export async function processContactsImportChunk(input: {
       if (rerun.enabled) {
         const sourceColumn = toText(rerun.sourceMatchColumn);
         const destinationField = toText(rerun.destinationMatchField);
-        const keyValue = sourceColumn ? toText(row[sourceColumn]) : "";
+        const keyValueRaw = sourceColumn ? toText(row[sourceColumn]) : "";
+        const keyValue = normalizeMatchValue(destinationField, keyValueRaw);
 
         if (!keyValue) {
           if (rerun.missingKeyBehavior === "skip_row") {
@@ -793,11 +903,16 @@ export async function processContactsImportChunk(input: {
             continue;
           }
         } else {
-          const matches = await findContactMatchesByField({
-            organizationId: context.organizationId,
-            destinationField,
-            keyValue
-          });
+          const prefetchedMatches = rerunPrefetch.get(keyValue);
+          const matches =
+            prefetchedMatches && prefetchedMatches.length > 0
+              ? prefetchedMatches
+              : await findContactMatchesByField({
+                  organizationId: context.organizationId,
+                  destinationField,
+                  keyValue,
+                  customFieldIdCache: rerunCustomFieldIdCache
+                });
           if (matches.length > 1) {
             failedRows += 1;
             ambiguousMatchCount += 1;
