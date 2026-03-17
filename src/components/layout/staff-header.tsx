@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { GlobalSearch } from "@/components/search/global-search";
+import { UserAccountMenu } from "@/components/layout/user-account-menu";
 
 export async function StaffHeader({ organizationId }: { organizationId: string }) {
   const supabase = await createClient();
@@ -33,9 +34,9 @@ export async function StaffHeader({ organizationId }: { organizationId: string }
             <p className="text-sm font-semibold text-slate-900">
               {organization?.name ?? "Unknown Organization"}
             </p>
-            <div className="mt-1 flex items-center gap-1 text-sm md:justify-end">
+            <div className="mt-1 flex items-center gap-2 text-sm md:justify-end">
               <span className="text-slate-500">Signed in as</span>
-              <span className="font-medium text-slate-900">{displayIdentity}</span>
+              <UserAccountMenu displayName={displayIdentity} profileHref="/staff/profile" />
             </div>
           </div>
         </div>

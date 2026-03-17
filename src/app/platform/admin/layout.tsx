@@ -2,9 +2,19 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { requirePlatformAdminAccess } from "@/lib/auth/guards";
+import { createClient } from "@/lib/supabase/server";
+import { UserAccountMenu } from "@/components/layout/user-account-menu";
 
 export default async function PlatformAdminLayout({ children }: { children: ReactNode }) {
   const context = await requirePlatformAdminAccess();
+  const supabase = await createClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  const { data: profile } = user
+    ? await supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle()
+    : { data: null };
+  const displayIdentity = String(profile?.display_name ?? user?.email ?? "Account");
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -51,7 +61,12 @@ export default async function PlatformAdminLayout({ children }: { children: Reac
           </Link>
         </nav>
       </aside>
-      <main className="flex-1 p-6">{children}</main>
+      <main className="flex-1 p-6">
+        <div className="mb-4 flex items-center justify-end">
+          <UserAccountMenu displayName={displayIdentity} profileHref="/platform/admin/profile" />
+        </div>
+        {children}
+      </main>
     </div>
   );
 }
