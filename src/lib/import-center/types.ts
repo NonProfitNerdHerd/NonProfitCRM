@@ -97,7 +97,13 @@ export const TRANSACTION_CONTACT_CREATE_FIELDS: TransactionStandardFieldDefiniti
 ];
 
 export const TRANSACTION_CONTACT_MATCH_FIELDS: Array<{
-  key: "email" | "alternate_email" | "phone" | "mobile_number" | "alternate_phone" | "external_source_id";
+  key:
+    | "email"
+    | "alternate_email"
+    | "phone"
+    | "mobile_number"
+    | "alternate_phone"
+    | "external_source_id";
   label: string;
 }> = [
   { key: "email", label: "Primary Email" },
@@ -116,13 +122,15 @@ export type TransactionImportConfig = {
     | "phone"
     | "mobile_number"
     | "alternate_phone"
-    | "external_source_id";
-  createMissingContact: boolean;
+    | "external_source_id"
+    | `custom:${string}`;
+  onNoContactMatch: "create_contact" | "skip_row";
   newContactType: "person" | "organization";
   newContactCategory: "lead" | "donor" | "non_lead";
-  campaignMappingEnabled: boolean;
   campaignSourceColumn: string | null;
-  defaultCampaignId: string | null;
+  // Value format:
+  // - "campaign:<campaignId>" maps to existing campaign
+  // - "create:<campaignName>" creates campaign on import
   campaignValueMap: Record<string, string>;
 };
 

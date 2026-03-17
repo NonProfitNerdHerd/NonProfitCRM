@@ -25,18 +25,25 @@ function donorStatusForCategory(category: "lead" | "donor" | "non_lead") {
 function normalizeTransactionConfig(
   input?: Partial<TransactionImportConfig> | null
 ): TransactionImportConfig {
+  const legacyCreateMissingContact =
+    input && Object.prototype.hasOwnProperty.call(input, "createMissingContact")
+      ? (input as { createMissingContact?: boolean }).createMissingContact !== false
+      : true;
   return {
     contactMatchSourceColumn: toText(input?.contactMatchSourceColumn) || null,
-    contactMatchField: input?.contactMatchField ?? "email",
-    createMissingContact: input?.createMissingContact !== false,
+    contactMatchField: (toText(input?.contactMatchField) as TransactionImportConfig["contactMatchField"]) || "email",
+    onNoContactMatch:
+      input?.onNoContactMatch === "skip_row"
+        ? "skip_row"
+        : legacyCreateMissingContact
+          ? "create_contact"
+          : "skip_row",
     newContactType: input?.newContactType === "organization" ? "organization" : "person",
     newContactCategory:
       input?.newContactCategory === "lead" || input?.newContactCategory === "non_lead"
         ? input.newContactCategory
         : "donor",
-    campaignMappingEnabled: Boolean(input?.campaignMappingEnabled),
     campaignSourceColumn: toText(input?.campaignSourceColumn) || null,
-    defaultCampaignId: toText(input?.defaultCampaignId) || null,
     campaignValueMap:
       input?.campaignValueMap && typeof input.campaignValueMap === "object"
         ? Object.fromEntries(
@@ -95,6 +102,21 @@ function normalizePaymentType(value: unknown): "Cash" | "Check" | "Card" | null 
   return null;
 }
 
+function parseCampaignAction(action: string) {
+  const normalized = toText(action);
+  if (normalized.startsWith("campaign:")) {
+    return { type: "campaign" as const, campaignId: normalized.replace("campaign:", "").trim() };
+  }
+  if (normalized.startsWith("create:")) {
+    return { type: "create" as const, campaignName: normalized.replace("create:", "").trim() };
+  }
+  if (normalized) {
+    // Backward compatibility with old templates that stored raw campaign id.
+    return { type: "campaign" as const, campaignId: normalized };
+  }
+  return null;
+}
+
 function mapTransactionRowToTargets(row: Record<string, unknown>, mappings: ImportCenterMapping[]) {
   const transaction: Record<string, unknown> = {};
   const contact: Record<string, unknown> = {};
@@ -144,32 +166,38 @@ function validateTransactionImportPayload(input: {
     errors.push(`Contact match source column "${sourceColumn}" was not found in the uploaded file.`);
   }
 
-  if (!toText(input.config.defaultCampaignId)) {
-    errors.push("A default campaign must be selected for transaction import.");
-  }
-
-  if (input.config.campaignMappingEnabled) {
-    const campaignSource = toText(input.config.campaignSourceColumn);
-    if (!campaignSource) {
-      errors.push("Campaign mapping is enabled, but no campaign source column was selected.");
-    } else if (input.rows.length > 0 && !(campaignSource in input.rows[0])) {
-      errors.push(`Campaign source column "${campaignSource}" was not found in the uploaded file.`);
-    } else {
-      const missingValues = new Set<string>();
-      for (const row of input.rows) {
-        const rawValue = toText(row[campaignSource]);
-        if (!rawValue) continue;
-        const normalized = normalizeCampaignValue(rawValue);
-        if (!input.config.campaignValueMap[normalized]) {
-          missingValues.add(rawValue);
-        }
+  const campaignSource = toText(input.config.campaignSourceColumn);
+  if (!campaignSource) {
+    errors.push("Campaign source column is required.");
+  } else if (input.rows.length > 0 && !(campaignSource in input.rows[0])) {
+    errors.push(`Campaign source column "${campaignSource}" was not found in the uploaded file.`);
+  } else {
+    const missingValues = new Set<string>();
+    const invalidActions = new Set<string>();
+    for (const row of input.rows) {
+      const rawValue = toText(row[campaignSource]);
+      if (!rawValue) continue;
+      const normalized = normalizeCampaignValue(rawValue);
+      const action = toText(input.config.campaignValueMap[normalized]);
+      if (!action) {
+        missingValues.add(rawValue);
+        continue;
       }
-      if (missingValues.size > 0) {
-        const sample = Array.from(missingValues).slice(0, 5).join(", ");
-        errors.push(
-          `Campaign mapping is incomplete. Map all source campaign values before import (for example: ${sample}).`
-        );
+      if (!action.startsWith("campaign:") && !action.startsWith("create:")) {
+        invalidActions.add(`${rawValue} -> ${action}`);
       }
+    }
+    if (missingValues.size > 0) {
+      const sample = Array.from(missingValues).slice(0, 5).join(", ");
+      errors.push(
+        `Campaign mapping is incomplete. Map all source campaign values before import (for example: ${sample}).`
+      );
+    }
+    if (invalidActions.size > 0) {
+      const sample = Array.from(invalidActions).slice(0, 5).join(", ");
+      errors.push(
+        `Campaign mapping contains invalid actions. Use existing campaign or create new campaign options (for example: ${sample}).`
+      );
     }
   }
 
@@ -182,7 +210,34 @@ async function findContactMatches(input: {
   value: string;
 }) {
   const supabase = await createClient();
-  const matchField = input.matchField;
+  const matchField = toText(input.matchField);
+
+  if (matchField.startsWith("custom:")) {
+    const internalKey = matchField.replace("custom:", "");
+    const normalized = toText(input.value).toLowerCase();
+    if (!internalKey || !normalized) return [];
+
+    const { data: field, error: fieldError } = await supabase
+      .from("contact_custom_fields")
+      .select("id")
+      .eq("organization_id", input.organizationId)
+      .eq("module", "contacts")
+      .eq("internal_key", internalKey)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (fieldError) throw fieldError;
+    if (!field?.id) return [];
+
+    const { data: valueRows, error: valuesError } = await supabase
+      .from("contact_custom_field_values")
+      .select("contact_id,value_text")
+      .eq("organization_id", input.organizationId)
+      .eq("custom_field_id", String(field.id))
+      .ilike("value_text", normalized)
+      .limit(5);
+    if (valuesError) throw valuesError;
+    return Array.from(new Set((valueRows ?? []).map((row) => String(row.contact_id))));
+  }
 
   if (
     matchField === "email" ||
@@ -383,23 +438,78 @@ export async function processTransactionsImportChunk(input: {
     throw new Error(payloadValidationErrors.join(" "));
   }
 
-  const campaignIdSet = new Set<string>([toText(config.defaultCampaignId)]);
-  for (const campaignId of Object.values(config.campaignValueMap)) {
-    if (toText(campaignId)) campaignIdSet.add(toText(campaignId));
+  const campaignIdSet = new Set<string>();
+  for (const action of Object.values(config.campaignValueMap)) {
+    const parsed = parseCampaignAction(action);
+    if (parsed?.type === "campaign" && toText(parsed.campaignId)) {
+      campaignIdSet.add(toText(parsed.campaignId));
+    }
   }
-  const campaignIds = Array.from(campaignIdSet).filter(Boolean);
+  const campaignIds = Array.from(campaignIdSet);
   const { data: campaigns, error: campaignError } = await supabase
     .from("campaigns")
     .select("id,name")
     .eq("organization_id", context.organizationId)
-    .in("id", campaignIds);
+    .in("id", campaignIds.length > 0 ? campaignIds : ["00000000-0000-0000-0000-000000000000"]);
   if (campaignError) throw campaignError;
   const campaignById = new Map<string, string>();
   for (const campaign of campaigns ?? []) {
     campaignById.set(String(campaign.id), String(campaign.name ?? ""));
   }
-  if (!campaignById.has(toText(config.defaultCampaignId))) {
-    throw new Error("Default campaign is invalid or no longer active.");
+  const createdCampaignByName = new Map<string, { id: string; name: string }>();
+
+  async function resolveCampaignForValue(sourceCampaignValue: string) {
+    const action = parseCampaignAction(config.campaignValueMap[normalizeCampaignValue(sourceCampaignValue)]);
+    if (!action) return null;
+
+    if (action.type === "campaign") {
+      const id = toText(action.campaignId);
+      const name = campaignById.get(id);
+      if (!id || !name) return null;
+      return { id, name };
+    }
+
+    const requestedName = toText(action.campaignName) || toText(sourceCampaignValue);
+    if (!requestedName) return null;
+    const cacheKey = normalizeCampaignValue(requestedName);
+    const cached = createdCampaignByName.get(cacheKey);
+    if (cached) return cached;
+
+    const { data: existingCampaign, error: existingCampaignError } = await supabase
+      .from("campaigns")
+      .select("id,name")
+      .eq("organization_id", context.organizationId)
+      .ilike("name", requestedName)
+      .limit(1)
+      .maybeSingle();
+    if (existingCampaignError) throw existingCampaignError;
+    if (existingCampaign?.id) {
+      const existing = { id: String(existingCampaign.id), name: toText(existingCampaign.name) || requestedName };
+      campaignById.set(existing.id, existing.name);
+      createdCampaignByName.set(cacheKey, existing);
+      return existing;
+    }
+
+    const { data: createdCampaign, error: createCampaignError } = await supabase
+      .from("campaigns")
+      .insert({
+        organization_id: context.organizationId,
+        name: requestedName,
+        status: "Active",
+        owner_user_id: context.userId,
+        created_by: context.userId
+      })
+      .select("id,name")
+      .single();
+    if (createCampaignError) throw createCampaignError;
+
+    const created = {
+      id: String(createdCampaign.id),
+      name: toText(createdCampaign.name) || requestedName
+    };
+    campaignById.set(created.id, created.name);
+    createdCampaignByName.set(cacheKey, created);
+    return created;
   }
 
   let successfulRows = 0;
@@ -456,14 +566,14 @@ export async function processTransactionsImportChunk(input: {
 
       const mapped = mapTransactionRowToTargets(row, mappings);
       if (!contactId) {
-        if (!config.createMissingContact) {
+        if (config.onNoContactMatch === "skip_row") {
           skippedRows += 1;
           noContactMatchSkipCount += 1;
           await appendImportCenterRowError({
             organizationId: context.organizationId,
             jobId: input.jobId,
             rowIndex,
-            errorMessage: `No contact was found for key "${matchValue}" and auto-create is disabled.`,
+            errorMessage: `No contact was found for key "${matchValue}" and "Skip Row" is selected for unmatched contacts.`,
             rawRow: row
           });
           continue;
@@ -480,38 +590,34 @@ export async function processTransactionsImportChunk(input: {
         createdContactCount += 1;
       }
 
-      let campaignId = toText(config.defaultCampaignId);
-      if (config.campaignMappingEnabled && toText(config.campaignSourceColumn)) {
-        const rawCampaignValue = toText(row[toText(config.campaignSourceColumn)]);
-        if (rawCampaignValue) {
-          const mappedCampaignId = config.campaignValueMap[normalizeCampaignValue(rawCampaignValue)];
-          if (!mappedCampaignId) {
-            skippedRows += 1;
-            campaignUnmappedSkipCount += 1;
-            await appendImportCenterRowError({
-              organizationId: context.organizationId,
-              jobId: input.jobId,
-              rowIndex,
-              errorMessage: `Campaign "${rawCampaignValue}" was not mapped to an existing campaign.`,
-              rawRow: row
-            });
-            continue;
-          }
-          campaignId = mappedCampaignId;
-          campaignMappedCount += 1;
-        }
-      }
-      if (!campaignById.has(campaignId)) {
-        failedRows += 1;
+      const rawCampaignValue = toText(row[toText(config.campaignSourceColumn)]);
+      if (!rawCampaignValue) {
+        skippedRows += 1;
+        campaignUnmappedSkipCount += 1;
         await appendImportCenterRowError({
           organizationId: context.organizationId,
           jobId: input.jobId,
           rowIndex,
-          errorMessage: "Selected campaign mapping is invalid.",
+          errorMessage: `Campaign value is blank in source column "${toText(config.campaignSourceColumn)}".`,
           rawRow: row
         });
         continue;
       }
+      const resolvedCampaign = await resolveCampaignForValue(rawCampaignValue);
+      if (!resolvedCampaign?.id) {
+        skippedRows += 1;
+        campaignUnmappedSkipCount += 1;
+        await appendImportCenterRowError({
+          organizationId: context.organizationId,
+          jobId: input.jobId,
+          rowIndex,
+          errorMessage: `Campaign "${rawCampaignValue}" was not mapped to an existing campaign and could not be created.`,
+          rawRow: row
+        });
+        continue;
+      }
+      const campaignId = resolvedCampaign.id;
+      campaignMappedCount += 1;
 
       const amount = parseAmount(mapped.transaction.amount);
       if (amount === null) {
@@ -617,7 +723,7 @@ export async function processTransactionsImportChunk(input: {
         source_platform: sourcePlatform,
         external_transaction_id: externalTransactionId || null,
         is_recurring: isRecurring,
-        campaign: campaignById.get(campaignId) ?? null,
+        campaign: resolvedCampaign.name || null,
         created_by: context.userId
       });
       if (insertError) throw insertError;

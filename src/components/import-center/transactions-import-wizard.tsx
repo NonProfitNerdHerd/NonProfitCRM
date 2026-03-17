@@ -18,10 +18,15 @@ import {
   TRANSACTION_STANDARD_FIELDS
 } from "@/lib/import-center/types";
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 type CampaignOption = {
   id: string;
+  label: string;
+};
+
+type MatchFieldOption = {
+  key: string;
   label: string;
 };
 
@@ -127,23 +132,38 @@ function buildSuggestedTransactionMappings(headers: string[]): ImportCenterMappi
 }
 
 function normalizeTransactionConfig(input?: Partial<TransactionImportConfig> | null): TransactionImportConfig {
+  const legacyCreateMissingContact =
+    input && Object.prototype.hasOwnProperty.call(input, "createMissingContact")
+      ? (input as { createMissingContact?: boolean }).createMissingContact !== false
+      : true;
+  function normalizeCampaignAction(value: unknown) {
+    const text = toText(value);
+    if (!text) return "";
+    if (text.startsWith("campaign:") || text.startsWith("create:")) return text;
+    // Backward compatibility with old saved templates that stored raw campaign id.
+    return `campaign:${text}`;
+  }
   return {
     contactMatchSourceColumn: toText(input?.contactMatchSourceColumn) || null,
-    contactMatchField: input?.contactMatchField ?? "email",
-    createMissingContact: input?.createMissingContact !== false,
+    contactMatchField: (toText(input?.contactMatchField) as TransactionImportConfig["contactMatchField"]) || "email",
+    onNoContactMatch:
+      input?.onNoContactMatch === "skip_row"
+        ? "skip_row"
+        : legacyCreateMissingContact
+          ? "create_contact"
+          : "skip_row",
     newContactType: input?.newContactType === "organization" ? "organization" : "person",
     newContactCategory:
       input?.newContactCategory === "lead" || input?.newContactCategory === "non_lead"
         ? input.newContactCategory
         : "donor",
-    campaignMappingEnabled: Boolean(input?.campaignMappingEnabled),
     campaignSourceColumn: toText(input?.campaignSourceColumn) || null,
-    defaultCampaignId: toText(input?.defaultCampaignId) || null,
     campaignValueMap:
       input?.campaignValueMap && typeof input.campaignValueMap === "object"
         ? Object.fromEntries(
             Object.entries(input.campaignValueMap)
               .map(([sourceValue, campaignId]) => [sourceValue.toLowerCase().trim(), toText(campaignId)])
+              .map(([sourceValue, action]) => [sourceValue, normalizeCampaignAction(action)])
               .filter((entry) => Boolean(entry[0]) && Boolean(entry[1]))
           )
         : {}
@@ -172,12 +192,15 @@ export function TransactionsImportWizard() {
   const [config, setConfig] = useState<TransactionImportConfig>(
     normalizeTransactionConfig({
       contactMatchField: "email",
-      createMissingContact: true,
+      onNoContactMatch: "create_contact",
       newContactType: "person",
       newContactCategory: "donor",
-      campaignMappingEnabled: false,
+      campaignSourceColumn: null,
       campaignValueMap: {}
     })
+  );
+  const [contactMatchFieldOptions, setContactMatchFieldOptions] = useState<MatchFieldOption[]>(
+    TRANSACTION_CONTACT_MATCH_FIELDS.map((field) => ({ key: field.key, label: field.label }))
   );
 
   const [runResult, setRunResult] = useState<Record<string, unknown> | null>(null);
@@ -189,7 +212,7 @@ export function TransactionsImportWizard() {
   } | null>(null);
 
   const campaignSourceValues = useMemo(() => {
-    if (!config.campaignMappingEnabled || !toText(config.campaignSourceColumn)) return [];
+    if (!toText(config.campaignSourceColumn)) return [];
     const seen = new Set<string>();
     const values: string[] = [];
     for (const row of rows) {
@@ -201,12 +224,11 @@ export function TransactionsImportWizard() {
       values.push(value);
     }
     return values.sort((a, b) => a.localeCompare(b));
-  }, [config.campaignMappingEnabled, config.campaignSourceColumn, rows]);
+  }, [config.campaignSourceColumn, rows]);
 
   const missingCampaignMappingsCount = useMemo(() => {
-    if (!config.campaignMappingEnabled) return 0;
     return campaignSourceValues.filter((value) => !config.campaignValueMap[value.toLowerCase()]).length;
-  }, [campaignSourceValues, config.campaignMappingEnabled, config.campaignValueMap]);
+  }, [campaignSourceValues, config.campaignValueMap]);
 
   const mappingSummary = useMemo(() => {
     const standard = mappings.filter((mapping) => mapping.targetType === "standard").length;
@@ -217,19 +239,24 @@ export function TransactionsImportWizard() {
   useEffect(() => {
     async function loadBootstrap() {
       try {
-        const [templatesResponse, campaignsResponse] = await Promise.all([
+        const [templatesResponse, campaignsResponse, metadataResponse] = await Promise.all([
           fetch("/api/import-center/templates?importType=transactions"),
-          fetch("/api/campaigns?status=Active")
+          fetch("/api/campaigns?status=Active"),
+          fetch("/api/import-center/metadata?importType=transactions")
         ]);
 
         const templatesPayload = await templatesResponse.json().catch(() => null);
         const campaignsPayload = await campaignsResponse.json().catch(() => null);
+        const metadataPayload = await metadataResponse.json().catch(() => null);
 
         if (!templatesResponse.ok) {
           throw new Error(templatesPayload?.message ?? "Unable to load transaction templates.");
         }
         if (!campaignsResponse.ok) {
           throw new Error(campaignsPayload?.message ?? "Unable to load campaigns.");
+        }
+        if (!metadataResponse.ok) {
+          throw new Error(metadataPayload?.message ?? "Unable to load transaction metadata.");
         }
 
         setTemplates((templatesPayload?.templates ?? []) as Array<Record<string, unknown>>);
@@ -246,6 +273,18 @@ export function TransactionsImportWizard() {
           }
         );
         setCampaigns(campaignOptions);
+
+        const customMatchFields = ((metadataPayload?.customFields ?? []) as Array<Record<string, unknown>>)
+          .filter((field) => toText(field.module) === "contacts" && Boolean(field.is_active))
+          .map((field) => ({
+            key: `custom:${toText(field.internal_key)}`,
+            label: `Custom Field: ${toText(field.field_label) || toText(field.internal_key)}`
+          }))
+          .filter((entry) => entry.key !== "custom:");
+        setContactMatchFieldOptions([
+          ...TRANSACTION_CONTACT_MATCH_FIELDS.map((field) => ({ key: field.key, label: field.label })),
+          ...customMatchFields
+        ]);
       } catch (bootstrapError) {
         setError(
           bootstrapError instanceof Error ? bootstrapError.message : "Unable to load transaction import data."
@@ -395,11 +434,24 @@ export function TransactionsImportWizard() {
         const normalizedSource = normalizeHeader(sourceValue);
         const mappedCampaignId = normalizedCampaignMap.get(normalizedSource);
         if (mappedCampaignId && !next[sourceValue.toLowerCase()]) {
-          next[sourceValue.toLowerCase()] = mappedCampaignId;
+          next[sourceValue.toLowerCase()] = `campaign:${mappedCampaignId}`;
         }
       }
       return { ...prev, campaignValueMap: next };
     });
+  }
+
+  function campaignActionLabel(action: string) {
+    const normalized = toText(action);
+    if (!normalized) return "-";
+    if (normalized.startsWith("campaign:")) {
+      const campaignId = normalized.replace("campaign:", "");
+      return campaigns.find((campaign) => campaign.id === campaignId)?.label ?? `Campaign ${campaignId}`;
+    }
+    if (normalized.startsWith("create:")) {
+      return `Create "${normalized.replace("create:", "")}"`;
+    }
+    return normalized;
   }
 
   function validateStep2() {
@@ -409,23 +461,37 @@ export function TransactionsImportWizard() {
     if (!headers.includes(toText(config.contactMatchSourceColumn))) {
       return `Contact match source column "${toText(config.contactMatchSourceColumn)}" was not found in the uploaded file.`;
     }
-    if (!toText(config.defaultCampaignId)) {
-      return "Select a default campaign for imported transactions.";
-    }
-    if (config.campaignMappingEnabled && !toText(config.campaignSourceColumn)) {
-      return "Campaign mapping is enabled; select a campaign source column.";
-    }
-    if (
-      config.campaignMappingEnabled &&
-      toText(config.campaignSourceColumn) &&
-      !headers.includes(toText(config.campaignSourceColumn))
-    ) {
-      return `Campaign source column "${toText(config.campaignSourceColumn)}" was not found in the uploaded file.`;
+    if (!toText(config.contactMatchField)) {
+      return "Select a CRM contact field to match incoming transactions.";
     }
     return null;
   }
 
   function validateStep3() {
+    if (!toText(config.campaignSourceColumn)) {
+      return "Select the source column that contains campaign values.";
+    }
+    if (toText(config.campaignSourceColumn) && !headers.includes(toText(config.campaignSourceColumn))) {
+      return `Campaign source column "${toText(config.campaignSourceColumn)}" was not found in the uploaded file.`;
+    }
+    if (missingCampaignMappingsCount > 0) {
+      return "Map all detected source campaign values to existing campaigns or choose create campaign.";
+    }
+    return null;
+  }
+
+  function validateStep4() {
+    if (config.onNoContactMatch !== "create_contact") return null;
+    if (config.newContactType !== "person" && config.newContactType !== "organization") {
+      return "Select the contact type to use when creating unmatched contacts.";
+    }
+    if (!["lead", "donor", "non_lead"].includes(config.newContactCategory)) {
+      return "Select the contact category to use when creating unmatched contacts.";
+    }
+    return null;
+  }
+
+  function validateStep5() {
     const hasAmount = mappings.some(
       (mapping) => mapping.targetType === "standard" && mapping.targetKey === "transaction:amount"
     );
@@ -434,9 +500,6 @@ export function TransactionsImportWizard() {
       (mapping) => mapping.targetType === "standard" && mapping.targetKey === "transaction:donation_date"
     );
     if (!hasDate) return "Map a source column to Donation Date.";
-    if (config.campaignMappingEnabled && missingCampaignMappingsCount > 0) {
-      return "Map all detected source campaign values to existing CRM campaigns before continuing.";
-    }
     return null;
   }
 
@@ -484,7 +547,7 @@ export function TransactionsImportWizard() {
     setMessage(null);
     setRunProgress(null);
     try {
-      const setupError = validateStep2() ?? validateStep3();
+      const setupError = validateStep2() ?? validateStep3() ?? validateStep4() ?? validateStep5();
       if (setupError) throw new Error(setupError);
 
       const startResponse = await fetch("/api/import-center/transactions/jobs", {
@@ -590,7 +653,7 @@ export function TransactionsImportWizard() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
-        {[1, 2, 3, 4, 5].map((stepNumber) => (
+        {[1, 2, 3, 4, 5, 6, 7].map((stepNumber) => (
           <button
             key={stepNumber}
             type="button"
@@ -604,12 +667,16 @@ export function TransactionsImportWizard() {
             {stepNumber === 1
               ? "1. Load File"
               : stepNumber === 2
-                ? "2. Contact & Campaign Setup"
+                ? "2. Contact Match Setup"
                 : stepNumber === 3
-                  ? "3. Field Mapping"
+                  ? "3. Campaign Mapping"
                   : stepNumber === 4
-                    ? "4. Review Import"
-                    : "5. Run Import"}
+                    ? "4. No Record Found Behavior"
+                    : stepNumber === 5
+                      ? "5. Field Mapping"
+                      : stepNumber === 6
+                        ? "6. Review Import"
+                        : "7. Run Import"}
           </button>
         ))}
       </div>
@@ -678,8 +745,8 @@ export function TransactionsImportWizard() {
       {step === 2 ? (
         <Card>
           <CardHeader
-            title="Step 2: Contact & Campaign Setup"
-            subtitle="Define how transactions match contacts and how campaign values map."
+            title="Step 2: Contact Match Setup"
+            subtitle="Define how transaction rows find the matching contact in CRM."
           />
           <div className="grid gap-4 md:grid-cols-2">
             <div>
@@ -714,7 +781,7 @@ export function TransactionsImportWizard() {
                 ))}
               </select>
             </div>
-            <div>
+            <div className="md:col-span-2">
               <label className="mb-1 block text-sm font-medium">Contact match CRM field</label>
               <select
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
@@ -726,46 +793,169 @@ export function TransactionsImportWizard() {
                   }))
                 }
               >
-                {TRANSACTION_CONTACT_MATCH_FIELDS.map((field) => (
+                {contactMatchFieldOptions.map((field) => (
                   <option key={field.key} value={field.key}>
                     {field.label}
                   </option>
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <Button type="button" variant="secondary" onClick={() => setStep(1)}>
+              Back
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                const setupError = validateStep2();
+                if (setupError) {
+                  setError(setupError);
+                  return;
+                }
+                setError(null);
+                setStep(3);
+              }}
+            >
+              Continue
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      {step === 3 ? (
+        <Card>
+          <CardHeader
+            title="Step 3: Campaign Mapping"
+            subtitle="Select campaign source column and map every source value to existing campaign or create new."
+          />
+          <div className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium">Default campaign (required)</label>
+              <label className="mb-1 block text-sm font-medium">Campaign source column</label>
               <select
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={toText(config.defaultCampaignId)}
+                value={toText(config.campaignSourceColumn)}
                 onChange={(event) =>
-                  setConfig((prev) => ({ ...prev, defaultCampaignId: event.target.value || null }))
+                  setConfig((prev) => ({ ...prev, campaignSourceColumn: event.target.value || null }))
                 }
               >
-                <option value="">-- Select default campaign --</option>
-                {campaigns.map((campaign) => (
-                  <option key={campaign.id} value={campaign.id}>
-                    {campaign.label}
+                <option value="">-- Select campaign column --</option>
+                {headers.map((header) => (
+                  <option key={header} value={header}>
+                    {header}
                   </option>
                 ))}
               </select>
             </div>
+
+            <div className="rounded-md border border-slate-200 p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Source Campaign Values</p>
+                  <p className="text-xs text-slate-600">
+                    Map each unique source value to an existing campaign or create a new campaign.
+                  </p>
+                </div>
+                <Button type="button" variant="secondary" onClick={autoMapCampaignValues}>
+                  Auto-map by Name
+                </Button>
+              </div>
+              <div className="max-h-72 overflow-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="py-2">Source Campaign Value</th>
+                      <th className="py-2">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campaignSourceValues.map((sourceValue) => (
+                      <tr key={sourceValue} className="border-b border-slate-100">
+                        <td className="py-2">{sourceValue}</td>
+                        <td className="py-2">
+                          <select
+                            className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                            value={toText(config.campaignValueMap[sourceValue.toLowerCase()])}
+                            onChange={(event) =>
+                              setCampaignMappingForSourceValue(sourceValue, event.target.value || "")
+                            }
+                          >
+                            <option value="">-- Select action --</option>
+                            {campaigns.map((campaign) => (
+                              <option key={campaign.id} value={`campaign:${campaign.id}`}>
+                                Use Existing: {campaign.label}
+                              </option>
+                            ))}
+                            <option value={`create:${sourceValue}`}>Create New Campaign: {sourceValue}</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                    {campaignSourceValues.length === 0 ? (
+                      <tr>
+                        <td className="py-2 text-slate-500" colSpan={2}>
+                          No campaign values detected in the selected source column.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-slate-600">
+                Unmapped campaign values: {missingCampaignMappingsCount}
+              </p>
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <Button type="button" variant="secondary" onClick={() => setStep(2)}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const campaignError = validateStep3();
+                  if (campaignError) {
+                    setError(campaignError);
+                    return;
+                  }
+                  setError(null);
+                  setStep(4);
+                }}
+              >
+                Continue
+              </Button>
+            </div>
           </div>
+        </Card>
+      ) : null}
 
-          <div className="mt-4 rounded-md border border-slate-200 p-4">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={config.createMissingContact}
+      {step === 4 ? (
+        <Card>
+          <CardHeader
+            title="Step 4: No Record Found Behavior"
+            subtitle="Define behavior when no matching contact record is found."
+          />
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium">When no contact match is found</label>
+              <select
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={config.onNoContactMatch}
                 onChange={(event) =>
-                  setConfig((prev) => ({ ...prev, createMissingContact: event.target.checked }))
+                  setConfig((prev) => ({
+                    ...prev,
+                    onNoContactMatch: event.target.value as TransactionImportConfig["onNoContactMatch"]
+                  }))
                 }
-              />
-              Create a new contact if no match is found
-            </label>
+              >
+                <option value="create_contact">Create New Contact</option>
+                <option value="skip_row">Skip Row and Log It</option>
+              </select>
+            </div>
 
-            {config.createMissingContact ? (
-              <div className="mt-3 grid gap-4 md:grid-cols-2">
+            {config.onNoContactMatch === "create_contact" ? (
+              <div className="grid gap-4 md:grid-cols-2 rounded-md border border-slate-200 p-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium">New contact type</label>
                   <select
@@ -801,67 +991,35 @@ export function TransactionsImportWizard() {
                 </div>
               </div>
             ) : null}
-          </div>
 
-          <div className="mt-4 rounded-md border border-slate-200 p-4">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={config.campaignMappingEnabled}
-                onChange={(event) =>
-                  setConfig((prev) => ({ ...prev, campaignMappingEnabled: event.target.checked }))
-                }
-              />
-              This file has a Campaign column to map before import
-            </label>
-            {config.campaignMappingEnabled ? (
-              <div className="mt-3">
-                <label className="mb-1 block text-sm font-medium">Campaign source column</label>
-                <select
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={toText(config.campaignSourceColumn)}
-                  onChange={(event) =>
-                    setConfig((prev) => ({ ...prev, campaignSourceColumn: event.target.value || null }))
+            <div className="mt-4 flex gap-2">
+              <Button type="button" variant="secondary" onClick={() => setStep(3)}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const behaviorError = validateStep4();
+                  if (behaviorError) {
+                    setError(behaviorError);
+                    return;
                   }
-                >
-                  <option value="">-- Select campaign column --</option>
-                  {headers.map((header) => (
-                    <option key={header} value={header}>
-                      {header}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="mt-4 flex gap-2">
-            <Button type="button" variant="secondary" onClick={() => setStep(1)}>
-              Back
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                const setupError = validateStep2();
-                if (setupError) {
-                  setError(setupError);
-                  return;
-                }
-                setError(null);
-                setStep(3);
-              }}
-            >
-              Continue
-            </Button>
+                  setError(null);
+                  setStep(5);
+                }}
+              >
+                Continue
+              </Button>
+            </div>
           </div>
         </Card>
       ) : null}
 
-      {step === 3 ? (
+      {step === 5 ? (
         <Card>
           <CardHeader
-            title="Step 3: Field Mapping"
-            subtitle="Map transaction fields and optional contact fields for auto-create."
+            title="Step 5: Field Mapping"
+            subtitle="Map transaction fields and optional contact fields for create-contact behavior."
           />
           <div className="mb-3 flex gap-2">
             <Button type="button" variant="secondary" onClick={() => void saveTemplate()}>
@@ -937,79 +1095,20 @@ export function TransactionsImportWizard() {
             </table>
           </div>
 
-          {config.campaignMappingEnabled && toText(config.campaignSourceColumn) ? (
-            <div className="mt-5 rounded-md border border-slate-200 p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Campaign Value Review & Mapping</p>
-                  <p className="text-xs text-slate-600">
-                    Map each source campaign value to an existing CRM campaign before import.
-                  </p>
-                </div>
-                <Button type="button" variant="secondary" onClick={autoMapCampaignValues}>
-                  Auto-map by Name
-                </Button>
-              </div>
-              <div className="max-h-72 overflow-auto">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200">
-                      <th className="py-2">Source Campaign Value</th>
-                      <th className="py-2">Mapped CRM Campaign</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {campaignSourceValues.map((sourceValue) => (
-                      <tr key={sourceValue} className="border-b border-slate-100">
-                        <td className="py-2">{sourceValue}</td>
-                        <td className="py-2">
-                          <select
-                            className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
-                            value={toText(config.campaignValueMap[sourceValue.toLowerCase()])}
-                            onChange={(event) =>
-                              setCampaignMappingForSourceValue(sourceValue, event.target.value || "")
-                            }
-                          >
-                            <option value="">-- Select campaign --</option>
-                            {campaigns.map((campaign) => (
-                              <option key={campaign.id} value={campaign.id}>
-                                {campaign.label}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                    {campaignSourceValues.length === 0 ? (
-                      <tr>
-                        <td className="py-2 text-slate-500" colSpan={2}>
-                          No campaign values detected in the selected source column.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-              <p className="mt-2 text-xs text-slate-600">
-                Unmapped campaign values: {missingCampaignMappingsCount}
-              </p>
-            </div>
-          ) : null}
-
           <div className="mt-4 flex gap-2">
-            <Button type="button" variant="secondary" onClick={() => setStep(2)}>
+            <Button type="button" variant="secondary" onClick={() => setStep(4)}>
               Back
             </Button>
             <Button
               type="button"
               onClick={() => {
-                const mappingError = validateStep3();
+                const mappingError = validateStep5();
                 if (mappingError) {
                   setError(mappingError);
                   return;
                 }
                 setError(null);
-                setStep(4);
+                setStep(6);
               }}
             >
               Continue
@@ -1018,11 +1117,11 @@ export function TransactionsImportWizard() {
         </Card>
       ) : null}
 
-      {step === 4 ? (
+      {step === 6 ? (
         <Card>
           <CardHeader
-            title="Step 4: Review Import"
-            subtitle="Confirm matching, campaign mapping, and transaction field mappings before run."
+            title="Step 6: Review Import"
+            subtitle="Confirm matching, campaign mapping, no-match behavior, and field mappings before run."
           />
           <div className="grid gap-3 md:grid-cols-2">
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">File: {fileName || "-"}</p>
@@ -1037,20 +1136,14 @@ export function TransactionsImportWizard() {
               Contact Match: {toText(config.contactMatchSourceColumn) || "-"} → {config.contactMatchField}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-              Create Missing Contact: {config.createMissingContact ? "Yes" : "No"}
+              No Contact Match Behavior:{" "}
+              {config.onNoContactMatch === "create_contact" ? "Create New Contact" : "Skip Row and Log It"}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
               New Contact Defaults: {config.newContactType} / {config.newContactCategory}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-              Default Campaign:{" "}
-              {campaigns.find((campaign) => campaign.id === config.defaultCampaignId)?.label || "-"}
-            </p>
-            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-              Campaign Mapping Enabled: {config.campaignMappingEnabled ? "Yes" : "No"}
-            </p>
-            <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-              Campaign Source Column: {config.campaignMappingEnabled ? toText(config.campaignSourceColumn) || "-" : "N/A"}
+              Campaign Source Column: {toText(config.campaignSourceColumn) || "-"}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
               Campaign Values Detected: {campaignSourceValues.length}
@@ -1062,22 +1155,44 @@ export function TransactionsImportWizard() {
               Mapping Summary: {mappingSummary.standard} mapped, {mappingSummary.unmapped} unmapped
             </p>
           </div>
+          {campaignSourceValues.length > 0 ? (
+            <div className="mt-4 max-h-56 overflow-auto rounded-md border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="py-2 px-2">Source Campaign Value</th>
+                    <th className="py-2 px-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaignSourceValues.map((sourceValue) => (
+                    <tr key={sourceValue} className="border-b border-slate-100">
+                      <td className="py-2 px-2">{sourceValue}</td>
+                      <td className="py-2 px-2">
+                        {campaignActionLabel(toText(config.campaignValueMap[sourceValue.toLowerCase()]))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
           <div className="mt-4 flex gap-2">
-            <Button type="button" variant="secondary" onClick={() => setStep(3)}>
+            <Button type="button" variant="secondary" onClick={() => setStep(5)}>
               Back
             </Button>
-            <Button type="button" onClick={() => setStep(5)}>
+            <Button type="button" onClick={() => setStep(7)}>
               Continue
             </Button>
           </div>
         </Card>
       ) : null}
 
-      {step === 5 ? (
+      {step === 7 ? (
         <Card>
           <CardHeader
-            title="Step 5: Run Import"
-            subtitle="Import transactions, link (or create) contacts, and attach to mapped campaigns."
+            title="Step 7: Run Import"
+            subtitle="Import transactions, link contacts, create missing contacts (if selected), and resolve campaigns."
           />
           <div className="space-y-3">
             <Button type="button" disabled={loading} onClick={() => void runImport()}>
@@ -1113,7 +1228,7 @@ export function TransactionsImportWizard() {
                 ) : null}
               </div>
             ) : null}
-            <Button type="button" variant="secondary" onClick={() => setStep(4)}>
+            <Button type="button" variant="secondary" onClick={() => setStep(6)}>
               Back
             </Button>
           </div>
