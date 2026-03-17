@@ -428,82 +428,163 @@ export function TenantDetailDashboard({
         {activeTab === "configuration" ? (
           <form className="space-y-3" onSubmit={saveTenantConfig}>
             <div className="grid gap-2 md:grid-cols-3">
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={editForm.status}
-                onChange={(event) => setEditForm((prev) => ({ ...prev, status: event.target.value }))}
-              >
-                <option value="draft">draft</option>
-                <option value="active">active</option>
-                <option value="suspended">suspended</option>
-                <option value="archived">archived</option>
-              </select>
-              <Input
-                value={editForm.planPackage}
-                onChange={(event) => setEditForm((prev) => ({ ...prev, planPackage: event.target.value }))}
-                placeholder="Plan package"
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={editForm.onboardingStage}
-                onChange={(event) => setEditForm((prev) => ({ ...prev, onboardingStage: event.target.value }))}
-              >
-                {["new", "discovery", "implementation", "data_migration", "training", "go_live", "active"].map(
-                  (stage) => (
-                    <option key={stage} value={stage}>
-                      {stage}
+              <div className="space-y-1">
+                <label htmlFor="tenant-status" className="text-xs font-semibold text-slate-700">
+                  Tenant Status
+                </label>
+                <select
+                  id="tenant-status"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={editForm.status}
+                  onChange={(event) => setEditForm((prev) => ({ ...prev, status: event.target.value }))}
+                >
+                  <option value="draft">draft</option>
+                  <option value="active">active</option>
+                  <option value="suspended">suspended</option>
+                  <option value="archived">archived</option>
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Controls whether this tenant is live, paused, or archived in the platform.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="tenant-plan-package" className="text-xs font-semibold text-slate-700">
+                  Plan Package
+                </label>
+                <Input
+                  id="tenant-plan-package"
+                  value={editForm.planPackage}
+                  onChange={(event) => setEditForm((prev) => ({ ...prev, planPackage: event.target.value }))}
+                  placeholder="standard"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Billing/entitlement plan key used for this tenant.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="tenant-onboarding-stage" className="text-xs font-semibold text-slate-700">
+                  Onboarding Stage
+                </label>
+                <select
+                  id="tenant-onboarding-stage"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={editForm.onboardingStage}
+                  onChange={(event) => setEditForm((prev) => ({ ...prev, onboardingStage: event.target.value }))}
+                >
+                  {["new", "discovery", "implementation", "data_migration", "training", "go_live", "active"].map(
+                    (stage) => (
+                      <option key={stage} value={stage}>
+                        {stage}
+                      </option>
+                    )
+                  )}
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Indicates where this tenant is in implementation and launch.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="tenant-backup-tier" className="text-xs font-semibold text-slate-700">
+                  Backup Tier
+                </label>
+                <select
+                  id="tenant-backup-tier"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={editForm.backupTierId}
+                  onChange={(event) => setEditForm((prev) => ({ ...prev, backupTierId: event.target.value }))}
+                >
+                  <option value="">Unassigned Backup Tier</option>
+                  {backupTiers.map((tier) => (
+                    <option key={toText(tier.id)} value={toText(tier.id)}>
+                      {toText(tier.name)} ({toText(tier.backup_frequency)} / {toText(tier.retention_days)}d)
                     </option>
-                  )
-                )}
-              </select>
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={editForm.backupTierId}
-                onChange={(event) => setEditForm((prev) => ({ ...prev, backupTierId: event.target.value }))}
-              >
-                <option value="">Unassigned Backup Tier</option>
-                {backupTiers.map((tier) => (
-                  <option key={toText(tier.id)} value={toText(tier.id)}>
-                    {toText(tier.name)} ({toText(tier.backup_frequency)} / {toText(tier.retention_days)}d)
-                  </option>
-                ))}
-              </select>
-              <Input
-                value={editForm.primaryContactName}
-                onChange={(event) =>
-                  setEditForm((prev) => ({ ...prev, primaryContactName: event.target.value }))
-                }
-                placeholder="Primary contact name"
-              />
-              <Input
-                type="email"
-                value={editForm.primaryContactEmail}
-                onChange={(event) =>
-                  setEditForm((prev) => ({ ...prev, primaryContactEmail: event.target.value }))
-                }
-                placeholder="Primary contact email"
-              />
-              <Input
-                value={editForm.primaryContactPhone}
-                onChange={(event) =>
-                  setEditForm((prev) => ({ ...prev, primaryContactPhone: event.target.value }))
-                }
-                placeholder="Primary contact phone"
-              />
-              <Input
-                value={editForm.enabledModulesCsv}
-                onChange={(event) =>
-                  setEditForm((prev) => ({ ...prev, enabledModulesCsv: event.target.value }))
-                }
-                placeholder="Enabled modules CSV"
-              />
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Sets backup frequency and retention defaults for this tenant.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="tenant-primary-contact-name" className="text-xs font-semibold text-slate-700">
+                  Primary Contact Name
+                </label>
+                <Input
+                  id="tenant-primary-contact-name"
+                  value={editForm.primaryContactName}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, primaryContactName: event.target.value }))
+                  }
+                  placeholder="Jane Admin"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Main operational contact for platform and implementation communications.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="tenant-primary-contact-email" className="text-xs font-semibold text-slate-700">
+                  Primary Contact Email
+                </label>
+                <Input
+                  id="tenant-primary-contact-email"
+                  type="email"
+                  value={editForm.primaryContactEmail}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, primaryContactEmail: event.target.value }))
+                  }
+                  placeholder="admin@example.org"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Email used for tenant-level notices and support follow-up.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="tenant-primary-contact-phone" className="text-xs font-semibold text-slate-700">
+                  Primary Contact Phone
+                </label>
+                <Input
+                  id="tenant-primary-contact-phone"
+                  value={editForm.primaryContactPhone}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, primaryContactPhone: event.target.value }))
+                  }
+                  placeholder="(555) 123-4567"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Optional direct line for urgent implementation or support issues.
+                </p>
+              </div>
+              <div className="space-y-1 md:col-span-3">
+                <label htmlFor="tenant-enabled-modules" className="text-xs font-semibold text-slate-700">
+                  Enabled Modules (CSV)
+                </label>
+                <Input
+                  id="tenant-enabled-modules"
+                  value={editForm.enabledModulesCsv}
+                  onChange={(event) =>
+                    setEditForm((prev) => ({ ...prev, enabledModulesCsv: event.target.value }))
+                  }
+                  placeholder="contacts,financial,projects,memberships,reports"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Comma-separated module keys that should be available to this tenant.
+                </p>
+              </div>
             </div>
-            <textarea
-              className="min-h-16 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={editForm.internalNotes}
-              onChange={(event) => setEditForm((prev) => ({ ...prev, internalNotes: event.target.value }))}
-              placeholder="Internal notes"
-            />
+            <div className="space-y-1">
+              <label htmlFor="tenant-internal-notes" className="text-xs font-semibold text-slate-700">
+                Internal Notes
+              </label>
+              <textarea
+                id="tenant-internal-notes"
+                className="min-h-16 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={editForm.internalNotes}
+                onChange={(event) => setEditForm((prev) => ({ ...prev, internalNotes: event.target.value }))}
+                placeholder="Internal platform notes for this tenant"
+              />
+              <p className="text-[11px] text-slate-500">
+                Staff-only notes about setup decisions, exceptions, or support context.
+              </p>
+            </div>
             <Button type="submit" disabled={loading}>
               {loading ? "Saving..." : "Save Tenant Configuration"}
             </Button>
@@ -542,71 +623,125 @@ export function TenantDetailDashboard({
         {activeTab === "restore_request" ? (
           <form className="space-y-3" onSubmit={submitRestoreRequest}>
             <div className="grid gap-2 md:grid-cols-3">
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={restoreForm.backupSnapshotId}
-                onChange={(event) =>
-                  setRestoreForm((prev) => ({ ...prev, backupSnapshotId: event.target.value }))
-                }
-              >
-                <option value="">Use point-in-time only</option>
-                {snapshotOptions.map((snapshot) => (
-                  <option key={snapshot.id} value={snapshot.id}>
-                    {snapshot.label}
-                  </option>
-                ))}
-              </select>
-              <Input
-                type="datetime-local"
-                value={restoreForm.backupPointInTime}
-                onChange={(event) =>
-                  setRestoreForm((prev) => ({ ...prev, backupPointInTime: event.target.value }))
-                }
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={restoreForm.restoreTarget}
-                onChange={(event) =>
-                  setRestoreForm((prev) => ({
-                    ...prev,
-                    restoreTarget: event.target.value as "production" | "staging_tenant" | "staging_workspace"
-                  }))
-                }
-              >
-                <option value="staging_tenant">Restore to staging tenant</option>
-                <option value="staging_workspace">Restore to staging workspace</option>
-                <option value="production">Restore to production tenant</option>
-              </select>
-              <Input
-                value={restoreForm.stagingTenantId}
-                onChange={(event) =>
-                  setRestoreForm((prev) => ({ ...prev, stagingTenantId: event.target.value }))
-                }
-                placeholder="Optional staging tenant id"
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={restoreForm.riskLevel}
-                onChange={(event) =>
-                  setRestoreForm((prev) => ({
-                    ...prev,
-                    riskLevel: event.target.value as "low" | "medium" | "high" | "critical"
-                  }))
-                }
-              >
-                <option value="low">Risk: Low</option>
-                <option value="medium">Risk: Medium</option>
-                <option value="high">Risk: High</option>
-                <option value="critical">Risk: Critical</option>
-              </select>
+              <div className="space-y-1">
+                <label htmlFor="restore-snapshot-id" className="text-xs font-semibold text-slate-700">
+                  Backup Snapshot
+                </label>
+                <select
+                  id="restore-snapshot-id"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={restoreForm.backupSnapshotId}
+                  onChange={(event) =>
+                    setRestoreForm((prev) => ({ ...prev, backupSnapshotId: event.target.value }))
+                  }
+                >
+                  <option value="">Use point-in-time only</option>
+                  {snapshotOptions.map((snapshot) => (
+                    <option key={snapshot.id} value={snapshot.id}>
+                      {snapshot.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Choose a captured snapshot, or leave blank to restore by point-in-time.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="restore-point-in-time" className="text-xs font-semibold text-slate-700">
+                  Backup Point In Time
+                </label>
+                <Input
+                  id="restore-point-in-time"
+                  type="datetime-local"
+                  value={restoreForm.backupPointInTime}
+                  onChange={(event) =>
+                    setRestoreForm((prev) => ({ ...prev, backupPointInTime: event.target.value }))
+                  }
+                />
+                <p className="text-[11px] text-slate-500">
+                  Exact UTC timestamp to restore to when doing PITR recovery.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="restore-target" className="text-xs font-semibold text-slate-700">
+                  Restore Target
+                </label>
+                <select
+                  id="restore-target"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={restoreForm.restoreTarget}
+                  onChange={(event) =>
+                    setRestoreForm((prev) => ({
+                      ...prev,
+                      restoreTarget: event.target.value as "production" | "staging_tenant" | "staging_workspace"
+                    }))
+                  }
+                >
+                  <option value="staging_tenant">Restore to staging tenant</option>
+                  <option value="staging_workspace">Restore to staging workspace</option>
+                  <option value="production">Restore to production tenant</option>
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Select where restored data should be applied.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="restore-staging-tenant-id" className="text-xs font-semibold text-slate-700">
+                  Staging Tenant ID
+                </label>
+                <Input
+                  id="restore-staging-tenant-id"
+                  value={restoreForm.stagingTenantId}
+                  onChange={(event) =>
+                    setRestoreForm((prev) => ({ ...prev, stagingTenantId: event.target.value }))
+                  }
+                  placeholder="Optional staging tenant id"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Required when target is a specific staging tenant environment.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="restore-risk-level" className="text-xs font-semibold text-slate-700">
+                  Risk Level
+                </label>
+                <select
+                  id="restore-risk-level"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={restoreForm.riskLevel}
+                  onChange={(event) =>
+                    setRestoreForm((prev) => ({
+                      ...prev,
+                      riskLevel: event.target.value as "low" | "medium" | "high" | "critical"
+                    }))
+                  }
+                >
+                  <option value="low">Risk: Low</option>
+                  <option value="medium">Risk: Medium</option>
+                  <option value="high">Risk: High</option>
+                  <option value="critical">Risk: Critical</option>
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Operational impact level used for approval and audit workflows.
+                </p>
+              </div>
             </div>
-            <textarea
-              className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={restoreForm.reason}
-              onChange={(event) => setRestoreForm((prev) => ({ ...prev, reason: event.target.value }))}
-              placeholder="Restore reason and verification plan (required)"
-              required
-            />
+            <div className="space-y-1">
+              <label htmlFor="restore-reason" className="text-xs font-semibold text-slate-700">
+                Restore Reason and Verification Plan
+              </label>
+              <textarea
+                id="restore-reason"
+                className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={restoreForm.reason}
+                onChange={(event) => setRestoreForm((prev) => ({ ...prev, reason: event.target.value }))}
+                placeholder="Describe why this restore is needed and how it will be validated."
+                required
+              />
+              <p className="text-[11px] text-slate-500">
+                Include incident context, impact, and post-restore validation checks.
+              </p>
+            </div>
             <p className="text-xs text-amber-700">
               Restore operations are tenant-scoped and require explicit confirmation and audit logging.
             </p>
