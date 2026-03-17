@@ -7,8 +7,7 @@ const previewSchema = z.object({
   activityType: z.enum(["all", "transactions"]),
   transactionsFrom: z.string().trim().optional().nullable(),
   transactionsTo: z.string().trim().optional().nullable(),
-  tagId: z.string().trim().optional().nullable(),
-  search: z.string().trim().optional().nullable()
+  tagId: z.string().trim().optional().nullable()
 });
 
 export async function POST(request: Request) {

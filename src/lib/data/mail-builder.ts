@@ -105,7 +105,6 @@ type MailBuilderPreviewFilter = {
   transactionsFrom?: string | null;
   transactionsTo?: string | null;
   tagId?: string | null;
-  search?: string | null;
 };
 
 export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
@@ -116,7 +115,6 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
   const activityType = input.activityType;
   const dateFrom = parseDate(input.transactionsFrom);
   const dateTo = parseDate(input.transactionsTo);
-  const search = toText(input.search);
   const normalizedTagId = toText(input.tagId);
 
   let contactQuery = supabase
@@ -132,13 +130,6 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     contactQuery = contactQuery.eq("entity_type", "person");
   } else if (segment === "organizations") {
     contactQuery = contactQuery.eq("entity_type", "organization");
-  }
-
-  if (search) {
-    const like = `%${search}%`;
-    contactQuery = contactQuery.or(
-      `first_name.ilike.${like},last_name.ilike.${like},preferred_name.ilike.${like},organization_name.ilike.${like},email.ilike.${like},phone.ilike.${like}`
-    );
   }
 
   const { data: contacts, error: contactsError } = await contactQuery;

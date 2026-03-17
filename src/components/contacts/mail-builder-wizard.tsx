@@ -40,6 +40,14 @@ type MailRecipient = {
   lastTransactionDate: string;
 };
 
+function toCsvCell(value: unknown) {
+  const cell = String(value ?? "");
+  if (cell.includes(",") || cell.includes('"') || cell.includes("\n")) {
+    return `"${cell.replaceAll('"', '""')}"`;
+  }
+  return cell;
+}
+
 function toText(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -121,7 +129,6 @@ export function MailBuilderWizard() {
   const [activityType, setActivityType] = useState<ActivityType>("all");
   const [transactionsFrom, setTransactionsFrom] = useState("");
   const [transactionsTo, setTransactionsTo] = useState("");
-  const [search, setSearch] = useState("");
   const [selectedTagId, setSelectedTagId] = useState("");
   const [tagOptions, setTagOptions] = useState<Array<{ id: string; path: string }>>([]);
 
@@ -135,6 +142,8 @@ export function MailBuilderWizard() {
   });
 
   const [recipients, setRecipients] = useState<MailRecipient[]>([]);
+  const [step2Recipients, setStep2Recipients] = useState<MailRecipient[]>([]);
+  const [step2Loading, setStep2Loading] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
 
   useEffect(() => {
@@ -152,6 +161,12 @@ export function MailBuilderWizard() {
     const currentRecipient = recipients[Math.min(previewIndex, Math.max(0, recipients.length - 1))];
     return applyTemplate(selectedTemplate.template_body, currentRecipient);
   }, [selectedTemplate, recipients, previewIndex]);
+
+  useEffect(() => {
+    if (step !== 2) return;
+    void loadStep2Results();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, segment, activityType, transactionsFrom, transactionsTo]);
 
   async function loadTemplates() {
     const response = await fetch("/api/mail-builder/templates");
@@ -238,32 +253,102 @@ export function MailBuilderWizard() {
     await loadTemplates();
   }
 
+  async function fetchRecipients(tagId: string | null) {
+    const response = await fetch("/api/mail-builder/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        segment,
+        activityType,
+        transactionsFrom: transactionsFrom || null,
+        transactionsTo: transactionsTo || null,
+        tagId
+      })
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.message ?? "Unable to build recipient list.");
+    }
+    return {
+      recipients: (payload?.recipients ?? []) as MailRecipient[],
+      totalCount: Number(payload?.totalCount ?? 0)
+    };
+  }
+
+  async function loadStep2Results() {
+    setStep2Loading(true);
+    clearMessages();
+    try {
+      const result = await fetchRecipients(null);
+      setStep2Recipients(result.recipients);
+      setMessage(`Step 2 results loaded: ${result.totalCount} contacts.`);
+    } catch (resultError) {
+      setError(resultError instanceof Error ? resultError.message : "Unable to load Step 2 results.");
+      setStep2Recipients([]);
+    } finally {
+      setStep2Loading(false);
+    }
+  }
+
   async function generatePreview() {
     setLoading(true);
     clearMessages();
     try {
-      const response = await fetch("/api/mail-builder/preview", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          segment,
-          activityType,
-          transactionsFrom: transactionsFrom || null,
-          transactionsTo: transactionsTo || null,
-          tagId: selectedTagId || null,
-          search: search || null
-        })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.message ?? "Unable to generate mail preview.");
-      setRecipients((payload?.recipients ?? []) as MailRecipient[]);
+      const result = await fetchRecipients(selectedTagId || null);
+      setRecipients(result.recipients);
       setPreviewIndex(0);
-      setMessage(`Loaded ${Number(payload?.totalCount ?? 0)} recipients for this mailing.`);
+      setMessage(`Loaded ${result.totalCount} recipients for this mailing.`);
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : "Unable to generate preview.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function exportStep2Csv() {
+    if (step2Recipients.length === 0) {
+      setError("No Step 2 rows to export.");
+      return;
+    }
+    const headers = [
+      "Name",
+      "Entity Type",
+      "Tracking Status",
+      "Email",
+      "Phone",
+      "Address 1",
+      "Address 2",
+      "City",
+      "State",
+      "Postal Code",
+      "Transaction Count",
+      "Transaction Total",
+      "Last Transaction Date"
+    ];
+    const rows = step2Recipients.map((row) => [
+      row.name,
+      row.entityType,
+      row.trackingStatus,
+      row.email,
+      row.phone,
+      row.addressLine1,
+      row.addressLine2,
+      row.city,
+      row.state,
+      row.postalCode,
+      row.transactionCount,
+      row.transactionTotal,
+      formatDateIso(row.lastTransactionDate)
+    ]);
+    const csv = [headers.map((item) => toCsvCell(item)).join(","), ...rows.map((row) => row.map((item) => toCsvCell(item)).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const fileDate = new Date().toISOString().slice(0, 10);
+    link.href = href;
+    link.download = `mail-builder-step-2-${fileDate}.csv`;
+    link.click();
+    URL.revokeObjectURL(href);
   }
 
   function goToNextStep() {
@@ -392,7 +477,7 @@ export function MailBuilderWizard() {
                 Transactions
               </label>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2">
               {activityType === "transactions" ? (
                 <>
                   <div>
@@ -416,17 +501,61 @@ export function MailBuilderWizard() {
                     />
                   </div>
                 </>
-              ) : (
-                <div className="md:col-span-2" />
-              )}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Search contacts</label>
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Name, org, email, phone"
-                />
+              ) : null}
+            </div>
+
+            <div className="rounded-md border border-slate-200 p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-900">
+                  Step 2 Result List ({step2Recipients.length})
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" onClick={() => void loadStep2Results()} disabled={step2Loading}>
+                    {step2Loading ? "Refreshing..." : "Refresh Results"}
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={exportStep2Csv} disabled={step2Recipients.length === 0}>
+                    Export CSV
+                  </Button>
+                </div>
               </div>
+              {step2Recipients.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-600">
+                        <th className="py-2 pr-3">Name</th>
+                        <th className="py-2 pr-3">Type</th>
+                        <th className="py-2 pr-3">Email</th>
+                        <th className="py-2 pr-3">Phone</th>
+                        <th className="py-2 pr-3">Location</th>
+                        <th className="py-2 pr-3">Transactions</th>
+                        <th className="py-2 pr-3">Total</th>
+                        <th className="py-2 pr-3">Last Transaction</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {step2Recipients.map((row) => (
+                        <tr key={row.contactId} className="border-b border-slate-100">
+                          <td className="py-2 pr-3">{row.name}</td>
+                          <td className="py-2 pr-3">{row.entityType}</td>
+                          <td className="py-2 pr-3">{row.email || "-"}</td>
+                          <td className="py-2 pr-3">{row.phone || "-"}</td>
+                          <td className="py-2 pr-3">
+                            {[row.city, row.state, row.postalCode].filter(Boolean).join(", ") || "-"}
+                          </td>
+                          <td className="py-2 pr-3">{row.transactionCount}</td>
+                          <td className="py-2 pr-3">{formatCurrency(row.transactionTotal || 0)}</td>
+                          <td className="py-2 pr-3">{formatDateIso(row.lastTransactionDate) || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  No results loaded yet. Click <strong>Refresh Results</strong> to load everyone filtered by Steps 1-2.
+                </p>
+              )}
             </div>
           </div>
         ) : null}
