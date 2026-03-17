@@ -25,7 +25,14 @@ export function TaskEditor({
     status: String(task.status ?? "todo"),
     priority: String(task.priority ?? "medium"),
     suspenseDate: String(task.due_date ?? "").slice(0, 10),
-    assignedToUserId: String(task.assigned_to ?? "")
+    startDate: String(task.start_date ?? "").slice(0, 10),
+    endDate: String(task.end_date ?? "").slice(0, 10),
+    assignedToUserId: String(task.assigned_to ?? ""),
+    ownerUserId: String(task.owner_user_id ?? task.assigned_to ?? ""),
+    estimatedHours: String(task.estimated_hours ?? ""),
+    actualHours: String(task.actual_hours ?? ""),
+    percentComplete: String(task.percent_complete ?? 0),
+    blockingNote: String(task.blocking_note ?? "")
   });
   const [commentBody, setCommentBody] = useState("");
   const [commentRows, setCommentRows] = useState(comments);
@@ -110,6 +117,16 @@ export function TaskEditor({
               setForm((prev) => ({ ...prev, suspenseDate: event.target.value }))
             }
           />
+          <Input
+            type="date"
+            value={form.startDate}
+            onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))}
+          />
+          <Input
+            type="date"
+            value={form.endDate}
+            onChange={(event) => setForm((prev) => ({ ...prev, endDate: event.target.value }))}
+          />
           <select
             className="rounded-md border border-slate-300 px-3 py-2 text-sm"
             value={form.assignedToUserId}
@@ -124,6 +141,38 @@ export function TaskEditor({
               </option>
             ))}
           </select>
+          <select
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+            value={form.ownerUserId}
+            onChange={(event) => setForm((prev) => ({ ...prev, ownerUserId: event.target.value }))}
+          >
+            <option value="">Task owner</option>
+            {users.map((user) => (
+              <option key={user.user_id} value={user.user_id}>
+                {user.display_name ?? user.user_id}
+              </option>
+            ))}
+          </select>
+          <Input
+            value={form.estimatedHours}
+            onChange={(event) => setForm((prev) => ({ ...prev, estimatedHours: event.target.value }))}
+            placeholder="Estimated hours"
+          />
+          <Input
+            value={form.actualHours}
+            onChange={(event) => setForm((prev) => ({ ...prev, actualHours: event.target.value }))}
+            placeholder="Actual hours"
+          />
+          <Input
+            value={form.percentComplete}
+            onChange={(event) => setForm((prev) => ({ ...prev, percentComplete: event.target.value }))}
+            placeholder="Percent complete"
+          />
+          <Input
+            value={form.blockingNote}
+            onChange={(event) => setForm((prev) => ({ ...prev, blockingNote: event.target.value }))}
+            placeholder="Blocking notes / dependency notes"
+          />
         </div>
         <Button className="mt-3" type="button" onClick={saveTask} disabled={saving}>
           {saving ? "Saving..." : "Save Task"}

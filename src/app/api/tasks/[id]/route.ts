@@ -38,7 +38,15 @@ export async function PATCH(request: Request, { params }: RouteProps) {
       status: parsed.data.status,
       priority: parsed.data.priority,
       suspenseDate: parsed.data.suspenseDate,
-      assignedToUserId: parsed.data.assignedToUserId
+      assignedToUserId: parsed.data.assignedToUserId,
+      ownerUserId: parsed.data.ownerUserId,
+      estimatedHours: parsed.data.estimatedHours,
+      actualHours: parsed.data.actualHours,
+      startDate: parsed.data.startDate,
+      endDate: parsed.data.endDate,
+      percentComplete: parsed.data.percentComplete,
+      milestoneId: parsed.data.milestoneId,
+      blockingNote: parsed.data.blockingNote
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

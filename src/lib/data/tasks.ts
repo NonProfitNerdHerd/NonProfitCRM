@@ -40,7 +40,7 @@ export async function listTasks(filters?: {
   let query = supabase
     .from("tasks")
     .select(
-      "id,title,description,due_date,status,priority,assigned_to,completed_at,project_id,parent_task_id,contact_id,contacts(first_name,last_name),projects(name)"
+      "id,title,description,due_date,start_date,end_date,status,priority,assigned_to,owner_user_id,estimated_hours,actual_hours,percent_complete,milestone_id,blocking_note,completed_at,project_id,parent_task_id,contact_id,contacts(first_name,last_name),projects(name)"
     )
     .eq("organization_id", context.organizationId)
     .order("due_date", { ascending: true })
@@ -106,12 +106,20 @@ export async function createTask(input: {
   title: string;
   description?: string;
   suspenseDate?: string;
+  startDate?: string;
+  endDate?: string;
   priority?: string;
   assignedToUserId?: string;
+  ownerUserId?: string;
   contactId?: string;
   crmOrganizationId?: string;
   projectId?: string;
   parentTaskId?: string;
+  estimatedHours?: number;
+  actualHours?: number;
+  percentComplete?: number;
+  milestoneId?: string;
+  blockingNote?: string;
 }) {
   const context = await requireStaffPermission("can_create_tasks");
   const supabase = await createClient();
@@ -127,17 +135,26 @@ export async function createTask(input: {
   const { data, error } = await supabase
     .from("tasks")
     .insert({
+      tenant_id: context.organizationId,
       organization_id: context.organizationId,
       title: input.title,
       description: input.description ?? null,
       due_date: input.suspenseDate ?? null,
+      start_date: input.startDate ?? null,
+      end_date: input.endDate ?? null,
       priority: normalizedPriority,
       status: "todo",
       assigned_to: input.assignedToUserId ?? context.userId,
+      owner_user_id: input.ownerUserId ?? input.assignedToUserId ?? context.userId,
       contact_id: input.contactId ?? null,
       crm_organization_id: input.crmOrganizationId ?? null,
       project_id: input.projectId ?? null,
       parent_task_id: input.parentTaskId ?? null,
+      estimated_hours: typeof input.estimatedHours === "number" ? input.estimatedHours : null,
+      actual_hours: typeof input.actualHours === "number" ? input.actualHours : null,
+      percent_complete: typeof input.percentComplete === "number" ? input.percentComplete : 0,
+      milestone_id: input.milestoneId ?? null,
+      blocking_note: input.blockingNote ?? null,
       created_by: context.userId
     })
     .select("id, contact_id, assigned_to")
@@ -174,7 +191,15 @@ export async function updateTask(input: {
   status?: "todo" | "in_progress" | "completed" | "blocked" | "cancelled";
   priority?: "low" | "medium" | "high" | "urgent";
   suspenseDate?: string;
+  startDate?: string;
+  endDate?: string;
   assignedToUserId?: string | null;
+  ownerUserId?: string | null;
+  estimatedHours?: number;
+  actualHours?: number;
+  percentComplete?: number;
+  milestoneId?: string | null;
+  blockingNote?: string;
 }) {
   const context = await requireStaffPermission("can_edit_tasks");
   const supabase = await createClient();
@@ -196,7 +221,15 @@ export async function updateTask(input: {
   }
   if (input.priority !== undefined) updates.priority = input.priority;
   if (input.suspenseDate !== undefined) updates.due_date = input.suspenseDate || null;
+  if (input.startDate !== undefined) updates.start_date = input.startDate || null;
+  if (input.endDate !== undefined) updates.end_date = input.endDate || null;
   if (input.assignedToUserId !== undefined) updates.assigned_to = input.assignedToUserId;
+  if (input.ownerUserId !== undefined) updates.owner_user_id = input.ownerUserId;
+  if (input.estimatedHours !== undefined) updates.estimated_hours = input.estimatedHours;
+  if (input.actualHours !== undefined) updates.actual_hours = input.actualHours;
+  if (input.percentComplete !== undefined) updates.percent_complete = input.percentComplete;
+  if (input.milestoneId !== undefined) updates.milestone_id = input.milestoneId;
+  if (input.blockingNote !== undefined) updates.blocking_note = input.blockingNote || null;
 
   const { data, error } = await supabase
     .from("tasks")
@@ -294,7 +327,7 @@ export async function getTask(taskId: string) {
   const { data, error } = await supabase
     .from("tasks")
     .select(
-      "id,title,description,due_date,status,priority,assigned_to,created_by,completed_at,project_id,parent_task_id,contact_id,crm_organization_id,contacts(first_name,last_name,email),projects(name),crm_organizations(name)"
+      "id,title,description,due_date,start_date,end_date,status,priority,assigned_to,owner_user_id,estimated_hours,actual_hours,percent_complete,milestone_id,blocking_note,created_by,completed_at,project_id,parent_task_id,contact_id,crm_organization_id,contacts(first_name,last_name,email),projects(name),crm_organizations(name)"
     )
     .eq("organization_id", context.organizationId)
     .eq("id", taskId)
@@ -306,7 +339,7 @@ export async function getTask(taskId: string) {
     await Promise.all([
       supabase
         .from("tasks")
-        .select("id,title,status,priority,due_date,assigned_to,completed_at")
+        .select("id,title,status,priority,due_date,assigned_to,owner_user_id,percent_complete,completed_at")
         .eq("organization_id", context.organizationId)
         .eq("parent_task_id", taskId)
         .order("due_date", { ascending: true }),

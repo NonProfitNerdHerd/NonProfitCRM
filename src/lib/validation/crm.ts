@@ -22,11 +22,48 @@ export const campaignSchema = z
 export const projectSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
-  status: z.enum(["active", "on_hold", "completed", "cancelled"]).default("active"),
+  status: z
+    .enum([
+      "idea",
+      "under_review",
+      "approved",
+      "planning",
+      "active",
+      "on_hold",
+      "completed",
+      "cancelled",
+      "archived"
+    ])
+    .optional(),
+  lifecycleStatus: z
+    .enum([
+      "idea",
+      "under_review",
+      "approved",
+      "planning",
+      "active",
+      "on_hold",
+      "completed",
+      "cancelled",
+      "archived"
+    ])
+    .default("idea"),
   projectStartDate: z.string().optional(),
   expectedEndDate: z.string().optional(),
   projectManagerUserId: z.string().uuid().optional(),
   ownerUserId: z.string().uuid().optional(),
+  problemStatement: z.string().optional(),
+  businessJustification: z.string().optional(),
+  expectedOutcomes: z.string().optional(),
+  successCriteria: z.string().optional(),
+  roughCostEstimate: z.coerce.number().nonnegative().optional(),
+  roughTimeEstimateWeeks: z.coerce.number().nonnegative().optional(),
+  strategicAlignment: z.string().optional(),
+  requestorName: z.string().optional(),
+  executiveSponsorName: z.string().optional(),
+  scoreImpact: z.coerce.number().int().min(1).max(5).optional(),
+  scoreEffort: z.coerce.number().int().min(1).max(5).optional(),
+  scoreRisk: z.coerce.number().int().min(1).max(5).optional(),
   assignedStaff: z
     .array(
       z.object({
@@ -89,7 +126,15 @@ export const taskUpdateSchema = z.object({
   status: z.enum(["todo", "in_progress", "completed", "blocked", "cancelled"]).optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
   suspenseDate: z.string().optional(),
-  assignedToUserId: z.string().uuid().nullable().optional()
+  assignedToUserId: z.string().uuid().nullable().optional(),
+  ownerUserId: z.string().uuid().optional(),
+  estimatedHours: z.coerce.number().nonnegative().optional(),
+  actualHours: z.coerce.number().nonnegative().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  percentComplete: z.coerce.number().int().min(0).max(100).optional(),
+  milestoneId: z.string().uuid().nullable().optional(),
+  blockingNote: z.string().optional()
 });
 
 export const taskCommentSchema = z.object({

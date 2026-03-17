@@ -20,7 +20,7 @@ export default async function ProjectManagementIndexPage() {
     <Card>
       <CardHeader
         title="Project Management"
-        subtitle="Select and manage projects with staffing and stakeholder workflows"
+        subtitle="Mission-focused lifecycle management from intake to post-project review."
       />
       <ProjectsDashboard
         projects={projects as ProjectRow[]}

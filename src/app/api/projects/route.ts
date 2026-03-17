@@ -7,10 +7,15 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const status =
       (url.searchParams.get("status") as
+        | "idea"
+        | "under_review"
+        | "approved"
+        | "planning"
         | "active"
         | "on_hold"
         | "completed"
         | "cancelled"
+        | "archived"
         | "all"
         | null) ?? "all";
     const q = url.searchParams.get("q") ?? undefined;

@@ -6,12 +6,20 @@ const createTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   suspenseDate: z.string().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
   assignedToUserId: z.string().uuid().optional(),
+  ownerUserId: z.string().uuid().optional(),
   contactId: z.string().uuid().optional(),
   crmOrganizationId: z.string().uuid().optional(),
   projectId: z.string().uuid().optional(),
-  parentTaskId: z.string().uuid().optional()
+  parentTaskId: z.string().uuid().optional(),
+  estimatedHours: z.coerce.number().nonnegative().optional(),
+  actualHours: z.coerce.number().nonnegative().optional(),
+  percentComplete: z.coerce.number().int().min(0).max(100).optional(),
+  milestoneId: z.string().uuid().optional(),
+  blockingNote: z.string().optional()
 });
 
 export async function GET(request: Request) {

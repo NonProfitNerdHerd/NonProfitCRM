@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
@@ -22,6 +23,116 @@ type StakeholderForm = {
   contactInfo: string;
 };
 
+type LifecyclePhase =
+  | "idea"
+  | "evaluation"
+  | "planning"
+  | "execution"
+  | "monitoring"
+  | "closure"
+  | "post_review";
+
+type LifecycleStatus =
+  | "idea"
+  | "under_review"
+  | "approved"
+  | "planning"
+  | "active"
+  | "on_hold"
+  | "completed"
+  | "cancelled"
+  | "archived";
+
+const PHASE_DETAILS: Array<{
+  key: LifecyclePhase;
+  label: string;
+  why: string;
+  skip: string;
+  good: string;
+}> = [
+  {
+    key: "idea",
+    label: "1. Idea / Intake",
+    why: "This stage makes sure everyone understands the real problem before work begins.",
+    skip: "If skipped, teams chase activity instead of mission impact and projects drift.",
+    good: "A clear problem statement, measurable success criteria, and rough cost/time expectations."
+  },
+  {
+    key: "evaluation",
+    label: "2. Evaluation",
+    why: "Evaluation helps leaders prioritize limited nonprofit time, money, and people.",
+    skip: "If skipped, lower-impact work can crowd out urgent mission priorities.",
+    good: "Impact, effort, and risk scoring used to make transparent decisions."
+  },
+  {
+    key: "planning",
+    label: "3. Planning",
+    why: "Planning sets boundaries so the team knows what is in scope and what is not.",
+    skip: "If skipped, scope creep grows quietly and burnout follows.",
+    good: "Documented in-scope, out-of-scope, milestones, assumptions, and dependencies."
+  },
+  {
+    key: "execution",
+    label: "4. Execution",
+    why: "Execution converts plans into owned tasks with fair workload expectations.",
+    skip: "If skipped, accountability blurs and delivery slows down.",
+    good: "Every task has an owner, effort estimate, due date, and dependency clarity."
+  },
+  {
+    key: "monitoring",
+    label: "5. Monitoring & Control",
+    why: "Monitoring keeps leadership informed without micromanaging staff.",
+    skip: "If skipped, risks and budget issues appear late when fixes are expensive.",
+    good: "Open risks, budget variance, and progress updates are current and visible."
+  },
+  {
+    key: "closure",
+    label: "6. Closure",
+    why: "Closure confirms whether the mission outcome was actually achieved.",
+    skip: "If skipped, teams move on with unresolved variance and unclear outcomes.",
+    good: "Final outcomes, success check, and budget variance explanation are documented."
+  },
+  {
+    key: "post_review",
+    label: "7. Post-Project Review",
+    why: "Review turns hard-earned experience into repeatable wisdom.",
+    skip: "If skipped, avoidable mistakes repeat in future projects.",
+    good: "Lessons learned are captured and future decisions benefit from them."
+  }
+];
+
+const STATUS_OPTIONS: Array<{ value: LifecycleStatus; label: string }> = [
+  { value: "idea", label: "Idea" },
+  { value: "under_review", label: "Under Review" },
+  { value: "approved", label: "Approved" },
+  { value: "planning", label: "Planning" },
+  { value: "active", label: "Active" },
+  { value: "on_hold", label: "On Hold" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "archived", label: "Archived" }
+];
+
+const TRANSITION_EXPLANATIONS: Record<LifecycleStatus, string> = {
+  idea: "Idea status captures the problem first so you do not spend money solving the wrong thing.",
+  under_review:
+    "Under Review lets leadership compare this effort against other mission priorities before committing staff time.",
+  approved:
+    "Approved means this is worth doing, but still needs planning discipline to protect people and budget.",
+  planning:
+    "Planning prevents avoidable chaos by defining scope, assumptions, ownership, and key dates before execution.",
+  active:
+    "You are moving this project into Active status. At this stage, unclear scope or missing ownership typically leads to burnout and budget overruns.",
+  on_hold:
+    "On Hold is appropriate when constraints change. Documenting this pause protects trust and planning transparency.",
+  completed:
+    "Completed should only happen when outcomes and closure review are documented to protect institutional learning.",
+  cancelled:
+    "Cancelled is a stewardship decision when mission value no longer justifies spend.",
+  archived:
+    "Archived keeps records available for learning while signaling that operational work has ended."
+};
+
 function effectiveStatus(task: Record<string, unknown>) {
   const status = String(task.status ?? "todo");
   const completedAt = task.completed_at as string | null | undefined;
@@ -30,6 +141,7 @@ function effectiveStatus(task: Record<string, unknown>) {
   if (status === "cancelled") return "Canceled";
   if (dueDate && new Date(dueDate) < new Date()) return "Overdue";
   if (status === "in_progress") return "In Progress";
+  if (status === "blocked") return "Blocked";
   return "Open";
 }
 
@@ -39,7 +151,20 @@ export function ProjectManagementTabs({
   groupedTasks,
   staff,
   stakeholders,
-  users
+  users,
+  scope,
+  scopeChanges,
+  milestones,
+  risks,
+  budget,
+  resources,
+  decisionLog,
+  updates,
+  review,
+  taskDependencies,
+  dashboard,
+  guardrails,
+  warnings
 }: {
   project: Record<string, unknown>;
   tasks: Array<Record<string, unknown>>;
@@ -47,10 +172,46 @@ export function ProjectManagementTabs({
   staff: Array<Record<string, unknown>>;
   stakeholders: Array<Record<string, unknown>>;
   users: UserOption[];
+  scope?: Record<string, unknown> | null;
+  scopeChanges?: Array<Record<string, unknown>>;
+  milestones?: Array<Record<string, unknown>>;
+  risks?: Array<Record<string, unknown>>;
+  budget?: Record<string, unknown> | null;
+  resources?: Array<Record<string, unknown>>;
+  decisionLog?: Array<Record<string, unknown>>;
+  updates?: Array<Record<string, unknown>>;
+  review?: Record<string, unknown> | null;
+  taskDependencies?: Array<Record<string, unknown>>;
+  dashboard?: {
+    lifecycleStatus?: string;
+    percentComplete?: number;
+    budgetStatus?: string;
+    openRisks?: number;
+    upcomingMilestones?: number;
+    overdueTasks?: number;
+    blockingDependencies?: number;
+  };
+  guardrails?: {
+    intakeComplete?: boolean;
+    scopeComplete?: boolean;
+    reviewComplete?: boolean;
+    missingOwnershipCount?: number;
+    blockedWithoutDependencyCount?: number;
+  };
+  warnings?: string[];
 }) {
-  const [activeTab, setActiveTab] = useState<"overview" | "tasks" | "stakeholder_matrix">("overview");
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<LifecyclePhase>("idea");
   const [projectState, setProjectState] = useState(project);
   const [staffRows, setStaffRows] = useState(staff);
+  const [statusSelection, setStatusSelection] = useState<LifecycleStatus>(
+    String(
+      project.lifecycle_status ?? project.status ?? "idea"
+    ) as LifecycleStatus
+  );
+  const [bypassGuardrails, setBypassGuardrails] = useState(false);
+  const [bypassNote, setBypassNote] = useState("");
+  const [statusGuardrailIssues, setStatusGuardrailIssues] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<
     "all" | "open" | "in_progress" | "completed" | "overdue" | "canceled"
   >("all");
@@ -73,6 +234,7 @@ export function ProjectManagementTabs({
     }))
   );
   const [projectSaveError, setProjectSaveError] = useState<string | null>(null);
+  const [sharedError, setSharedError] = useState<string | null>(null);
 
   const [rows, setRows] = useState(stakeholders);
   const [showNewStakeholder, setShowNewStakeholder] = useState(false);
@@ -91,6 +253,108 @@ export function ProjectManagementTabs({
     contactInfo: ""
   });
 
+  const [intakeForm, setIntakeForm] = useState({
+    problemStatement: String(project.problem_statement ?? ""),
+    businessJustification: String(project.business_justification ?? ""),
+    expectedOutcomes: String(project.expected_outcomes ?? ""),
+    successCriteria: String(project.success_criteria ?? ""),
+    roughCostEstimate: String(project.rough_cost_estimate ?? ""),
+    roughTimeEstimateWeeks: String(project.rough_time_estimate_weeks ?? ""),
+    strategicAlignment: String(project.strategic_alignment ?? ""),
+    requestorName: String(project.requestor_name ?? ""),
+    executiveSponsorName: String(project.executive_sponsor_name ?? ""),
+    scoreImpact: String(project.score_impact ?? ""),
+    scoreEffort: String(project.score_effort ?? ""),
+    scoreRisk: String(project.score_risk ?? "")
+  });
+
+  const [scopeForm, setScopeForm] = useState({
+    inScope: String(scope?.in_scope ?? ""),
+    outOfScope: String(scope?.out_of_scope ?? ""),
+    assumptions: String(scope?.assumptions ?? ""),
+    constraints: String(scope?.constraints ?? ""),
+    dependencies: String(scope?.dependencies ?? "")
+  });
+  const [scopeChangeForm, setScopeChangeForm] = useState({
+    changeSummary: "",
+    changeReason: "",
+    impactSummary: "",
+    requestedBy: "",
+    approvedBy: "",
+    effectiveDate: ""
+  });
+
+  const [milestoneForm, setMilestoneForm] = useState({
+    milestoneName: "",
+    dueDate: "",
+    ownerUserId: "",
+    percentComplete: "0",
+    description: ""
+  });
+  const [resourceForm, setResourceForm] = useState({
+    resourceName: "",
+    roleName: "",
+    allocationPercent: "",
+    plannedHours: "",
+    actualHours: "",
+    costRate: "",
+    notes: ""
+  });
+  const [taskForm, setTaskForm] = useState({
+    title: "",
+    description: "",
+    ownerUserId: "",
+    dueDate: "",
+    estimatedHours: "",
+    actualHours: "",
+    startDate: "",
+    status: "todo",
+    priority: "medium",
+    percentComplete: "0",
+    milestoneId: "",
+    blockingNote: ""
+  });
+  const [dependencyForm, setDependencyForm] = useState({
+    taskId: "",
+    prerequisiteTaskId: "",
+    dependencyType: "blocks",
+    note: ""
+  });
+
+  const [riskForm, setRiskForm] = useState({
+    riskTitle: "",
+    riskDescription: "",
+    likelihood: "3",
+    impact: "3",
+    mitigationPlan: "",
+    ownerUserId: "",
+    status: "open",
+    targetResolutionDate: ""
+  });
+  const [budgetForm, setBudgetForm] = useState({
+    approvedBudget: String(budget?.approved_budget ?? 0),
+    forecastedSpend: String(budget?.forecasted_spend ?? 0),
+    actualSpend: String(budget?.actual_spend ?? 0),
+    notes: String(budget?.notes ?? "")
+  });
+  const [decisionForm, setDecisionForm] = useState({
+    decisionSummary: "",
+    decisionDetails: ""
+  });
+  const [updateForm, setUpdateForm] = useState({
+    updateTitle: "",
+    updateBody: "",
+    healthStatus: "on_track"
+  });
+  const [reviewForm, setReviewForm] = useState({
+    finalOutcomeSummary: String(review?.final_outcome_summary ?? ""),
+    metSuccessCriteria:
+      typeof review?.met_success_criteria === "boolean" ? review?.met_success_criteria : false,
+    budgetVarianceExplanation: String(review?.budget_variance_explanation ?? ""),
+    lessonsLearned: String(review?.lessons_learned ?? ""),
+    wouldDoAgain: String(review?.would_do_again ?? "")
+  });
+
   const userNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const user of users) {
@@ -98,6 +362,14 @@ export function ProjectManagementTabs({
     }
     return map;
   }, [users]);
+
+  const averageScore = useMemo(() => {
+    const values = [intakeForm.scoreImpact, intakeForm.scoreEffort, intakeForm.scoreRisk]
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    if (!values.length) return null;
+    return (values.reduce((sum, current) => sum + current, 0) / values.length).toFixed(1);
+  }, [intakeForm.scoreImpact, intakeForm.scoreEffort, intakeForm.scoreRisk]);
 
   const filteredTasks = useMemo(() => {
     if (statusFilter === "all") return tasks;
@@ -111,6 +383,32 @@ export function ProjectManagementTabs({
       return true;
     });
   }, [tasks, statusFilter]);
+
+  async function saveLifecycleAction(payload: Record<string, unknown>) {
+    setSaving(true);
+    setSharedError(null);
+    const response = await fetch(`/api/projects/${String(projectState.id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const body = await response.json().catch(() => null);
+    setSaving(false);
+    if (!response.ok) {
+      if (Array.isArray(body?.guardrailIssues)) {
+        setStatusGuardrailIssues(body.guardrailIssues as string[]);
+      }
+      setSharedError(body?.message ?? "Unable to save project lifecycle changes.");
+      return false;
+    }
+    return true;
+  }
+
+  async function saveAndRefresh(payload: Record<string, unknown>) {
+    const ok = await saveLifecycleAction(payload);
+    if (!ok) return;
+    router.refresh();
+  }
 
   function resetProjectForm() {
     setProjectForm({
@@ -178,6 +476,7 @@ export function ProjectManagementTabs({
     );
     setSaving(false);
     setShowEditProject(false);
+    router.refresh();
   }
 
   async function createStakeholder(event: FormEvent) {
@@ -207,100 +506,564 @@ export function ProjectManagementTabs({
       });
     }
     setSaving(false);
+    router.refresh();
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <TabButton active={activeTab === "overview"} onClick={() => setActiveTab("overview")}>
-          Overview
-        </TabButton>
-        <TabButton active={activeTab === "tasks"} onClick={() => setActiveTab("tasks")}>
-          Tasks
-        </TabButton>
-        <TabButton
-          active={activeTab === "stakeholder_matrix"}
-          onClick={() => setActiveTab("stakeholder_matrix")}
+      <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
+        <h4 className="text-sm font-semibold text-slate-900">
+          Why this lifecycle framework exists
+        </h4>
+        <p className="mt-1 text-sm text-slate-700">
+          This workflow helps your team protect mission time, budget, and people by making sure
+          key thinking happens before execution.
+        </p>
+        <p className="mt-2 text-xs text-slate-600">
+          Skipping planning often leads to scope creep, surprise spending, and staff burnout.
+        </p>
+      </section>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <SummaryBox
+          label="Lifecycle Status"
+          value={String(dashboard?.lifecycleStatus ?? project.lifecycle_status ?? "idea")}
+          tone="slate"
+          compact
+        />
+        <SummaryBox
+          label="% Complete"
+          value={`${dashboard?.percentComplete ?? 0}%`}
+          tone="green"
+          compact
+        />
+        <SummaryBox
+          label="Budget Status"
+          value={String(dashboard?.budgetStatus ?? "No budget entered")}
+          tone="amber"
+          compact
+        />
+        <SummaryBox
+          label="Open Risks"
+          value={String(dashboard?.openRisks ?? 0)}
+          tone="red"
+          compact
+        />
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <SummaryBox
+          label="Upcoming Milestones"
+          value={String(dashboard?.upcomingMilestones ?? 0)}
+          tone="amber"
+          compact
+        />
+        <SummaryBox
+          label="Overdue Tasks"
+          value={String(dashboard?.overdueTasks ?? 0)}
+          tone="red"
+          compact
+        />
+        <SummaryBox
+          label="Blocking Dependencies"
+          value={String(dashboard?.blockingDependencies ?? 0)}
+          tone="red"
+          compact
+        />
+      </div>
+      <p className="text-xs text-slate-600">
+        This dashboard helps leadership see reality without asking staff for daily update emails.
+      </p>
+
+      <section className="rounded-md border border-slate-200 p-4">
+        <h4 className="text-sm font-semibold text-slate-900">Lifecycle Status Engine</h4>
+        <p className="mt-1 text-xs text-slate-600">
+          Move status intentionally. Guardrails help prevent unclear scope, missed ownership, and
+          budget surprises.
+        </p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <select
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+            value={statusSelection}
+            onChange={(event) => setStatusSelection(event.target.value as LifecycleStatus)}
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            disabled={saving}
+            onClick={() =>
+              saveAndRefresh({
+                action: "transition_status",
+                lifecycleStatus: statusSelection,
+                bypassGuardrails,
+                bypassNote
+              })
+            }
+          >
+            {saving ? "Saving..." : "Apply Status Transition"}
+          </Button>
+        </div>
+        <Button
+          className="mt-2"
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            resetProjectForm();
+            setShowEditProject(true);
+          }}
         >
-          Stakeholder Matrix
-        </TabButton>
+          Edit Project Basics
+        </Button>
+        <p className="mt-2 text-xs text-amber-700">{TRANSITION_EXPLANATIONS[statusSelection]}</p>
+        <label className="mt-3 flex items-start gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            checked={bypassGuardrails}
+            onChange={(event) => setBypassGuardrails(event.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            I understand I am proceeding without recommended planning steps and this increases the
+            risk of delay, cost overruns, and staff burnout.
+          </span>
+        </label>
+        {bypassGuardrails ? (
+          <Input
+            value={bypassNote}
+            onChange={(event) => setBypassNote(event.target.value)}
+            placeholder="Optional bypass note (why this exception is needed)"
+          />
+        ) : null}
+        {statusGuardrailIssues.length > 0 ? (
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-700">
+            {statusGuardrailIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      {(warnings ?? []).length > 0 ? (
+        <section className="rounded-md border border-red-200 bg-red-50 p-4">
+          <h5 className="text-sm font-semibold text-red-900">Smart warnings</h5>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-800">
+            {(warnings ?? []).map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section className="rounded-md border border-slate-200 bg-white p-4 text-xs text-slate-700">
+        <p>
+          <strong>Guardrail readiness:</strong>{" "}
+          Intake {guardrails?.intakeComplete ? "complete" : "incomplete"} • Scope{" "}
+          {guardrails?.scopeComplete ? "complete" : "incomplete"} • Closure review{" "}
+          {guardrails?.reviewComplete ? "complete" : "incomplete"}
+        </p>
+      </section>
+
+      <div className="flex flex-wrap gap-2">
+        {PHASE_DETAILS.map((phase) => (
+          <TabButton
+            key={phase.key}
+            active={activeTab === phase.key}
+            onClick={() => setActiveTab(phase.key)}
+          >
+            {phase.label}
+          </TabButton>
+        ))}
       </div>
 
-      {activeTab === "overview" ? (
+      <GuidancePanel phase={PHASE_DETAILS.find((phase) => phase.key === activeTab)!} />
+
+      {activeTab === "idea" ? (
         <section className="rounded-md border border-slate-200 p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">Project Overview</h4>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                resetProjectForm();
-                setShowEditProject(true);
-              }}
-            >
-              Edit Project
-            </Button>
+          <h4 className="text-sm font-semibold text-slate-900">Idea / Intake</h4>
+          <p className="mt-1 text-xs text-slate-600">
+            Clear intake protects leadership credibility by defining success before spending.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <LabeledTextarea
+              label="Problem Statement"
+              value={intakeForm.problemStatement}
+              onChange={(value) => setIntakeForm((prev) => ({ ...prev, problemStatement: value }))}
+            />
+            <LabeledTextarea
+              label="Business Justification"
+              value={intakeForm.businessJustification}
+              onChange={(value) =>
+                setIntakeForm((prev) => ({ ...prev, businessJustification: value }))
+              }
+            />
+            <LabeledTextarea
+              label="Expected Outcomes"
+              value={intakeForm.expectedOutcomes}
+              onChange={(value) => setIntakeForm((prev) => ({ ...prev, expectedOutcomes: value }))}
+            />
+            <LabeledTextarea
+              label="Success Criteria (Measurable)"
+              value={intakeForm.successCriteria}
+              onChange={(value) => setIntakeForm((prev) => ({ ...prev, successCriteria: value }))}
+            />
+            <Input
+              value={intakeForm.roughCostEstimate}
+              onChange={(event) =>
+                setIntakeForm((prev) => ({ ...prev, roughCostEstimate: event.target.value }))
+              }
+              placeholder="Rough Cost Estimate"
+            />
+            <Input
+              value={intakeForm.roughTimeEstimateWeeks}
+              onChange={(event) =>
+                setIntakeForm((prev) => ({ ...prev, roughTimeEstimateWeeks: event.target.value }))
+              }
+              placeholder="Rough Time Estimate (weeks)"
+            />
+            <Input
+              value={intakeForm.requestorName}
+              onChange={(event) =>
+                setIntakeForm((prev) => ({ ...prev, requestorName: event.target.value }))
+              }
+              placeholder="Requestor"
+            />
+            <Input
+              value={intakeForm.executiveSponsorName}
+              onChange={(event) =>
+                setIntakeForm((prev) => ({ ...prev, executiveSponsorName: event.target.value }))
+              }
+              placeholder="Executive Sponsor"
+            />
+            <div className="md:col-span-2">
+              <LabeledTextarea
+                label="Strategic Alignment"
+                value={intakeForm.strategicAlignment}
+                onChange={(value) =>
+                  setIntakeForm((prev) => ({ ...prev, strategicAlignment: value }))
+                }
+              />
+            </div>
           </div>
-          <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
-            <div>
-              <p className="text-slate-500">Project Name</p>
-              <p>{String(projectState.name ?? "-")}</p>
-            </div>
-            <div>
-              <p className="text-slate-500">Status</p>
-              <p>{String(projectState.status ?? "-")}</p>
-            </div>
+          <Button
+            className="mt-3"
+            type="button"
+            disabled={saving}
+            onClick={() =>
+              saveAndRefresh({
+                action: "update_intake",
+                ...intakeForm,
+                roughCostEstimate: numberOrNull(intakeForm.roughCostEstimate),
+                roughTimeEstimateWeeks: numberOrNull(intakeForm.roughTimeEstimateWeeks),
+                scoreImpact: numberOrNull(intakeForm.scoreImpact),
+                scoreEffort: numberOrNull(intakeForm.scoreEffort),
+                scoreRisk: numberOrNull(intakeForm.scoreRisk)
+              })
+            }
+          >
+            Save Intake
+          </Button>
+        </section>
+      ) : null}
+
+      {activeTab === "evaluation" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <h4 className="text-sm font-semibold text-slate-900">Evaluation Scoring</h4>
+          <p className="mt-1 text-xs text-slate-600">
+            Scoring helps nonprofits prioritize high-impact work when capacity is limited.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <Input
+              value={intakeForm.scoreImpact}
+              onChange={(event) =>
+                setIntakeForm((prev) => ({ ...prev, scoreImpact: event.target.value }))
+              }
+              placeholder="Impact (1-5)"
+            />
+            <Input
+              value={intakeForm.scoreEffort}
+              onChange={(event) =>
+                setIntakeForm((prev) => ({ ...prev, scoreEffort: event.target.value }))
+              }
+              placeholder="Effort (1-5)"
+            />
+            <Input
+              value={intakeForm.scoreRisk}
+              onChange={(event) =>
+                setIntakeForm((prev) => ({ ...prev, scoreRisk: event.target.value }))
+              }
+              placeholder="Risk (1-5)"
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-600">
+            Average score: <strong>{averageScore ?? "N/A"}</strong>
+          </p>
+          <Button
+            className="mt-3"
+            type="button"
+            disabled={saving}
+            onClick={() =>
+              saveAndRefresh({
+                action: "update_intake",
+                scoreImpact: numberOrNull(intakeForm.scoreImpact),
+                scoreEffort: numberOrNull(intakeForm.scoreEffort),
+                scoreRisk: numberOrNull(intakeForm.scoreRisk)
+              })
+            }
+          >
+            Save Evaluation Scores
+          </Button>
+        </section>
+      ) : null}
+
+      {activeTab === "planning" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <h4 className="text-sm font-semibold text-slate-900">Scope, Milestones, and Resources</h4>
+          <p className="mt-1 text-xs text-slate-600">
+            Out-of-scope is required because it protects your team from unplanned expansion.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <LabeledTextarea
+              label="In Scope"
+              value={scopeForm.inScope}
+              onChange={(value) => setScopeForm((prev) => ({ ...prev, inScope: value }))}
+            />
+            <LabeledTextarea
+              label="Out of Scope (required)"
+              value={scopeForm.outOfScope}
+              onChange={(value) => setScopeForm((prev) => ({ ...prev, outOfScope: value }))}
+            />
+            <LabeledTextarea
+              label="Assumptions"
+              value={scopeForm.assumptions}
+              onChange={(value) => setScopeForm((prev) => ({ ...prev, assumptions: value }))}
+            />
+            <LabeledTextarea
+              label="Constraints"
+              value={scopeForm.constraints}
+              onChange={(value) => setScopeForm((prev) => ({ ...prev, constraints: value }))}
+            />
             <div className="md:col-span-2">
-              <p className="text-slate-500">Description</p>
-              <p>{String(projectState.description ?? "-")}</p>
+              <LabeledTextarea
+                label="Dependencies"
+                value={scopeForm.dependencies}
+                onChange={(value) => setScopeForm((prev) => ({ ...prev, dependencies: value }))}
+              />
             </div>
-            <div>
-              <p className="text-slate-500">Project Start Date</p>
-              <p>{formatDate(projectState.project_start_date as string)}</p>
-            </div>
-            <div>
-              <p className="text-slate-500">Projected End Date</p>
-              <p>{formatDate(projectState.expected_end_date as string)}</p>
-            </div>
-            <div>
-              <p className="text-slate-500">Project Owner</p>
-              <p>
-                {userNameById.get(String(projectState.owner_user_id ?? "")) ??
-                  String(projectState.owner_user_id ?? "-")}
+          </div>
+          <Button
+            className="mt-3"
+            type="button"
+            disabled={saving}
+            onClick={() => saveAndRefresh({ action: "update_scope", ...scopeForm })}
+          >
+            Save Scope
+          </Button>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Milestones</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                Milestones give leadership visibility without micromanaging tasks.
               </p>
-            </div>
-            <div>
-              <p className="text-slate-500">Project Manager</p>
-              <p>
-                {userNameById.get(String(projectState.project_manager_user_id ?? "")) ??
-                  String(projectState.project_manager_user_id ?? "-")}
-              </p>
-            </div>
-            <div className="md:col-span-2">
-              <p className="text-slate-500">Assigned Staff Members</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {staffRows.length === 0 ? (
-                  <span className="text-sm text-slate-500">No staff assigned</span>
-                ) : (
-                  staffRows.map((member) => (
-                    <span
-                      key={`${String(member.id)}`}
-                      className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700"
-                    >
-                      {userNameById.get(String(member.user_id ?? "")) ?? String(member.user_id ?? "-")} •{" "}
-                      {String(member.role_on_project ?? "-")}
-                    </span>
-                  ))
-                )}
+              <div className="mt-2 space-y-2">
+                {(milestones ?? []).map((milestone) => (
+                  <div key={String(milestone.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{String(milestone.milestone_name ?? "-")}</p>
+                    <p className="text-slate-600">
+                      Due {formatDate(String(milestone.due_date ?? ""))} •{" "}
+                      {String(milestone.percent_complete ?? 0)}%
+                    </p>
+                  </div>
+                ))}
               </div>
-            </div>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={milestoneForm.milestoneName}
+                  onChange={(event) =>
+                    setMilestoneForm((prev) => ({ ...prev, milestoneName: event.target.value }))
+                  }
+                  placeholder="Milestone name"
+                />
+                <Input
+                  type="date"
+                  value={milestoneForm.dueDate}
+                  onChange={(event) =>
+                    setMilestoneForm((prev) => ({ ...prev, dueDate: event.target.value }))
+                  }
+                />
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={milestoneForm.ownerUserId}
+                  onChange={(event) =>
+                    setMilestoneForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                  }
+                >
+                  <option value="">Owner</option>
+                  {users.map((user) => (
+                    <option key={user.user_id} value={user.user_id}>
+                      {user.display_name ?? user.user_id}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={milestoneForm.percentComplete}
+                  onChange={(event) =>
+                    setMilestoneForm((prev) => ({ ...prev, percentComplete: event.target.value }))
+                  }
+                  placeholder="Percent complete"
+                />
+                <LabeledTextarea
+                  label="Description"
+                  value={milestoneForm.description}
+                  onChange={(value) =>
+                    setMilestoneForm((prev) => ({ ...prev, description: value }))
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    saveAndRefresh({
+                      action: "upsert_milestone",
+                      ...milestoneForm,
+                      percentComplete: numberOrNull(milestoneForm.percentComplete)
+                    })
+                  }
+                >
+                  Add Milestone
+                </Button>
+              </div>
+            </section>
+
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Resources</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                Resource visibility supports fair workloads and prevents hidden capacity gaps.
+              </p>
+              <div className="mt-2 space-y-2">
+                {(resources ?? []).map((resource) => (
+                  <div key={String(resource.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{String(resource.resource_name ?? "-")}</p>
+                    <p className="text-slate-600">
+                      {String(resource.role_name ?? "Role not set")} •{" "}
+                      {String(resource.allocation_percent ?? "0")}% allocation
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={resourceForm.resourceName}
+                  onChange={(event) =>
+                    setResourceForm((prev) => ({ ...prev, resourceName: event.target.value }))
+                  }
+                  placeholder="Resource name"
+                />
+                <Input
+                  value={resourceForm.roleName}
+                  onChange={(event) =>
+                    setResourceForm((prev) => ({ ...prev, roleName: event.target.value }))
+                  }
+                  placeholder="Role"
+                />
+                <Input
+                  value={resourceForm.allocationPercent}
+                  onChange={(event) =>
+                    setResourceForm((prev) => ({ ...prev, allocationPercent: event.target.value }))
+                  }
+                  placeholder="Allocation %"
+                />
+                <Input
+                  value={resourceForm.plannedHours}
+                  onChange={(event) =>
+                    setResourceForm((prev) => ({ ...prev, plannedHours: event.target.value }))
+                  }
+                  placeholder="Planned hours"
+                />
+                <Input
+                  value={resourceForm.actualHours}
+                  onChange={(event) =>
+                    setResourceForm((prev) => ({ ...prev, actualHours: event.target.value }))
+                  }
+                  placeholder="Actual hours"
+                />
+                <Input
+                  value={resourceForm.costRate}
+                  onChange={(event) =>
+                    setResourceForm((prev) => ({ ...prev, costRate: event.target.value }))
+                  }
+                  placeholder="Cost rate"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    saveAndRefresh({
+                      action: "upsert_resource",
+                      ...resourceForm,
+                      allocationPercent: numberOrNull(resourceForm.allocationPercent),
+                      plannedHours: numberOrNull(resourceForm.plannedHours),
+                      actualHours: numberOrNull(resourceForm.actualHours),
+                      costRate: numberOrNull(resourceForm.costRate)
+                    })
+                  }
+                >
+                  Add Resource
+                </Button>
+              </div>
+            </section>
+
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Scope Change Log</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                When scope changes are undocumented, projects grow quietly and budgets disappear.
+              </p>
+              <div className="mt-2 space-y-2">
+                {(scopeChanges ?? []).map((change) => (
+                  <div key={String(change.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{String(change.change_summary ?? "-")}</p>
+                    <p className="text-slate-600">{formatDate(String(change.created_at ?? ""))}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={scopeChangeForm.changeSummary}
+                  onChange={(event) =>
+                    setScopeChangeForm((prev) => ({ ...prev, changeSummary: event.target.value }))
+                  }
+                  placeholder="Change summary"
+                />
+                <LabeledTextarea
+                  label="Reason"
+                  value={scopeChangeForm.changeReason}
+                  onChange={(value) =>
+                    setScopeChangeForm((prev) => ({ ...prev, changeReason: value }))
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => saveAndRefresh({ action: "add_scope_change", ...scopeChangeForm })}
+                >
+                  Add Scope Change
+                </Button>
+              </div>
+            </section>
           </div>
         </section>
       ) : null}
 
-      {activeTab === "tasks" ? (
+      {activeTab === "execution" ? (
         <section className="rounded-md border border-slate-200 p-4">
-          <h4 className="mb-3 text-sm font-semibold text-slate-900">Tasks</h4>
+          <h4 className="mb-3 text-sm font-semibold text-slate-900">Tasks and Dependencies</h4>
+          <p className="mb-3 text-xs text-slate-600">
+            Every task needs an owner. Dependencies prevent schedule collisions and confusion.
+          </p>
           <div className="mb-4 grid gap-3 md:grid-cols-4">
             <SummaryBox label="Overdue" value={(groupedTasks.overdue ?? []).length} tone="red" />
             <SummaryBox label="Upcoming" value={(groupedTasks.upcoming ?? []).length} tone="amber" />
@@ -368,160 +1131,383 @@ export function ProjectManagementTabs({
               </table>
             </div>
           )}
-        </section>
-      ) : null}
 
-      {activeTab === "stakeholder_matrix" ? (
-        <section className="rounded-md border border-slate-200 p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">Stakeholder Matrix</h4>
-            <Button type="button" onClick={() => setShowNewStakeholder(true)}>
-              New
-            </Button>
-          </div>
-          {rows.length === 0 ? (
-            <p className="text-sm text-slate-500">No stakeholder records yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-600">
-                    <th className="py-2">Stakeholder Name</th>
-                    <th className="py-2">Role / Title</th>
-                    <th className="py-2">Organization</th>
-                    <th className="py-2">Type</th>
-                    <th className="py-2">Influence</th>
-                    <th className="py-2">Interest</th>
-                    <th className="py-2">Support</th>
-                    <th className="py-2">Owner</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={String(row.id)} className="border-b border-slate-100">
-                      <td className="py-2">{String(row.stakeholder_name ?? row.stakeholderName ?? "-")}</td>
-                      <td className="py-2">
-                        {String(row.stakeholder_role_title ?? row.stakeholderRoleTitle ?? "-")}
-                      </td>
-                      <td className="py-2">
-                        {String(row.stakeholder_organization ?? row.organization ?? "-")}
-                      </td>
-                      <td className="py-2">{String(row.stakeholder_type ?? row.stakeholderType ?? "-")}</td>
-                      <td className="py-2">{String(row.influence_level ?? row.influenceLevel ?? "-")}</td>
-                      <td className="py-2">{String(row.interest_level ?? row.interestLevel ?? "-")}</td>
-                      <td className="py-2">{String(row.support_level ?? row.supportLevel ?? "-")}</td>
-                      <td className="py-2">
-                        {userNameById.get(
-                          String(row.owner_user_id ?? row.ownerUserId ?? "")
-                        ) ?? String(row.owner_user_id ?? row.ownerUserId ?? "-")}
-                      </td>
-                    </tr>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Add Task</h5>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={taskForm.title}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, title: event.target.value }))
+                  }
+                  placeholder="Task title"
+                />
+                <LabeledTextarea
+                  label="Task description"
+                  value={taskForm.description}
+                  onChange={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
+                />
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={taskForm.ownerUserId}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                  }
+                >
+                  <option value="">Task owner (required)</option>
+                  {users.map((user) => (
+                    <option key={user.user_id} value={user.user_id}>
+                      {user.display_name ?? user.user_id}
+                    </option>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      {showNewStakeholder ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h5 className="text-base font-semibold text-slate-900">New Stakeholder</h5>
-              <button
-                type="button"
-                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
-                onClick={() => setShowNewStakeholder(false)}
-              >
-                Close
-              </button>
-            </div>
-            <form className="grid gap-3 md:grid-cols-2" onSubmit={createStakeholder}>
-              <Input
-                placeholder="Stakeholder Name"
-                value={form.stakeholderName}
-                onChange={(event) => setForm((prev) => ({ ...prev, stakeholderName: event.target.value }))}
-              />
-              <Input
-                placeholder="Role / Title"
-                value={form.stakeholderRoleTitle}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, stakeholderRoleTitle: event.target.value }))
-                }
-              />
-              <Input
-                placeholder="Organization"
-                value={form.organization}
-                onChange={(event) => setForm((prev) => ({ ...prev, organization: event.target.value }))}
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={form.stakeholderType}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    stakeholderType: event.target.value as "Internal" | "External"
-                  }))
-                }
-              >
-                <option value="External">External</option>
-                <option value="Internal">Internal</option>
-              </select>
-              <Input
-                placeholder="Influence Level"
-                value={form.influenceLevel}
-                onChange={(event) => setForm((prev) => ({ ...prev, influenceLevel: event.target.value }))}
-              />
-              <Input
-                placeholder="Interest Level"
-                value={form.interestLevel}
-                onChange={(event) => setForm((prev) => ({ ...prev, interestLevel: event.target.value }))}
-              />
-              <Input
-                placeholder="Support Level"
-                value={form.supportLevel}
-                onChange={(event) => setForm((prev) => ({ ...prev, supportLevel: event.target.value }))}
-              />
-              <Input
-                placeholder="Engagement Strategy"
-                value={form.engagementStrategy}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, engagementStrategy: event.target.value }))
-                }
-              />
-              <Input
-                placeholder="Communication Needs / Notes"
-                value={form.communicationNeeds}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, communicationNeeds: event.target.value }))
-                }
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={form.ownerUserId}
-                onChange={(event) => setForm((prev) => ({ ...prev, ownerUserId: event.target.value }))}
-              >
-                <option value="">Owner / Responsible Staff</option>
-                {users.map((user) => (
-                  <option key={user.user_id} value={user.user_id}>
-                    {user.display_name ?? user.user_id}
-                  </option>
-                ))}
-              </select>
-              <Input
-                placeholder="Contact Information"
-                value={form.contactInfo}
-                onChange={(event) => setForm((prev) => ({ ...prev, contactInfo: event.target.value }))}
-              />
-              <div className="md:col-span-2">
-                <Button type="submit" disabled={saving}>
-                  {saving ? "Saving..." : "Create Stakeholder"}
+                </select>
+                <Input
+                  type="date"
+                  value={taskForm.startDate}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, startDate: event.target.value }))
+                  }
+                />
+                <Input
+                  type="date"
+                  value={taskForm.dueDate}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
+                  }
+                />
+                <Input
+                  value={taskForm.estimatedHours}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, estimatedHours: event.target.value }))
+                  }
+                  placeholder="Estimated hours"
+                />
+                <Input
+                  value={taskForm.actualHours}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, actualHours: event.target.value }))
+                  }
+                  placeholder="Actual hours"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!taskForm.ownerUserId}
+                  onClick={() =>
+                    saveAndRefresh({
+                      action: "upsert_task",
+                      ...taskForm,
+                      ownerUserId: taskForm.ownerUserId,
+                      estimatedHours: numberOrNull(taskForm.estimatedHours),
+                      actualHours: numberOrNull(taskForm.actualHours),
+                      percentComplete: numberOrNull(taskForm.percentComplete),
+                      milestoneId: taskForm.milestoneId || null
+                    })
+                  }
+                >
+                  Add Task
                 </Button>
               </div>
-            </form>
+            </section>
+
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Blocking Dependencies</h5>
+              <div className="mt-2 space-y-2">
+                {(taskDependencies ?? []).map((dependency) => (
+                  <div key={String(dependency.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p>
+                      Task {String(dependency.task_id)} depends on {String(dependency.prerequisite_task_id)}
+                    </p>
+                    <p className="text-slate-600">{String(dependency.note ?? "No note")}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 grid gap-2">
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={dependencyForm.taskId}
+                  onChange={(event) =>
+                    setDependencyForm((prev) => ({ ...prev, taskId: event.target.value }))
+                  }
+                >
+                  <option value="">Task being blocked</option>
+                  {tasks.map((task) => (
+                    <option key={String(task.id)} value={String(task.id)}>
+                      {String(task.title ?? task.id)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={dependencyForm.prerequisiteTaskId}
+                  onChange={(event) =>
+                    setDependencyForm((prev) => ({
+                      ...prev,
+                      prerequisiteTaskId: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">Prerequisite task</option>
+                  {tasks.map((task) => (
+                    <option key={String(task.id)} value={String(task.id)}>
+                      {String(task.title ?? task.id)}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={dependencyForm.note}
+                  onChange={(event) =>
+                    setDependencyForm((prev) => ({ ...prev, note: event.target.value }))
+                  }
+                  placeholder="Dependency note"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!dependencyForm.taskId || !dependencyForm.prerequisiteTaskId}
+                  onClick={() => saveAndRefresh({ action: "add_task_dependency", ...dependencyForm })}
+                >
+                  Add Dependency
+                </Button>
+              </div>
+            </section>
           </div>
-        </div>
+        </section>
+      ) : null}
+
+      {activeTab === "monitoring" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <h4 className="text-sm font-semibold text-slate-900">Risk, Budget, Decisions, and Updates</h4>
+          <p className="mt-1 text-xs text-slate-600">
+            Risk tracking is stewardship, not pessimism. Monitoring variance protects donor trust.
+          </p>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Risk Register</h5>
+              <div className="mt-2 space-y-2">
+                {(risks ?? []).map((risk) => (
+                  <div key={String(risk.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{String(risk.risk_title ?? "-")}</p>
+                    <p className="text-slate-600">
+                      Likelihood {String(risk.likelihood ?? "-")} • Impact {String(risk.impact ?? "-")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={riskForm.riskTitle}
+                  onChange={(event) =>
+                    setRiskForm((prev) => ({ ...prev, riskTitle: event.target.value }))
+                  }
+                  placeholder="Risk title"
+                />
+                <LabeledTextarea
+                  label="Risk description"
+                  value={riskForm.riskDescription}
+                  onChange={(value) =>
+                    setRiskForm((prev) => ({ ...prev, riskDescription: value }))
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    saveAndRefresh({
+                      action: "upsert_risk",
+                      ...riskForm,
+                      likelihood: numberOrNull(riskForm.likelihood),
+                      impact: numberOrNull(riskForm.impact)
+                    })
+                  }
+                >
+                  Add Risk
+                </Button>
+              </div>
+            </section>
+
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Budget</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                Variance tracking helps you explain spend clearly to boards and funders.
+              </p>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={budgetForm.approvedBudget}
+                  onChange={(event) =>
+                    setBudgetForm((prev) => ({ ...prev, approvedBudget: event.target.value }))
+                  }
+                  placeholder="Approved budget"
+                />
+                <Input
+                  value={budgetForm.forecastedSpend}
+                  onChange={(event) =>
+                    setBudgetForm((prev) => ({ ...prev, forecastedSpend: event.target.value }))
+                  }
+                  placeholder="Forecasted spend"
+                />
+                <Input
+                  value={budgetForm.actualSpend}
+                  onChange={(event) =>
+                    setBudgetForm((prev) => ({ ...prev, actualSpend: event.target.value }))
+                  }
+                  placeholder="Actual spend"
+                />
+                <LabeledTextarea
+                  label="Budget notes"
+                  value={budgetForm.notes}
+                  onChange={(value) => setBudgetForm((prev) => ({ ...prev, notes: value }))}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    saveAndRefresh({
+                      action: "update_budget",
+                      approvedBudget: numberOrZero(budgetForm.approvedBudget),
+                      forecastedSpend: numberOrZero(budgetForm.forecastedSpend),
+                      actualSpend: numberOrZero(budgetForm.actualSpend),
+                      notes: budgetForm.notes
+                    })
+                  }
+                >
+                  Save Budget
+                </Button>
+              </div>
+            </section>
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Decision Log</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                When decisions are undocumented, institutional memory disappears.
+              </p>
+              <div className="mt-2 space-y-2">
+                {(decisionLog ?? []).map((decision) => (
+                  <div key={String(decision.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{String(decision.decision_summary ?? "-")}</p>
+                    <p className="text-slate-600">{formatDate(String(decision.decided_at ?? ""))}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={decisionForm.decisionSummary}
+                  onChange={(event) =>
+                    setDecisionForm((prev) => ({ ...prev, decisionSummary: event.target.value }))
+                  }
+                  placeholder="Decision summary"
+                />
+                <LabeledTextarea
+                  label="Decision details"
+                  value={decisionForm.decisionDetails}
+                  onChange={(value) =>
+                    setDecisionForm((prev) => ({ ...prev, decisionDetails: value }))
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => saveAndRefresh({ action: "add_decision", ...decisionForm })}
+                >
+                  Add Decision
+                </Button>
+              </div>
+            </section>
+
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Project Updates</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                Regular updates reduce hallway confusion and email chaos.
+              </p>
+              <div className="mt-2 space-y-2">
+                {(updates ?? []).map((update) => (
+                  <div key={String(update.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{String(update.update_title ?? "-")}</p>
+                    <p className="text-slate-600">{formatDate(String(update.published_at ?? ""))}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 grid gap-2">
+                <Input
+                  value={updateForm.updateTitle}
+                  onChange={(event) =>
+                    setUpdateForm((prev) => ({ ...prev, updateTitle: event.target.value }))
+                  }
+                  placeholder="Update title"
+                />
+                <LabeledTextarea
+                  label="Update details"
+                  value={updateForm.updateBody}
+                  onChange={(value) => setUpdateForm((prev) => ({ ...prev, updateBody: value }))}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => saveAndRefresh({ action: "add_update", ...updateForm })}
+                >
+                  Add Update
+                </Button>
+              </div>
+            </section>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "closure" || activeTab === "post_review" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-900">
+              {activeTab === "closure" ? "Closure" : "Post-Project Review"}
+            </h4>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => saveAndRefresh({ action: "update_review", ...reviewForm })}
+            >
+              Save Review
+            </Button>
+          </div>
+          <p className="text-xs text-slate-600">
+            Closure turns experience into wisdom. Without review, mistakes repeat.
+          </p>
+          <div className="mt-3 grid gap-3">
+            <LabeledTextarea
+              label="Final Outcome Summary"
+              value={reviewForm.finalOutcomeSummary}
+              onChange={(value) => setReviewForm((prev) => ({ ...prev, finalOutcomeSummary: value }))}
+            />
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={reviewForm.metSuccessCriteria}
+                onChange={(event) =>
+                  setReviewForm((prev) => ({ ...prev, metSuccessCriteria: event.target.checked }))
+                }
+              />
+              Did we meet success criteria?
+            </label>
+            <LabeledTextarea
+              label="Budget Variance Explanation"
+              value={reviewForm.budgetVarianceExplanation}
+              onChange={(value) =>
+                setReviewForm((prev) => ({ ...prev, budgetVarianceExplanation: value }))
+              }
+            />
+            <LabeledTextarea
+              label="Lessons Learned"
+              value={reviewForm.lessonsLearned}
+              onChange={(value) => setReviewForm((prev) => ({ ...prev, lessonsLearned: value }))}
+            />
+            <LabeledTextarea
+              label="Would we do this again?"
+              value={reviewForm.wouldDoAgain}
+              onChange={(value) => setReviewForm((prev) => ({ ...prev, wouldDoAgain: value }))}
+            />
+          </div>
+        </section>
       ) : null}
 
       {showEditProject ? (
@@ -681,6 +1667,159 @@ export function ProjectManagementTabs({
           </div>
         </div>
       ) : null}
+
+      <section className="rounded-md border border-slate-200 p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h4 className="text-sm font-semibold text-slate-900">Stakeholder Matrix</h4>
+          <Button type="button" onClick={() => setShowNewStakeholder(true)}>
+            New
+          </Button>
+        </div>
+        {rows.length === 0 ? (
+          <p className="text-sm text-slate-500">No stakeholder records yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-600">
+                  <th className="py-2">Stakeholder Name</th>
+                  <th className="py-2">Role / Title</th>
+                  <th className="py-2">Organization</th>
+                  <th className="py-2">Type</th>
+                  <th className="py-2">Influence</th>
+                  <th className="py-2">Interest</th>
+                  <th className="py-2">Support</th>
+                  <th className="py-2">Owner</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={String(row.id)} className="border-b border-slate-100">
+                    <td className="py-2">{String(row.stakeholder_name ?? row.stakeholderName ?? "-")}</td>
+                    <td className="py-2">
+                      {String(row.stakeholder_role_title ?? row.stakeholderRoleTitle ?? "-")}
+                    </td>
+                    <td className="py-2">
+                      {String(row.stakeholder_organization ?? row.organization ?? "-")}
+                    </td>
+                    <td className="py-2">{String(row.stakeholder_type ?? row.stakeholderType ?? "-")}</td>
+                    <td className="py-2">{String(row.influence_level ?? row.influenceLevel ?? "-")}</td>
+                    <td className="py-2">{String(row.interest_level ?? row.interestLevel ?? "-")}</td>
+                    <td className="py-2">{String(row.support_level ?? row.supportLevel ?? "-")}</td>
+                    <td className="py-2">
+                      {userNameById.get(
+                        String(row.owner_user_id ?? row.ownerUserId ?? "")
+                      ) ?? String(row.owner_user_id ?? row.ownerUserId ?? "-")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {showNewStakeholder ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h5 className="text-base font-semibold text-slate-900">New Stakeholder</h5>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setShowNewStakeholder(false)}
+              >
+                Close
+              </button>
+            </div>
+            <form className="grid gap-3 md:grid-cols-2" onSubmit={createStakeholder}>
+              <Input
+                placeholder="Stakeholder Name"
+                value={form.stakeholderName}
+                onChange={(event) => setForm((prev) => ({ ...prev, stakeholderName: event.target.value }))}
+              />
+              <Input
+                placeholder="Role / Title"
+                value={form.stakeholderRoleTitle}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, stakeholderRoleTitle: event.target.value }))
+                }
+              />
+              <Input
+                placeholder="Organization"
+                value={form.organization}
+                onChange={(event) => setForm((prev) => ({ ...prev, organization: event.target.value }))}
+              />
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={form.stakeholderType}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    stakeholderType: event.target.value as "Internal" | "External"
+                  }))
+                }
+              >
+                <option value="External">External</option>
+                <option value="Internal">Internal</option>
+              </select>
+              <Input
+                placeholder="Influence Level"
+                value={form.influenceLevel}
+                onChange={(event) => setForm((prev) => ({ ...prev, influenceLevel: event.target.value }))}
+              />
+              <Input
+                placeholder="Interest Level"
+                value={form.interestLevel}
+                onChange={(event) => setForm((prev) => ({ ...prev, interestLevel: event.target.value }))}
+              />
+              <Input
+                placeholder="Support Level"
+                value={form.supportLevel}
+                onChange={(event) => setForm((prev) => ({ ...prev, supportLevel: event.target.value }))}
+              />
+              <Input
+                placeholder="Engagement Strategy"
+                value={form.engagementStrategy}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, engagementStrategy: event.target.value }))
+                }
+              />
+              <Input
+                placeholder="Communication Needs / Notes"
+                value={form.communicationNeeds}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, communicationNeeds: event.target.value }))
+                }
+              />
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={form.ownerUserId}
+                onChange={(event) => setForm((prev) => ({ ...prev, ownerUserId: event.target.value }))}
+              >
+                <option value="">Owner / Responsible Staff</option>
+                {users.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>
+                    {user.display_name ?? user.user_id}
+                  </option>
+                ))}
+              </select>
+              <Input
+                placeholder="Contact Information"
+                value={form.contactInfo}
+                onChange={(event) => setForm((prev) => ({ ...prev, contactInfo: event.target.value }))}
+              />
+              <div className="md:col-span-2">
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Saving..." : "Create Stakeholder"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {sharedError ? <p className="text-sm text-red-700">{sharedError}</p> : null}
     </div>
   );
 }
@@ -712,11 +1851,13 @@ function TabButton({
 function SummaryBox({
   label,
   value,
-  tone
+  tone,
+  compact = false
 }: {
   label: string;
-  value: number;
+  value: number | string;
   tone: "red" | "amber" | "green" | "slate";
+  compact?: boolean;
 }) {
   const colorClass =
     tone === "red"
@@ -730,7 +1871,59 @@ function SummaryBox({
   return (
     <div className={`rounded-md border border-slate-200 p-3 ${colorClass}`}>
       <p className="text-xs font-medium">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
+      <p className={`mt-1 font-semibold ${compact ? "text-sm" : "text-2xl"}`}>{value}</p>
     </div>
   );
+}
+
+function GuidancePanel({
+  phase
+}: {
+  phase: { label: string; why: string; skip: string; good: string };
+}) {
+  return (
+    <section className="rounded-md border border-blue-200 bg-blue-50 p-4">
+      <h5 className="text-sm font-semibold text-blue-900">{phase.label}</h5>
+      <p className="mt-1 text-xs text-blue-800">
+        <strong>Why this stage exists:</strong> {phase.why}
+      </p>
+      <p className="mt-1 text-xs text-blue-800">
+        <strong>What happens if you skip this:</strong> {phase.skip}
+      </p>
+      <p className="mt-1 text-xs text-blue-800">
+        <strong>What good looks like:</strong> {phase.good}
+      </p>
+    </section>
+  );
+}
+
+function LabeledTextarea({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs text-slate-700">
+      <span>{label}</span>
+      <textarea
+        className="min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function numberOrNull(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function numberOrZero(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

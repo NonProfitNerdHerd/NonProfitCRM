@@ -11,6 +11,7 @@ export type ProjectRow = {
   name: string;
   description: string | null;
   status: string;
+  lifecycle_status?: string | null;
   project_start_date: string | null;
   expected_end_date: string | null;
   owner_user_id: string | null;
@@ -34,20 +35,30 @@ export function ProjectsDashboard({
   detailBasePath?: string;
 }) {
   const [activeTab, setActiveTab] = useState<"active" | "completed" | "all">("active");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "on_hold" | "completed" | "cancelled">(
-    "all"
-  );
+  const [statusFilter, setStatusFilter] = useState<
+    | "all"
+    | "idea"
+    | "under_review"
+    | "approved"
+    | "planning"
+    | "active"
+    | "on_hold"
+    | "completed"
+    | "cancelled"
+    | "archived"
+  >("all");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
 
   const visibleProjects = useMemo(() => {
     return projects.filter((project) => {
-      if (activeTab === "active" && !["active", "on_hold"].includes(project.status)) return false;
-      if (activeTab === "completed" && project.status !== "completed") return false;
-      if (statusFilter !== "all" && project.status !== statusFilter) return false;
+      const lifecycleStatus = project.lifecycle_status ?? project.status;
+      if (activeTab === "active" && !["active", "on_hold", "planning", "approved"].includes(lifecycleStatus)) return false;
+      if (activeTab === "completed" && !["completed", "archived", "cancelled"].includes(lifecycleStatus)) return false;
+      if (statusFilter !== "all" && lifecycleStatus !== statusFilter) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
-        const payload = `${project.name} ${project.description ?? ""} ${project.status}`.toLowerCase();
+        const payload = `${project.name} ${project.description ?? ""} ${lifecycleStatus}`.toLowerCase();
         if (!payload.includes(q)) return false;
       }
       return true;
@@ -85,15 +96,30 @@ export function ProjectsDashboard({
           value={statusFilter}
           onChange={(event) =>
             setStatusFilter(
-              event.target.value as "all" | "active" | "on_hold" | "completed" | "cancelled"
+              event.target.value as
+                | "all"
+                | "idea"
+                | "under_review"
+                | "approved"
+                | "planning"
+                | "active"
+                | "on_hold"
+                | "completed"
+                | "cancelled"
+                | "archived"
             )
           }
         >
           <option value="all">All Statuses</option>
+          <option value="idea">Idea</option>
+          <option value="under_review">Under Review</option>
+          <option value="approved">Approved</option>
+          <option value="planning">Planning</option>
           <option value="active">Active</option>
           <option value="on_hold">On Hold</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
+          <option value="archived">Archived</option>
         </select>
         <Input
           value={search}
@@ -114,7 +140,7 @@ export function ProjectsDashboard({
             >
               <div className="flex items-center justify-between">
                 <p className="text-sm font-semibold text-slate-900">{project.name}</p>
-                <span className="text-xs text-slate-500">{project.status}</span>
+                <span className="text-xs text-slate-500">{project.lifecycle_status ?? project.status}</span>
               </div>
               <p className="mt-1 text-xs text-slate-600">{project.description ?? "-"}</p>
               <p className="mt-2 text-xs text-slate-500">
@@ -151,7 +177,7 @@ function NewProjectModal({
   const [form, setForm] = useState({
     name: "",
     description: "",
-    status: "active",
+    status: "idea",
     projectStartDate: "",
     expectedEndDate: "",
     projectManagerUserId: "",
@@ -251,10 +277,15 @@ function NewProjectModal({
                 value={form.status}
                 onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}
               >
+                <option value="idea">Idea</option>
+                <option value="under_review">Under Review</option>
+                <option value="approved">Approved</option>
+                <option value="planning">Planning</option>
                 <option value="active">Active</option>
                 <option value="on_hold">On Hold</option>
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
+                <option value="archived">Archived</option>
               </select>
               <Input
                 value={form.description}
