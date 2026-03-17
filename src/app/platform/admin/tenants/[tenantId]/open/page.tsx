@@ -21,7 +21,7 @@ export default async function OpenTenantConsolePage({ params }: PageProps) {
   const supabase = await createClient();
   const [{ data: tenant, error: tenantError }, { data: adminRole, error: adminRoleError }] =
     await Promise.all([
-      supabase.from("tenants").select("id").eq("id", resolvedTenantId).maybeSingle(),
+      supabase.from("tenants").select("id,slug").eq("id", resolvedTenantId).maybeSingle(),
       supabase
         .from("role_templates")
         .select("id")
@@ -49,5 +49,6 @@ export default async function OpenTenantConsolePage({ params }: PageProps) {
     .update({ default_organization_id: resolvedTenantId })
     .eq("id", context.userId);
 
-  redirect("/staff/dashboard");
+  const tenantSlug = toText((tenant as { slug?: string } | null)?.slug);
+  redirect(tenantSlug ? `/${tenantSlug}/staff/dashboard` : "/staff/dashboard");
 }

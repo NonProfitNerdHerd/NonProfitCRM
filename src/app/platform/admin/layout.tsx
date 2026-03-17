@@ -63,7 +63,11 @@ export default async function PlatformAdminLayout({ children }: { children: Reac
       </aside>
       <main className="flex-1 p-6">
         <div className="mb-4 flex items-center justify-end">
-          <UserAccountMenu displayName={displayIdentity} profileHref="/platform/admin/profile" />
+          <UserAccountMenu
+            displayName={displayIdentity}
+            profileHref="/platform/admin/profile"
+            logoutHref="/platform/login"
+          />
         </div>
         {children}
       </main>

@@ -27,6 +27,11 @@ export default async function StaffLayout({ children }: { children: ReactNode })
       redirect("/change-password");
     }
   }
+  const { data: organization } = await supabase
+    .from("organizations")
+    .select("name,slug,logo_url")
+    .eq("id", context.organizationId)
+    .maybeSingle();
 
   return (
     <div className="flex min-h-screen print:block">
@@ -34,11 +39,17 @@ export default async function StaffLayout({ children }: { children: ReactNode })
         <StaffSidebar
           canAccessDataTools={canAccessDataTools}
           canAccessVolunteerCoordination={canAccessVolunteerCoordination}
+          organizationName={String(organization?.name ?? "")}
+          organizationSlug={String(organization?.slug ?? "")}
+          organizationLogoUrl={String((organization as { logo_url?: string } | null)?.logo_url ?? "")}
         />
       </div>
       <div className="flex-1 px-6 pb-6 pt-0 print:p-0">
         <div className="print:hidden">
-          <StaffHeader organizationId={context.organizationId} />
+          <StaffHeader
+            organizationName={String(organization?.name ?? "")}
+            organizationSlug={String(organization?.slug ?? "")}
+          />
         </div>
         {children}
       </div>

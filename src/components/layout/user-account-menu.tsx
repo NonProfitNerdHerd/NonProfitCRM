@@ -6,17 +6,19 @@ import { createClient } from "@/lib/supabase/client";
 
 export function UserAccountMenu({
   displayName,
-  profileHref
+  profileHref,
+  logoutHref = "/login"
 }: {
   displayName: string;
   profileHref: string;
+  logoutHref?: string;
 }) {
   const router = useRouter();
 
   async function onLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.replace("/login");
+    router.replace(logoutHref);
     router.refresh();
   }
 

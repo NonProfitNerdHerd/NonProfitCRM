@@ -69,12 +69,21 @@ const BASE_MENU: MenuItem[] = [
 
 export function StaffSidebar({
   canAccessDataTools,
-  canAccessVolunteerCoordination
+  canAccessVolunteerCoordination,
+  organizationName,
+  organizationSlug,
+  organizationLogoUrl
 }: {
   canAccessDataTools?: boolean;
   canAccessVolunteerCoordination?: boolean;
+  organizationName?: string;
+  organizationSlug?: string;
+  organizationLogoUrl?: string;
 }) {
   const pathname = usePathname();
+  const normalizedPathname = pathname.replace(/^\/[^/]+(?=\/staff(\/|$))/, "");
+  const tenantPrefix = organizationSlug ? `/${organizationSlug}` : "";
+  const withTenantPrefix = (href: string) => `${tenantPrefix}${href}`;
   const menu = [
     ...BASE_MENU,
     ...(canAccessVolunteerCoordination
@@ -137,28 +146,32 @@ export function StaffSidebar({
       matches: (path: string) => path.startsWith("/staff/admin"),
       children: [
         { href: "/staff/admin/users", label: "Users" },
-        { href: "/staff/admin/integrations", label: "Integrations" }
+        { href: "/staff/admin/integrations", label: "Integrations" },
+        { href: "/staff/admin/settings", label: "Organization Settings" }
       ]
     } satisfies MenuItem
   ];
 
   return (
-    <aside className="sticky top-0 h-screen w-64 border-r border-slate-200 bg-white px-4 py-6">
+    <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-slate-200 bg-white px-4 py-6">
       <div className="mb-8">
-        <Link href="/staff/dashboard" className="block">
-          <Image
-            src="/HerdCoreLogo.png"
-            alt="HerdCore"
-            width={220}
-            height={72}
-            className="h-auto w-full max-w-[220px]"
-            priority
-          />
+        <Link href={withTenantPrefix("/staff/dashboard")} className="block">
+          {organizationLogoUrl ? (
+            <img
+              src={organizationLogoUrl}
+              alt={`${organizationName || "Organization"} logo`}
+              className="h-auto max-h-[72px] w-full max-w-[220px] rounded object-contain"
+            />
+          ) : (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
+              {organizationName || "Tenant"}
+            </div>
+          )}
         </Link>
       </div>
-      <nav className="space-y-1">
+      <nav className="flex-1 space-y-1 overflow-y-auto">
         {menu.map((item) => {
-          const isActive = item.matches(pathname);
+          const isActive = item.matches(normalizedPathname);
           return (
             <div key={item.href}>
               <Link
@@ -168,18 +181,18 @@ export function StaffSidebar({
                     ? "bg-brand-50 text-brand-700"
                     : "text-slate-700 hover:bg-slate-100"
                 )}
-                href={item.href}
+                href={withTenantPrefix(item.href)}
               >
                 {item.label}
               </Link>
               {isActive && item.children ? (
                 <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
                   {item.children.map((child) => {
-                    const childActive = pathname.startsWith(child.href);
+                    const childActive = normalizedPathname.startsWith(child.href);
                     return (
                       <Link
                         key={child.href}
-                        href={child.href}
+                        href={withTenantPrefix(child.href)}
                         className={cn(
                           "block rounded-md px-2 py-1.5 text-xs font-medium transition",
                           childActive
@@ -197,6 +210,18 @@ export function StaffSidebar({
           );
         })}
       </nav>
+      <div className="mt-6 border-t border-slate-200 pt-4">
+        <Link href={withTenantPrefix("/staff/dashboard")} className="block">
+          <Image
+            src="/HerdCoreLogo.png"
+            alt="HerdCore"
+            width={180}
+            height={60}
+            className="h-auto w-full max-w-[180px] opacity-90"
+            priority
+          />
+        </Link>
+      </div>
     </aside>
   );
 }

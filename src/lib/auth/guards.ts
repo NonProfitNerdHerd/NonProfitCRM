@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { PermissionKey } from "@/types/database";
 import {
@@ -26,6 +27,27 @@ export type RoleKey =
 
 async function getActiveOrgId(userId: string): Promise<string | null> {
   const supabase = await createClient();
+  const requestHeaders = await headers();
+  const hintedTenantId = requestHeaders.get("x-tenant-id");
+  if (hintedTenantId) {
+    return hintedTenantId;
+  }
+  const cookieStore = await cookies();
+  const cookieTenantId = cookieStore.get("active_tenant_id")?.value?.trim();
+  if (cookieTenantId) {
+    return cookieTenantId;
+  }
+  const cookieTenantSlug = cookieStore.get("active_tenant_slug")?.value?.trim();
+  if (cookieTenantSlug) {
+    const { data: organizationBySlug } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("slug", cookieTenantSlug)
+      .maybeSingle();
+    if (organizationBySlug?.id) {
+      return organizationBySlug.id;
+    }
+  }
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -252,7 +274,7 @@ export async function requirePlatformAdminAccess(): Promise<PlatformAccessContex
     return await requirePlatformAccess();
   } catch (error) {
     if (error instanceof PlatformAccessError && error.status === 401) {
-      redirect("/login?mode=platform");
+      redirect("/platform/login");
     }
     redirect("/unauthorized");
   }
@@ -265,7 +287,7 @@ export async function requirePlatformRoleKeys(
     return await requirePlatformAccess(allowedRoles);
   } catch (error) {
     if (error instanceof PlatformAccessError && error.status === 401) {
-      redirect("/login?mode=platform");
+      redirect("/platform/login");
     }
     redirect("/unauthorized");
   }

@@ -12,10 +12,9 @@ export default function LoginPage() {
   const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [loginMode, setLoginMode] = useState<"tenant_admin" | "staff" | "constituent">(() => {
+  const [loginMode, setLoginMode] = useState<"staff" | "constituent">(() => {
     if (typeof window === "undefined") return "staff";
     const mode = new URLSearchParams(window.location.search).get("mode");
-    if (mode === "platform" || mode === "tenant") return "tenant_admin";
     if (mode === "portal" || mode === "constituent") return "constituent";
     return "staff";
   });
@@ -36,6 +35,40 @@ export default function LoginPage() {
       setTimeout(() => reject(new Error("Request timed out. Please try again.")), ms);
     });
     return Promise.race([promise, timeout]);
+  }
+
+  async function resolveTenantSlugForUser(
+    supabase: ReturnType<typeof createClient>,
+    userId: string,
+    fallbackOrganizationId?: string | null
+  ) {
+    let organizationId = fallbackOrganizationId ?? null;
+    if (!organizationId) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("default_organization_id")
+        .eq("id", userId)
+        .maybeSingle();
+      organizationId = String(profile?.default_organization_id ?? "").trim() || null;
+    }
+    if (!organizationId) {
+      const { data: membership } = await supabase
+        .from("organization_memberships")
+        .select("organization_id")
+        .eq("user_id", userId)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+      organizationId = String(membership?.organization_id ?? "").trim() || null;
+    }
+    if (!organizationId) return null;
+    const { data: organization } = await supabase
+      .from("organizations")
+      .select("slug")
+      .eq("id", organizationId)
+      .maybeSingle();
+    const tenantSlug = String(organization?.slug ?? "").trim();
+    return tenantSlug || null;
   }
 
   async function onPasswordSignIn(event: React.FormEvent) {
@@ -82,29 +115,10 @@ export default function LoginPage() {
           return;
         }
 
-        if (loginMode === "tenant_admin") {
-          const { data: platformMembership, error: platformError } = await supabase
-            .from("platform_admin_memberships")
-            .select("id")
-            .eq("user_id", user?.id ?? "")
-            .eq("is_active", true)
-            .limit(1)
-            .maybeSingle();
-
-          if (platformError || !platformMembership) {
-            await supabase.auth.signOut();
-            setError("You do not have access to the Platform Administration console.");
-            return;
-          }
-          router.replace("/platform/admin/tenants");
-          router.refresh();
-          return;
-        }
-
         if (loginMode === "constituent") {
           const { data: portalContact, error: portalError } = await supabase
             .from("contacts")
-            .select("id")
+            .select("id,organization_id")
             .eq("portal_user_id", user?.id ?? "")
             .limit(1)
             .maybeSingle();
@@ -114,12 +128,18 @@ export default function LoginPage() {
             setError("You do not have access to the Constituent Console.");
             return;
           }
-          router.replace("/portal/profile");
+          const tenantSlug = await resolveTenantSlugForUser(
+            supabase,
+            user?.id ?? "",
+            String(portalContact?.organization_id ?? "").trim() || null
+          );
+          router.replace(tenantSlug ? `/${tenantSlug}/portal/profile` : "/portal/profile");
           router.refresh();
           return;
         }
 
-        router.replace("/staff/dashboard");
+        const tenantSlug = await resolveTenantSlugForUser(supabase, user?.id ?? "");
+        router.replace(tenantSlug ? `/${tenantSlug}/staff/dashboard` : "/staff/dashboard");
         router.refresh();
       }
     } catch (authError) {
@@ -148,11 +168,9 @@ export default function LoginPage() {
           email,
           options: {
             emailRedirectTo:
-              loginMode === "tenant_admin"
-                ? `${window.location.origin}/platform/admin/tenants`
-                : loginMode === "constituent"
-                  ? `${window.location.origin}/portal/profile`
-                  : `${window.location.origin}/staff/dashboard`
+              loginMode === "constituent"
+                ? `${window.location.origin}/portal/profile`
+                : `${window.location.origin}/staff/dashboard`
           }
         })
       );
@@ -173,8 +191,8 @@ export default function LoginPage() {
     <main className="mx-auto flex min-h-screen max-w-md items-center px-6">
       <Card className="w-full">
         <CardHeader
-          title="Sign in"
-          subtitle="Choose a console and sign in."
+          title="Tenant Sign in"
+          subtitle="Sign in to the Staff or Constituent tenant experience."
         />
         <form className="space-y-4" onSubmit={onPasswordSignIn}>
           <div className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-3">
@@ -183,10 +201,10 @@ export default function LoginPage() {
             </p>
             <div className="grid gap-2 sm:grid-cols-3">
               <Link
-                href="/platform/admin/tenants"
+                href="/platform/login"
                 className="rounded-md border border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
-                Tenant Console
+                Platform Login
               </Link>
               <Link
                 href="/staff/dashboard"
@@ -207,15 +225,6 @@ export default function LoginPage() {
               Sign in destination
             </p>
             <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="login-mode"
-                  checked={loginMode === "tenant_admin"}
-                  onChange={() => setLoginMode("tenant_admin")}
-                />
-                Tenant Console
-              </label>
               <label className="flex items-center gap-2">
                 <input
                   type="radio"
