@@ -1,5 +1,5 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { VolunteerCoordinationDashboard } from "@/components/volunteer-coordination/volunteer-coordination-dashboard";
+import { VolunteerEventBuilder } from "@/components/volunteer-coordination/volunteer-event-builder";
 import { requireVolunteerCoordinationAccess } from "@/lib/auth/guards";
 
 export default async function VolunteerEventsRolesPage() {
@@ -9,9 +9,9 @@ export default async function VolunteerEventsRolesPage() {
     <Card>
       <CardHeader
         title="Events & Roles"
-        subtitle="Create volunteer events, recurring schedules, and role staffing requirements."
+        subtitle="Guided event builder for event setup, recurrence, roles, shifts, staffing, and fallback planning."
       />
-      <VolunteerCoordinationDashboard initialTab="events" hideInternalTabs />
+      <VolunteerEventBuilder />
     </Card>
   );
 }

@@ -1,5 +1,5 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { VolunteerCoordinationDashboard } from "@/components/volunteer-coordination/volunteer-coordination-dashboard";
+import { VolunteerCoordinationOperationsDashboard } from "@/components/volunteer-coordination/volunteer-coordination-operations-dashboard";
 import { requireVolunteerCoordinationAccess } from "@/lib/auth/guards";
 
 export default async function VolunteerCoordinationPage() {
@@ -9,9 +9,9 @@ export default async function VolunteerCoordinationPage() {
     <Card>
       <CardHeader
         title="Volunteer Coordination"
-        subtitle="Dashboard overview for volunteer recruitment, staffing health, attendance, and compliance."
+        subtitle="Operational overview for volunteer events, staffing readiness, and top volunteer activity."
       />
-      <VolunteerCoordinationDashboard initialTab="overview" hideInternalTabs />
+      <VolunteerCoordinationOperationsDashboard />
     </Card>
   );
 }

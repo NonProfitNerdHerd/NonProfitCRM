@@ -18,6 +18,7 @@ import {
   upsertVolunteerIncident,
   upsertVolunteerProfile,
   upsertVolunteerRole,
+  upsertVolunteerRoleShift,
   upsertWaitlistEntry
 } from "@/lib/volunteer-coordination/service";
 
@@ -165,12 +166,31 @@ export async function POST(request: Request) {
         supervisorContactId: payload.supervisorContactId,
         notes: payload.notes
       });
+    } else if (action === "upsert_role_shift") {
+      result = await upsertVolunteerRoleShift({
+        id: payload.id,
+        eventId: payload.eventId,
+        roleId: payload.roleId,
+        shiftName: payload.shiftName,
+        shiftStart: payload.shiftStart,
+        shiftEnd: payload.shiftEnd,
+        numberNeeded: payload.numberNeeded,
+        supervisorContactId: payload.supervisorContactId,
+        checkInLocation: payload.checkInLocation,
+        notes: payload.notes,
+        waitlistEnabled: payload.waitlistEnabled,
+        substituteEnabled: payload.substituteEnabled,
+        maxWaitlistCount: payload.maxWaitlistCount,
+        maxSubstituteCount: payload.maxSubstituteCount,
+        substituteScope: payload.substituteScope
+      });
     } else if (action === "upsert_assignment") {
       result = await upsertVolunteerAssignment({
         id: payload.id,
         volunteerProfileId: payload.volunteerProfileId,
         eventId: payload.eventId,
         roleId: payload.roleId,
+        shiftId: payload.shiftId,
         familyId: payload.familyId,
         groupId: payload.groupId,
         assignmentStatus: payload.assignmentStatus,
@@ -190,6 +210,7 @@ export async function POST(request: Request) {
         id: payload.id,
         eventId: payload.eventId,
         roleId: payload.roleId,
+        shiftId: payload.shiftId,
         volunteerProfileId: payload.volunteerProfileId,
         waitlistOrder: payload.waitlistOrder,
         entryStatus: payload.entryStatus,
@@ -200,6 +221,7 @@ export async function POST(request: Request) {
         id: payload.id,
         eventId: payload.eventId,
         roleId: payload.roleId,
+        shiftId: payload.shiftId,
         volunteerProfileId: payload.volunteerProfileId,
         availabilityStatus: payload.availabilityStatus,
         priorityOrder: payload.priorityOrder,

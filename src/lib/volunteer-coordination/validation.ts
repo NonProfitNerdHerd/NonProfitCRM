@@ -125,6 +125,7 @@ export const volunteerAssignmentUpsertSchema = z.object({
   volunteerProfileId: uuidSchema,
   eventId: uuidSchema,
   roleId: nullableString,
+  shiftId: nullableString,
   familyId: nullableString,
   groupId: nullableString,
   assignmentStatus: z.enum([
@@ -155,6 +156,7 @@ export const waitlistUpsertSchema = z.object({
   id: uuidSchema.optional(),
   eventId: uuidSchema,
   roleId: uuidSchema,
+  shiftId: nullableString,
   volunteerProfileId: uuidSchema,
   waitlistOrder: z.coerce.number().int().min(1).max(10000).optional(),
   entryStatus: z.enum(["waiting", "promoted", "removed"]).optional(),
@@ -165,10 +167,29 @@ export const substituteUpsertSchema = z.object({
   id: uuidSchema.optional(),
   eventId: uuidSchema,
   roleId: nullableString,
+  shiftId: nullableString,
   volunteerProfileId: uuidSchema,
   availabilityStatus: z.enum(["available", "unavailable", "assigned"]).optional(),
   priorityOrder: z.coerce.number().int().min(1).max(10000).optional(),
   notes: nullableString
+});
+
+export const volunteerRoleShiftUpsertSchema = z.object({
+  id: uuidSchema.optional(),
+  eventId: uuidSchema,
+  roleId: uuidSchema,
+  shiftName: nullableString,
+  shiftStart: z.string().trim().min(1),
+  shiftEnd: z.string().trim().min(1),
+  numberNeeded: z.coerce.number().int().min(1).max(10000).optional(),
+  supervisorContactId: nullableString,
+  checkInLocation: nullableString,
+  notes: nullableString,
+  waitlistEnabled: z.boolean().optional(),
+  substituteEnabled: z.boolean().optional(),
+  maxWaitlistCount: z.coerce.number().int().min(0).max(100000).optional().nullable(),
+  maxSubstituteCount: z.coerce.number().int().min(0).max(100000).optional().nullable(),
+  substituteScope: z.enum(["shift", "role"]).optional()
 });
 
 export const familyUpsertSchema = z.object({

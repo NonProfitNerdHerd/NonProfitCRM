@@ -70,6 +70,7 @@ export function isVolunteerSchemaMissingError(error: unknown) {
     message.includes("volunteer_event_series") ||
     message.includes("volunteer_events") ||
     message.includes("volunteer_event_roles") ||
+    message.includes("volunteer_role_shifts") ||
     message.includes("volunteer_assignments") ||
     message.includes("volunteer_hours") ||
     message.includes("volunteer_hour_imports") ||
@@ -104,6 +105,7 @@ export function buildVolunteerCoordinationEmptyState(schemaWarning?: string | nu
     events: [],
     eventSeries: [],
     eventRoles: [],
+    roleShifts: [],
     assignments: [],
     waitlist: [],
     substitutes: [],
@@ -125,6 +127,7 @@ export function buildVolunteerCoordinationEmptyState(schemaWarning?: string | nu
     options: {
       eventOptions: [],
       roleOptions: [],
+      shiftOptions: [],
       volunteerOptions: []
     }
   };
@@ -517,6 +520,14 @@ export async function getVolunteerCoordinationData(filters?: {
     .order("created_at", { ascending: true });
   if (eventRolesError) throw eventRolesError;
 
+  const { data: roleShifts, error: roleShiftsError } = await supabase
+    .from("volunteer_role_shifts")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .in("event_id", eventIds.length > 0 ? eventIds : ["00000000-0000-0000-0000-000000000000"])
+    .order("shift_start", { ascending: true });
+  if (roleShiftsError) throw roleShiftsError;
+
   const { data: eventSeries, error: eventSeriesError } = await supabase
     .from("volunteer_event_series")
     .select("*")
@@ -527,7 +538,9 @@ export async function getVolunteerCoordinationData(filters?: {
 
   let assignmentQuery = supabase
     .from("volunteer_assignments")
-    .select("*, volunteer_profiles(contact_id), volunteer_events(event_name,event_date), volunteer_event_roles(role_name)")
+    .select(
+      "*, volunteer_profiles(contact_id), volunteer_events(event_name,event_date), volunteer_event_roles(role_name), volunteer_role_shifts(shift_name,shift_start,shift_end,number_needed)"
+    )
     .eq("organization_id", context.organizationId)
     .order("assigned_at", { ascending: false })
     .limit(500);
@@ -539,7 +552,9 @@ export async function getVolunteerCoordinationData(filters?: {
 
   const { data: waitlist, error: waitlistError } = await supabase
     .from("volunteer_waitlist_entries")
-    .select("*, volunteer_event_roles(role_name), volunteer_events(event_name,event_date)")
+    .select(
+      "*, volunteer_event_roles(role_name), volunteer_events(event_name,event_date), volunteer_role_shifts(shift_name,shift_start,shift_end,number_needed)"
+    )
     .eq("organization_id", context.organizationId)
     .order("waitlist_order", { ascending: true })
     .limit(500);
@@ -547,7 +562,9 @@ export async function getVolunteerCoordinationData(filters?: {
 
   const { data: substitutes, error: substitutesError } = await supabase
     .from("volunteer_substitute_entries")
-    .select("*, volunteer_event_roles(role_name), volunteer_events(event_name,event_date)")
+    .select(
+      "*, volunteer_event_roles(role_name), volunteer_events(event_name,event_date), volunteer_role_shifts(shift_name,shift_start,shift_end,number_needed)"
+    )
     .eq("organization_id", context.organizationId)
     .order("priority_order", { ascending: true })
     .limit(500);
@@ -690,6 +707,7 @@ export async function getVolunteerCoordinationData(filters?: {
     events: events ?? [],
     eventSeries: eventSeries ?? [],
     eventRoles: eventRoles ?? [],
+    roleShifts: roleShifts ?? [],
     assignments: assignments ?? [],
     waitlist: waitlist ?? [],
     substitutes: substitutes ?? [],
@@ -717,6 +735,14 @@ export async function getVolunteerCoordinationData(filters?: {
         id: String(role.id),
         eventId: String(role.event_id),
         label: toText(role.role_name)
+      })),
+      shiftOptions: (roleShifts ?? []).map((shift) => ({
+        id: String(shift.id),
+        eventId: String(shift.event_id),
+        roleId: String(shift.role_id),
+        label:
+          toText(shift.shift_name) ||
+          `${toText(shift.shift_start)} - ${toText(shift.shift_end)} (${toText(shift.number_needed) || "0"} needed)`
       })),
       volunteerOptions: filteredVolunteers.map((volunteer) => {
         const contact = Array.isArray(volunteer.contacts) ? volunteer.contacts[0] : volunteer.contacts;
@@ -871,9 +897,17 @@ export async function getVolunteerEventDetail(eventId: string) {
     .order("created_at", { ascending: true });
   if (rolesError) throw rolesError;
 
+  const { data: roleShifts, error: roleShiftsError } = await supabase
+    .from("volunteer_role_shifts")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", eventId)
+    .order("shift_start", { ascending: true });
+  if (roleShiftsError) throw roleShiftsError;
+
   const { data: assignments, error: assignmentsError } = await supabase
     .from("volunteer_assignments")
-    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*), volunteer_role_shifts(*)")
     .eq("organization_id", context.organizationId)
     .eq("event_id", eventId)
     .order("assigned_at", { ascending: false })
@@ -882,7 +916,7 @@ export async function getVolunteerEventDetail(eventId: string) {
 
   const { data: waitlist, error: waitlistError } = await supabase
     .from("volunteer_waitlist_entries")
-    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*), volunteer_role_shifts(*)")
     .eq("organization_id", context.organizationId)
     .eq("event_id", eventId)
     .order("waitlist_order", { ascending: true })
@@ -891,7 +925,7 @@ export async function getVolunteerEventDetail(eventId: string) {
 
   const { data: substitutes, error: substitutesError } = await supabase
     .from("volunteer_substitute_entries")
-    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*), volunteer_role_shifts(*)")
     .eq("organization_id", context.organizationId)
     .eq("event_id", eventId)
     .order("priority_order", { ascending: true })
@@ -900,7 +934,7 @@ export async function getVolunteerEventDetail(eventId: string) {
 
   const { data: hours, error: hoursError } = await supabase
     .from("volunteer_hours")
-    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*)")
+    .select("*, volunteer_profiles(*,contacts(*)), volunteer_event_roles(*), volunteer_role_shifts(*)")
     .eq("organization_id", context.organizationId)
     .eq("event_id", eventId)
     .order("service_date", { ascending: false })
@@ -937,6 +971,7 @@ export async function getVolunteerEventDetail(eventId: string) {
     canViewSensitive,
     event,
     roles: roles ?? [],
+    roleShifts: roleShifts ?? [],
     assignments: assignments ?? [],
     waitlist: waitlist ?? [],
     substitutes: substitutes ?? [],
@@ -1317,6 +1352,14 @@ export async function generateVolunteerEventInstances(input: {
     .order("created_at", { ascending: true });
   if (templateRolesError) throw templateRolesError;
 
+  const { data: templateRoleShifts, error: templateRoleShiftsError } = await supabase
+    .from("volunteer_role_shifts")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", String(templateEvent.id))
+    .order("shift_start", { ascending: true });
+  if (templateRoleShiftsError) throw templateRoleShiftsError;
+
   const existingDateSet = new Set(existingEvents.map((event) => String(event.event_date)));
   const startsOnText = toText(series.starts_on) || toText(templateEvent.event_date);
   const startsOn = new Date(`${startsOnText}T00:00:00.000Z`);
@@ -1471,6 +1514,32 @@ export async function generateVolunteerEventInstances(input: {
         .eq("organization_id", context.organizationId)
         .eq("id", newRoleId);
       if (patchParentError) throw patchParentError;
+    }
+
+    for (const shift of templateRoleShifts ?? []) {
+      const newRoleId = oldToNewRoleId.get(String(shift.role_id));
+      if (!newRoleId) continue;
+      const { error: createShiftError } = await supabase.from("volunteer_role_shifts").insert({
+        organization_id: context.organizationId,
+        event_id: String(createdEvent.id),
+        role_id: newRoleId,
+        shift_name: shift.shift_name,
+        shift_start: shift.shift_start,
+        shift_end: shift.shift_end,
+        number_needed: shift.number_needed,
+        number_filled: 0,
+        supervisor_contact_id: shift.supervisor_contact_id,
+        check_in_location: shift.check_in_location,
+        notes: shift.notes,
+        waitlist_enabled: shift.waitlist_enabled,
+        substitute_enabled: shift.substitute_enabled,
+        max_waitlist_count: shift.max_waitlist_count,
+        max_substitute_count: shift.max_substitute_count,
+        substitute_scope: shift.substitute_scope,
+        created_by: context.userId,
+        updated_by: context.userId
+      });
+      if (createShiftError) throw createShiftError;
     }
   }
 
@@ -1658,11 +1727,98 @@ export async function upsertVolunteerRole(input: {
   return data;
 }
 
+export async function upsertVolunteerRoleShift(input: {
+  id?: string;
+  eventId: string;
+  roleId: string;
+  shiftName?: string | null;
+  shiftStart: string;
+  shiftEnd: string;
+  numberNeeded?: number;
+  supervisorContactId?: string | null;
+  checkInLocation?: string | null;
+  notes?: string | null;
+  waitlistEnabled?: boolean;
+  substituteEnabled?: boolean;
+  maxWaitlistCount?: number | null;
+  maxSubstituteCount?: number | null;
+  substituteScope?: "shift" | "role";
+}) {
+  const context = await requireVolunteerCoordinationManager();
+  const supabase = await createClient();
+
+  const payload = {
+    organization_id: context.organizationId,
+    event_id: input.eventId,
+    role_id: input.roleId,
+    shift_name: toText(input.shiftName) || null,
+    shift_start: toText(input.shiftStart),
+    shift_end: toText(input.shiftEnd),
+    number_needed: Math.max(1, toNumber(input.numberNeeded, 1)),
+    supervisor_contact_id: toText(input.supervisorContactId) || null,
+    check_in_location: toText(input.checkInLocation) || null,
+    notes: toText(input.notes) || null,
+    waitlist_enabled: input.waitlistEnabled !== false,
+    substitute_enabled: input.substituteEnabled !== false,
+    max_waitlist_count:
+      input.maxWaitlistCount === null || input.maxWaitlistCount === undefined
+        ? null
+        : Math.max(0, toNumber(input.maxWaitlistCount, 0)),
+    max_substitute_count:
+      input.maxSubstituteCount === null || input.maxSubstituteCount === undefined
+        ? null
+        : Math.max(0, toNumber(input.maxSubstituteCount, 0)),
+    substitute_scope: input.substituteScope === "role" ? "role" : "shift",
+    updated_by: context.userId
+  };
+
+  let data: Record<string, unknown> | null = null;
+  if (toText(input.id)) {
+    const response = await supabase
+      .from("volunteer_role_shifts")
+      .update(payload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", toText(input.id))
+      .select("*")
+      .single();
+    if (response.error) throw response.error;
+    data = response.data as Record<string, unknown>;
+  } else {
+    const response = await supabase
+      .from("volunteer_role_shifts")
+      .insert({
+        ...payload,
+        created_by: context.userId
+      })
+      .select("*")
+      .single();
+    if (response.error) throw response.error;
+    data = response.data as Record<string, unknown>;
+  }
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "volunteer_role_shift_upserted",
+    targetEntityType: "volunteer_role_shifts",
+    targetEntityId: toText(data?.id),
+    metadata: {
+      eventId: input.eventId,
+      roleId: input.roleId,
+      shiftStart: payload.shift_start,
+      shiftEnd: payload.shift_end
+    }
+  });
+
+  return data;
+}
+
 export async function upsertVolunteerAssignment(input: {
   id?: string;
   volunteerProfileId: string;
   eventId: string;
   roleId?: string | null;
+  shiftId?: string | null;
   familyId?: string | null;
   groupId?: string | null;
   assignmentStatus: string;
@@ -1684,6 +1840,7 @@ export async function upsertVolunteerAssignment(input: {
     volunteer_profile_id: input.volunteerProfileId,
     event_id: input.eventId,
     role_id: toText(input.roleId) || null,
+    shift_id: toText(input.shiftId) || null,
     family_id: toText(input.familyId) || null,
     group_id: toText(input.groupId) || null,
     assignment_status: toText(input.assignmentStatus) || "invited",
@@ -1739,6 +1896,7 @@ export async function upsertVolunteerAssignment(input: {
       volunteerProfileId: input.volunteerProfileId,
       eventId: input.eventId,
       roleId: payload.role_id,
+      shiftId: payload.shift_id,
       status: payload.assignment_status
     }
   });
@@ -1750,6 +1908,7 @@ export async function upsertWaitlistEntry(input: {
   id?: string;
   eventId: string;
   roleId: string;
+  shiftId?: string | null;
   volunteerProfileId: string;
   waitlistOrder?: number;
   entryStatus?: string;
@@ -1761,31 +1920,58 @@ export async function upsertWaitlistEntry(input: {
     organization_id: context.organizationId,
     event_id: input.eventId,
     role_id: input.roleId,
+    shift_id: toText(input.shiftId) || null,
     volunteer_profile_id: input.volunteerProfileId,
     waitlist_order: Math.max(1, toNumber(input.waitlistOrder, 1)),
     entry_status: toText(input.entryStatus) || "waiting",
     notes: toText(input.notes) || null
   };
 
-  const response = toText(input.id)
-    ? await supabase
-        .from("volunteer_waitlist_entries")
-        .update(payload)
-        .eq("organization_id", context.organizationId)
-        .eq("id", toText(input.id))
-        .select("*")
-        .single()
-    : await supabase
-        .from("volunteer_waitlist_entries")
-        .upsert(
-          {
-            ...payload,
-            created_by: context.userId
-          },
-          { onConflict: "event_id,role_id,volunteer_profile_id" }
-        )
-        .select("*")
-        .single();
+  if (toText(input.id)) {
+    const response = await supabase
+      .from("volunteer_waitlist_entries")
+      .update(payload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", toText(input.id))
+      .select("*")
+      .single();
+    if (response.error) throw response.error;
+    return response.data as Record<string, unknown>;
+  }
+
+  let existingQuery = supabase
+    .from("volunteer_waitlist_entries")
+    .select("id")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", input.eventId)
+    .eq("role_id", input.roleId)
+    .eq("volunteer_profile_id", input.volunteerProfileId);
+  existingQuery = payload.shift_id
+    ? existingQuery.eq("shift_id", payload.shift_id)
+    : existingQuery.is("shift_id", null);
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+  if (existingError) throw existingError;
+
+  if (existing?.id) {
+    const response = await supabase
+      .from("volunteer_waitlist_entries")
+      .update(payload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", String(existing.id))
+      .select("*")
+      .single();
+    if (response.error) throw response.error;
+    return response.data as Record<string, unknown>;
+  }
+
+  const response = await supabase
+    .from("volunteer_waitlist_entries")
+    .insert({
+      ...payload,
+      created_by: context.userId
+    })
+    .select("*")
+    .single();
   if (response.error) throw response.error;
   return response.data as Record<string, unknown>;
 }
@@ -1794,6 +1980,7 @@ export async function upsertSubstituteEntry(input: {
   id?: string;
   eventId: string;
   roleId?: string | null;
+  shiftId?: string | null;
   volunteerProfileId: string;
   availabilityStatus?: string;
   priorityOrder?: number;
@@ -1805,31 +1992,60 @@ export async function upsertSubstituteEntry(input: {
     organization_id: context.organizationId,
     event_id: input.eventId,
     role_id: toText(input.roleId) || null,
+    shift_id: toText(input.shiftId) || null,
     volunteer_profile_id: input.volunteerProfileId,
     availability_status: toText(input.availabilityStatus) || "available",
     priority_order: Math.max(1, toNumber(input.priorityOrder, 1)),
     notes: toText(input.notes) || null
   };
 
-  const response = toText(input.id)
-    ? await supabase
-        .from("volunteer_substitute_entries")
-        .update(payload)
-        .eq("organization_id", context.organizationId)
-        .eq("id", toText(input.id))
-        .select("*")
-        .single()
-    : await supabase
-        .from("volunteer_substitute_entries")
-        .upsert(
-          {
-            ...payload,
-            created_by: context.userId
-          },
-          { onConflict: "event_id,role_id,volunteer_profile_id" }
-        )
-        .select("*")
-        .single();
+  if (toText(input.id)) {
+    const response = await supabase
+      .from("volunteer_substitute_entries")
+      .update(payload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", toText(input.id))
+      .select("*")
+      .single();
+    if (response.error) throw response.error;
+    return response.data as Record<string, unknown>;
+  }
+
+  let existingQuery = supabase
+    .from("volunteer_substitute_entries")
+    .select("id")
+    .eq("organization_id", context.organizationId)
+    .eq("event_id", input.eventId)
+    .eq("volunteer_profile_id", input.volunteerProfileId);
+  existingQuery = payload.shift_id
+    ? existingQuery.eq("shift_id", payload.shift_id)
+    : existingQuery.is("shift_id", null);
+  existingQuery = payload.role_id
+    ? existingQuery.eq("role_id", payload.role_id)
+    : existingQuery.is("role_id", null);
+
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+  if (existingError) throw existingError;
+  if (existing?.id) {
+    const response = await supabase
+      .from("volunteer_substitute_entries")
+      .update(payload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", String(existing.id))
+      .select("*")
+      .single();
+    if (response.error) throw response.error;
+    return response.data as Record<string, unknown>;
+  }
+
+  const response = await supabase
+    .from("volunteer_substitute_entries")
+    .insert({
+      ...payload,
+      created_by: context.userId
+    })
+    .select("*")
+    .single();
   if (response.error) throw response.error;
   return response.data as Record<string, unknown>;
 }
