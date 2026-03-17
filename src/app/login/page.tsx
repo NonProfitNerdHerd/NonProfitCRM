@@ -12,10 +12,12 @@ export default function LoginPage() {
   const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [loginMode, setLoginMode] = useState<"tenant" | "platform">(() => {
-    if (typeof window === "undefined") return "tenant";
+  const [loginMode, setLoginMode] = useState<"tenant_admin" | "staff" | "constituent">(() => {
+    if (typeof window === "undefined") return "staff";
     const mode = new URLSearchParams(window.location.search).get("mode");
-    return mode === "platform" ? "platform" : "tenant";
+    if (mode === "platform" || mode === "tenant") return "tenant_admin";
+    if (mode === "portal" || mode === "constituent") return "constituent";
+    return "staff";
   });
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +82,7 @@ export default function LoginPage() {
           return;
         }
 
-        if (loginMode === "platform") {
+        if (loginMode === "tenant_admin") {
           const { data: platformMembership, error: platformError } = await supabase
             .from("platform_admin_memberships")
             .select("id")
@@ -94,7 +96,25 @@ export default function LoginPage() {
             setError("You do not have access to the Platform Administration console.");
             return;
           }
-          router.replace("/platform/admin");
+          router.replace("/platform/admin/tenants");
+          router.refresh();
+          return;
+        }
+
+        if (loginMode === "constituent") {
+          const { data: portalContact, error: portalError } = await supabase
+            .from("contacts")
+            .select("id")
+            .eq("portal_user_id", user?.id ?? "")
+            .limit(1)
+            .maybeSingle();
+
+          if (portalError || !portalContact) {
+            await supabase.auth.signOut();
+            setError("You do not have access to the Constituent Console.");
+            return;
+          }
+          router.replace("/portal/profile");
           router.refresh();
           return;
         }
@@ -128,9 +148,11 @@ export default function LoginPage() {
           email,
           options: {
             emailRedirectTo:
-              loginMode === "platform"
-                ? `${window.location.origin}/platform/admin`
-                : `${window.location.origin}/staff/dashboard`
+              loginMode === "tenant_admin"
+                ? `${window.location.origin}/platform/admin/tenants`
+                : loginMode === "constituent"
+                  ? `${window.location.origin}/portal/profile`
+                  : `${window.location.origin}/staff/dashboard`
           }
         })
       );
@@ -152,9 +174,34 @@ export default function LoginPage() {
       <Card className="w-full">
         <CardHeader
           title="Sign in"
-          subtitle="Securely access your nonprofit workspace."
+          subtitle="Choose a console and sign in."
         />
         <form className="space-y-4" onSubmit={onPasswordSignIn}>
+          <div className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Console links
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Link
+                href="/platform/admin/tenants"
+                className="rounded-md border border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Tenant Console
+              </Link>
+              <Link
+                href="/staff/dashboard"
+                className="rounded-md border border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Staff Console
+              </Link>
+              <Link
+                href="/portal/profile"
+                className="rounded-md border border-slate-200 px-2 py-1.5 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Constituent Console
+              </Link>
+            </div>
+          </div>
           <div className="rounded-md border border-slate-200 p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
               Sign in destination
@@ -164,19 +211,28 @@ export default function LoginPage() {
                 <input
                   type="radio"
                   name="login-mode"
-                  checked={loginMode === "tenant"}
-                  onChange={() => setLoginMode("tenant")}
+                  checked={loginMode === "tenant_admin"}
+                  onChange={() => setLoginMode("tenant_admin")}
                 />
-                Tenant Workspace
+                Tenant Console
               </label>
               <label className="flex items-center gap-2">
                 <input
                   type="radio"
                   name="login-mode"
-                  checked={loginMode === "platform"}
-                  onChange={() => setLoginMode("platform")}
+                  checked={loginMode === "staff"}
+                  onChange={() => setLoginMode("staff")}
                 />
-                Platform Admin
+                Staff Console
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="login-mode"
+                  checked={loginMode === "constituent"}
+                  onChange={() => setLoginMode("constituent")}
+                />
+                Constituent Console
               </label>
             </div>
           </div>
