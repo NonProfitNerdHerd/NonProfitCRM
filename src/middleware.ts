@@ -5,7 +5,9 @@ export async function middleware(request: NextRequest) {
   try {
     const pathname = request.nextUrl.pathname;
     const protectedPath =
-      pathname.startsWith("/staff") || pathname.startsWith("/portal");
+      pathname.startsWith("/staff") ||
+      pathname.startsWith("/portal") ||
+      pathname.startsWith("/platform");
 
     if (!protectedPath) {
       return NextResponse.next();
@@ -27,6 +29,21 @@ export async function middleware(request: NextRequest) {
       if (!portalContact) {
         return NextResponse.redirect(new URL("/unauthorized", request.url));
       }
+    }
+
+    if (pathname.startsWith("/platform")) {
+      const { data: membership } = await supabase
+        .from("platform_admin_memberships")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (!membership) {
+        return NextResponse.redirect(new URL("/unauthorized", request.url));
+      }
+      return response;
     }
 
     if (pathname.startsWith("/staff")) {
@@ -70,5 +87,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/staff/:path*", "/portal/:path*"]
+  matcher: ["/staff/:path*", "/portal/:path*", "/platform/:path*"]
 };

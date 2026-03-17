@@ -1,6 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PermissionKey } from "@/types/database";
+import {
+  type PlatformAccessContext,
+  type PlatformRoleKey,
+  PlatformAccessError,
+  requirePlatformAccess
+} from "@/lib/platform/auth";
 
 export type SessionContext = {
   userId: string;
@@ -239,4 +245,28 @@ export async function requireProjectCreator(): Promise<SessionContext> {
   }
 
   return context;
+}
+
+export async function requirePlatformAdminAccess(): Promise<PlatformAccessContext> {
+  try {
+    return await requirePlatformAccess();
+  } catch (error) {
+    if (error instanceof PlatformAccessError && error.status === 401) {
+      redirect("/login?mode=platform");
+    }
+    redirect("/unauthorized");
+  }
+}
+
+export async function requirePlatformRoleKeys(
+  allowedRoles: PlatformRoleKey[]
+): Promise<PlatformAccessContext> {
+  try {
+    return await requirePlatformAccess(allowedRoles);
+  } catch (error) {
+    if (error instanceof PlatformAccessError && error.status === 401) {
+      redirect("/login?mode=platform");
+    }
+    redirect("/unauthorized");
+  }
 }

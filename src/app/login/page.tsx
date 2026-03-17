@@ -12,6 +12,11 @@ export default function LoginPage() {
   const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [loginMode, setLoginMode] = useState<"tenant" | "platform">(() => {
+    if (typeof window === "undefined") return "tenant";
+    const mode = new URLSearchParams(window.location.search).get("mode");
+    return mode === "platform" ? "platform" : "tenant";
+  });
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,7 +74,32 @@ export default function LoginPage() {
           mustChangePassword = Boolean(profile?.must_change_password);
         }
 
-        router.replace(mustChangePassword ? "/change-password" : "/staff/dashboard");
+        if (mustChangePassword) {
+          router.replace("/change-password");
+          router.refresh();
+          return;
+        }
+
+        if (loginMode === "platform") {
+          const { data: platformMembership, error: platformError } = await supabase
+            .from("platform_admin_memberships")
+            .select("id")
+            .eq("user_id", user?.id ?? "")
+            .eq("is_active", true)
+            .limit(1)
+            .maybeSingle();
+
+          if (platformError || !platformMembership) {
+            await supabase.auth.signOut();
+            setError("You do not have access to the Platform Administration console.");
+            return;
+          }
+          router.replace("/platform/admin");
+          router.refresh();
+          return;
+        }
+
+        router.replace("/staff/dashboard");
         router.refresh();
       }
     } catch (authError) {
@@ -97,7 +127,10 @@ export default function LoginPage() {
         supabase.auth.signInWithOtp({
           email,
           options: {
-            emailRedirectTo: `${window.location.origin}/staff/dashboard`
+            emailRedirectTo:
+              loginMode === "platform"
+                ? `${window.location.origin}/platform/admin`
+                : `${window.location.origin}/staff/dashboard`
           }
         })
       );
@@ -122,6 +155,31 @@ export default function LoginPage() {
           subtitle="Securely access your nonprofit workspace."
         />
         <form className="space-y-4" onSubmit={onPasswordSignIn}>
+          <div className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Sign in destination
+            </p>
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="login-mode"
+                  checked={loginMode === "tenant"}
+                  onChange={() => setLoginMode("tenant")}
+                />
+                Tenant Workspace
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="login-mode"
+                  checked={loginMode === "platform"}
+                  onChange={() => setLoginMode("platform")}
+                />
+                Platform Admin
+              </label>
+            </div>
+          </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">
               Username or Email
