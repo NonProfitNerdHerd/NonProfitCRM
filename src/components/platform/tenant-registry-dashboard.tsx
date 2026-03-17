@@ -291,7 +291,7 @@ export function TenantRegistryDashboard({
                 <th className="py-2">Onboarding</th>
                 <th className="py-2">Backup Tier</th>
                 <th className="py-2">Last Backup</th>
-                <th className="py-2">Detail</th>
+                <th className="py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -316,12 +316,21 @@ export function TenantRegistryDashboard({
                         : "-"}
                     </td>
                     <td className="py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/platform/admin/tenants/${toText(tenant.id)}/open`}
+                          className="text-xs font-semibold text-emerald-700 hover:text-emerald-900"
+                        >
+                          Open Tenant
+                        </Link>
+                        <span className="text-slate-300">|</span>
                       <Link
                         href={`/platform/admin/tenants/${toText(tenant.id)}`}
                         className="text-xs font-semibold text-brand-700 hover:text-brand-900"
                       >
-                        Open
+                        Open Detail
                       </Link>
+                      </div>
                     </td>
                   </tr>
                 );
