@@ -748,8 +748,12 @@ begin
   for row in
     select c.table_name, c.is_nullable
     from information_schema.columns c
+    join information_schema.tables t
+      on t.table_schema = c.table_schema
+     and t.table_name = c.table_name
     where c.table_schema = 'public'
       and c.column_name = 'organization_id'
+      and t.table_type = 'BASE TABLE'
   loop
     select exists (
       select 1
