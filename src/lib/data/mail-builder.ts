@@ -138,12 +138,28 @@ export async function deleteMailBuilderTemplate(templateId: string) {
   if (error) throw error;
 }
 
+export async function listMailBuilderCampaignOptions() {
+  await requireAnyStaffPermission(["can_view_contacts", "can_view_donations"]);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("id,name,status")
+    .order("name", { ascending: true })
+    .limit(1000);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: toText(row.id),
+    name: toText(row.name),
+    status: toText(row.status)
+  }));
+}
+
 type MailBuilderPreviewFilter = {
   segment: ContactSegment;
   activityType: ActivityType;
   transactionsFrom?: string | null;
   transactionsTo?: string | null;
-  tagId?: string | null;
+  campaignId?: string | null;
 };
 
 export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
@@ -154,7 +170,7 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
   const activityType = input.activityType;
   const dateFrom = parseDate(input.transactionsFrom);
   const dateTo = parseDate(input.transactionsTo);
-  const normalizedTagId = toText(input.tagId);
+  const normalizedCampaignId = toText(input.campaignId);
 
   const enrichedContactSelect =
     "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,donor_status,address_line_1,address_line_2,city,state,postal_code,mailing_address_line_1,mailing_address_line_2,mailing_city,mailing_state,mailing_postal_code";
@@ -214,47 +230,48 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     return { recipients: [], totalCount: 0 };
   }
 
-  let tagFilteredIds = new Set(contactIds);
-  if (normalizedTagId) {
-    const { data: descendantTagIdsRaw, error: descendantError } = await supabase.rpc(
-      "collect_descendant_tag_ids",
-      {
-        org_id: context.organizationId,
-        input_tag_ids: [normalizedTagId]
-      }
-    );
-    if (descendantError) throw descendantError;
-    const descendantTagIds = Array.from(
-      new Set(
-        ((Array.isArray(descendantTagIdsRaw) ? descendantTagIdsRaw : []) as unknown[])
-          .map((value) => toText(value))
-          .filter(Boolean)
-      )
-    );
-    const tagIds = descendantTagIds.length > 0 ? descendantTagIds : [normalizedTagId];
-    const { data: taggedContacts, error: taggedError } = await supabase
-      .from("contact_tags")
-      .select("contact_id")
-      .eq("organization_id", context.organizationId)
-      .in("contact_id", contactIds)
-      .in("tag_id", tagIds);
-    if (taggedError) throw taggedError;
-    tagFilteredIds = new Set((taggedContacts ?? []).map((row) => toText(row.contact_id)).filter(Boolean));
-  }
-
-  const filteredContactsByTag = normalizedContactRows.filter((row) => tagFilteredIds.has(toText(row.id)));
-  const filteredContactIds = filteredContactsByTag.map((row) => toText(row.id)).filter(Boolean);
-  if (filteredContactIds.length === 0) {
-    return { recipients: [], totalCount: 0 };
-  }
-
   let transactionRows: Array<Record<string, unknown>> = [];
   let transactionRollup = new Map<string, { count: number; total: number; lastDate: string }>();
-  if (activityType === "transactions") {
-    const filteredContactSet = new Set(filteredContactIds);
+  const campaignDonationIds = new Set<string>();
+  if (normalizedCampaignId) {
+    let directCampaignQuery = supabase
+      .from("donations")
+      .select("id")
+      .eq("organization_id", context.organizationId)
+      .eq("campaign_id", normalizedCampaignId)
+      .not("contact_id", "is", null)
+      .limit(100000);
+    if (dateFrom) directCampaignQuery = directCampaignQuery.gte("donation_date", dateFrom);
+    if (dateTo) directCampaignQuery = directCampaignQuery.lte("donation_date", dateTo);
+    const { data: directCampaignRows, error: directCampaignError } = await directCampaignQuery;
+    if (!directCampaignError) {
+      for (const row of directCampaignRows ?? []) {
+        const donationId = toText(row.id);
+        if (donationId) campaignDonationIds.add(donationId);
+      }
+    }
+
+    const { data: allocationRows, error: allocationError } = await supabase
+      .from("donation_allocations")
+      .select("donation_id")
+      .eq("organization_id", context.organizationId)
+      .eq("campaign_id", normalizedCampaignId)
+      .limit(100000);
+    if (allocationError) {
+      throw new Error(errorMessage(allocationError, "Unable to load donation campaign allocations."));
+    }
+    for (const row of allocationRows ?? []) {
+      const donationId = toText(row.donation_id);
+      if (donationId) campaignDonationIds.add(donationId);
+    }
+  }
+
+  const shouldBuildTransactionRollup = activityType === "transactions" || Boolean(normalizedCampaignId);
+  if (shouldBuildTransactionRollup) {
+    const filteredContactSet = new Set(contactIds);
     let donationQuery = supabase
       .from("donations")
-      .select("contact_id,amount,donation_date")
+      .select("id,contact_id,amount,donation_date")
       .eq("organization_id", context.organizationId)
       .not("contact_id", "is", null)
       .limit(100000);
@@ -272,9 +289,11 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     transactionRows = (donations ?? []) as Array<Record<string, unknown>>;
     transactionRollup = new Map<string, { count: number; total: number; lastDate: string }>();
     for (const donation of transactionRows) {
+      const donationId = toText(donation.id);
       const contactId = toText(donation.contact_id);
       if (!contactId) continue;
       if (!filteredContactSet.has(contactId)) continue;
+      if (normalizedCampaignId && (!donationId || !campaignDonationIds.has(donationId))) continue;
       const current = transactionRollup.get(contactId) ?? { count: 0, total: 0, lastDate: "" };
       current.count += 1;
       current.total += toNumber(donation.amount);
@@ -284,9 +303,9 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     }
   }
 
-  const recipientRows = filteredContactsByTag
+  const recipientRows = normalizedContactRows
     .filter((row) => {
-      if (activityType !== "transactions") return true;
+      if (!shouldBuildTransactionRollup) return true;
       return transactionRollup.has(toText(row.id));
     })
     .map((row) => {
@@ -335,7 +354,7 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
       activityType,
       transactionsFrom: dateFrom,
       transactionsTo: dateTo,
-      tagId: normalizedTagId || null
+      campaignId: normalizedCampaignId || null
     }
   };
 }

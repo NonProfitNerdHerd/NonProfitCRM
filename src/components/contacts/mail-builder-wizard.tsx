@@ -111,7 +111,7 @@ function applyTemplate(templateBody: string, recipient: MailRecipient) {
 const STEP_TITLES: Array<{ key: MailStep; label: string }> = [
   { key: 1, label: "Step 1 - Select Donors, Donor Organizations, or All Contacts" },
   { key: 2, label: "Step 2 - Activity Filter (Transactions + Date Range)" },
-  { key: 3, label: "Step 3 - Further Filter by Tag" },
+  { key: 3, label: "Step 3 - Further Filter by Campaign" },
   { key: 4, label: "Step 4 - Select / Build Template" },
   { key: 5, label: "Step 5 - Print Preview" },
   { key: 6, label: "Step 6 - Export PDF" }
@@ -129,8 +129,10 @@ export function MailBuilderWizard() {
   const [activityType, setActivityType] = useState<ActivityType>("all");
   const [transactionsFrom, setTransactionsFrom] = useState("");
   const [transactionsTo, setTransactionsTo] = useState("");
-  const [selectedTagId, setSelectedTagId] = useState("");
-  const [tagOptions, setTagOptions] = useState<Array<{ id: string; path: string }>>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [campaignOptions, setCampaignOptions] = useState<Array<{ id: string; name: string; status: string }>>(
+    []
+  );
 
   const [templates, setTemplates] = useState<MailTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -147,7 +149,7 @@ export function MailBuilderWizard() {
   const [previewIndex, setPreviewIndex] = useState(0);
 
   useEffect(() => {
-    void Promise.all([loadTemplates(), loadTagOptions()]);
+    void Promise.all([loadTemplates(), loadCampaignOptions()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -189,12 +191,15 @@ export function MailBuilderWizard() {
     }
   }
 
-  async function loadTagOptions() {
-    const response = await fetch("/api/admin/tags/search?activeOnly=true&limit=200");
+  async function loadCampaignOptions() {
+    const response = await fetch("/api/mail-builder/campaigns");
     const payload = await response.json().catch(() => null);
-    if (!response.ok) return;
-    const tags = (payload?.tags ?? []) as Array<{ id: string; path: string }>;
-    setTagOptions(tags);
+    if (!response.ok) {
+      setError(payload?.message ?? "Unable to load campaign options.");
+      return;
+    }
+    const campaigns = (payload?.campaigns ?? []) as Array<{ id: string; name: string; status: string }>;
+    setCampaignOptions(campaigns);
   }
 
   function clearMessages() {
@@ -253,7 +258,7 @@ export function MailBuilderWizard() {
     await loadTemplates();
   }
 
-  async function fetchRecipients(tagId: string | null) {
+  async function fetchRecipients(campaignId: string | null) {
     const response = await fetch("/api/mail-builder/preview", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -262,7 +267,7 @@ export function MailBuilderWizard() {
         activityType,
         transactionsFrom: transactionsFrom || null,
         transactionsTo: transactionsTo || null,
-        tagId
+        campaignId
       })
     });
     const payload = await response.json().catch(() => null);
@@ -294,7 +299,7 @@ export function MailBuilderWizard() {
     setLoading(true);
     clearMessages();
     try {
-      const result = await fetchRecipients(selectedTagId || null);
+      const result = await fetchRecipients(selectedCampaignId || null);
       setRecipients(result.recipients);
       setPreviewIndex(0);
       setMessage(`Loaded ${result.totalCount} recipients for this mailing.`);
@@ -562,18 +567,20 @@ export function MailBuilderWizard() {
 
         {step === 3 ? (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-slate-700">Further filter by tag</p>
+            <p className="text-sm font-medium text-slate-700">Further filter by campaign</p>
             <div className="max-w-lg">
-              <label className="mb-1 block text-xs font-medium text-slate-600">Tag filter (optional)</label>
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                Campaign filter (optional)
+              </label>
               <select
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={selectedTagId}
-                onChange={(event) => setSelectedTagId(event.target.value)}
+                value={selectedCampaignId}
+                onChange={(event) => setSelectedCampaignId(event.target.value)}
               >
-                <option value="">No tag filter</option>
-                {tagOptions.map((tag) => (
-                  <option key={tag.id} value={tag.id}>
-                    {tag.path}
+                <option value="">No campaign filter</option>
+                {campaignOptions.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name}
                   </option>
                 ))}
               </select>
