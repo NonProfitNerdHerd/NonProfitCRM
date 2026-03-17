@@ -37,6 +37,12 @@ export default async function PlatformAdminLayout({ children }: { children: Reac
           </Link>
           <Link
             className="block rounded-md px-3 py-2 text-sm hover:bg-emerald-100"
+            href="/platform/admin/users"
+          >
+            Users & Roles
+          </Link>
+          <Link
+            className="block rounded-md px-3 py-2 text-sm hover:bg-emerald-100"
             href="/platform/admin/tenants"
           >
             Tenant Registry

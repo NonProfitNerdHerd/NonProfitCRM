@@ -21,6 +21,20 @@ function splitCsv(value: string) {
   );
 }
 
+function generateTemporaryPassword() {
+  return `Tmp!${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+}
+
+function displayNameFromNameParts(input: {
+  displayName?: string;
+  firstName: string;
+  lastName: string;
+}) {
+  const explicit = toText(input.displayName);
+  if (explicit) return explicit;
+  return `${toText(input.firstName)} ${toText(input.lastName)}`.trim();
+}
+
 async function logPlatformEvent(input: {
   actionType: string;
   targetEntityType: string;
@@ -564,6 +578,257 @@ export async function createImpersonationSession(input: {
     }
   });
   return data;
+}
+
+export type PlatformAdminManagedUser = {
+  user_id: string;
+  is_active: boolean;
+  first_name: string;
+  last_name: string;
+  display_name: string;
+  email: string;
+  username: string;
+  roles: Array<{ key: string; name: string }>;
+};
+
+const PLATFORM_ROLE_OPTIONS: Array<{ key: PlatformRoleKey; name: string; description: string }> = [
+  {
+    key: "super_admin",
+    name: "Super Admin",
+    description: "Full platform access including roles, provisioning, and recovery actions."
+  },
+  {
+    key: "build_team_admin",
+    name: "Build Team Admin",
+    description: "Manage platform configuration, users, and operational tooling."
+  },
+  {
+    key: "support_admin",
+    name: "Support Admin",
+    description: "Support-focused platform access for restore and tenant issue resolution."
+  },
+  {
+    key: "billing_admin",
+    name: "Billing Admin",
+    description: "Manage plan and billing-tier related platform administration tasks."
+  },
+  {
+    key: "internal_auditor",
+    name: "Internal Auditor",
+    description: "Read-only oversight access to platform actions and audit history."
+  },
+  {
+    key: "implementation_specialist",
+    name: "Implementation Specialist",
+    description: "Tenant implementation and onboarding access for rollout workflows."
+  }
+];
+
+function roleNameForPlatformKey(roleKey: string) {
+  const normalized = toText(roleKey).toLowerCase();
+  const exact = PLATFORM_ROLE_OPTIONS.find((entry) => entry.key === normalized);
+  if (exact) return exact.name;
+  if (!normalized) return "Unknown";
+  return normalized
+    .split("_")
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+}
+
+function normalizePlatformRoleKeys(inputKeys: string[]) {
+  const allowed = new Set(PLATFORM_ROLE_OPTIONS.map((entry) => entry.key));
+  return Array.from(
+    new Set(
+      inputKeys
+        .map((key) => toText(key).toLowerCase())
+        .filter((key): key is PlatformRoleKey => Boolean(key) && allowed.has(key as PlatformRoleKey))
+    )
+  );
+}
+
+export async function listPlatformAdminUsersData() {
+  const context = await requirePlatformAccess();
+  const canManageUsers = context.roles.some((role) =>
+    ["super_admin", "build_team_admin"].includes(role)
+  );
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("platform_list_admin_users");
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+
+  const grouped = new Map<string, PlatformAdminManagedUser>();
+  for (const row of rows) {
+    const userId = toText(row.user_id);
+    if (!userId) continue;
+    const existing = grouped.get(userId) ?? {
+      user_id: userId,
+      is_active: true,
+      first_name: toText(row.first_name),
+      last_name: toText(row.last_name),
+      display_name: toText(row.display_name),
+      email: toText(row.email),
+      username: toText(row.username),
+      roles: []
+    };
+    existing.is_active = Boolean(row.membership_is_active ?? row.profile_is_active ?? true);
+    const roleKey = toText(row.role).toLowerCase();
+    if (roleKey) {
+      const roleName = roleNameForPlatformKey(roleKey);
+      if (!existing.roles.some((role) => role.key === roleKey)) {
+        existing.roles.push({ key: roleKey, name: roleName });
+      }
+    }
+    grouped.set(userId, existing);
+  }
+
+  return {
+    users: Array.from(grouped.values()).sort((a, b) =>
+      (a.display_name || `${a.first_name} ${a.last_name}`.trim() || a.email).localeCompare(
+        b.display_name || `${b.first_name} ${b.last_name}`.trim() || b.email
+      )
+    ),
+    roles: PLATFORM_ROLE_OPTIONS,
+    canManageUsers
+  };
+}
+
+export async function createPlatformAdminUser(input: {
+  firstName: string;
+  lastName: string;
+  displayName?: string;
+  email: string;
+  username?: string;
+  isActive: boolean;
+  roleKeys: string[];
+}) {
+  const context = await requirePlatformAccess(["super_admin", "build_team_admin"]);
+  const supabase = await createClient();
+  const normalizedEmail = toText(input.email).toLowerCase();
+  if (!normalizedEmail) throw new Error("Email is required.");
+  const validRoleKeys = normalizePlatformRoleKeys(input.roleKeys);
+  if (validRoleKeys.length === 0) {
+    throw new Error("At least one platform role is required.");
+  }
+
+  const temporaryPassword = generateTemporaryPassword();
+  const displayName = displayNameFromNameParts({
+    displayName: input.displayName,
+    firstName: input.firstName,
+    lastName: input.lastName
+  });
+
+  const { data: createdUserId, error: createError } = await supabase.rpc("platform_create_auth_user", {
+    user_email: normalizedEmail,
+    user_password: temporaryPassword,
+    user_metadata: { display_name: displayName }
+  });
+  if (createError) throw new Error(createError.message);
+  const userId = toText(createdUserId);
+  if (!userId) {
+    throw new Error("Unable to provision authentication user.");
+  }
+
+  const { error: profileError } = await supabase.rpc("platform_upsert_user_profile", {
+    target_user_id: userId,
+    first_name: toText(input.firstName),
+    last_name: toText(input.lastName),
+    display_name: displayName,
+    email: normalizedEmail,
+    username: toText(input.username) || null,
+    is_active: Boolean(input.isActive),
+    must_change_password: true
+  });
+  if (profileError) throw new Error(profileError.message);
+
+  const { error: roleError } = await supabase.from("platform_admin_memberships").upsert(
+    validRoleKeys.map((roleKey) => ({
+      user_id: userId,
+      role: roleKey,
+      is_active: Boolean(input.isActive),
+      created_by: context.userId
+    })),
+    { onConflict: "user_id,role" }
+  );
+  if (roleError) throw new Error(roleError.message);
+
+  await logPlatformEvent({
+    actionType: "platform_admin_user_created",
+    targetEntityType: "platform_admin_memberships",
+    targetEntityId: userId,
+    metadata: {
+      roleKeys: validRoleKeys,
+      email: normalizedEmail
+    }
+  });
+
+  return { userId, temporaryPassword };
+}
+
+export async function updatePlatformAdminUser(input: {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  displayName?: string;
+  email: string;
+  username?: string;
+  isActive: boolean;
+  roleKeys: string[];
+}) {
+  const context = await requirePlatformAccess(["super_admin", "build_team_admin"]);
+  const supabase = await createClient();
+  const validRoleKeys = normalizePlatformRoleKeys(input.roleKeys);
+  if (validRoleKeys.length === 0) {
+    throw new Error("At least one platform role is required.");
+  }
+
+  const displayName = displayNameFromNameParts({
+    displayName: input.displayName,
+    firstName: input.firstName,
+    lastName: input.lastName
+  });
+  const normalizedEmail = toText(input.email).toLowerCase();
+
+  const { error: profileError } = await supabase.rpc("platform_upsert_user_profile", {
+    target_user_id: toText(input.userId),
+    first_name: toText(input.firstName),
+    last_name: toText(input.lastName),
+    display_name: displayName,
+    email: normalizedEmail,
+    username: toText(input.username) || null,
+    is_active: Boolean(input.isActive),
+    must_change_password: null
+  });
+  if (profileError) throw new Error(profileError.message);
+
+  const userId = toText(input.userId);
+  const { error: deactivateError } = await supabase
+    .from("platform_admin_memberships")
+    .update({ is_active: false })
+    .eq("user_id", userId);
+  if (deactivateError) throw new Error(deactivateError.message);
+
+  const { error: roleError } = await supabase.from("platform_admin_memberships").upsert(
+    validRoleKeys.map((roleKey) => ({
+      user_id: userId,
+      role: roleKey,
+      is_active: Boolean(input.isActive),
+      created_by: context.userId
+    })),
+    { onConflict: "user_id,role" }
+  );
+  if (roleError) throw new Error(roleError.message);
+
+  await logPlatformEvent({
+    actionType: "platform_admin_user_updated",
+    targetEntityType: "platform_admin_memberships",
+    targetEntityId: userId,
+    metadata: {
+      roleKeys: validRoleKeys,
+      email: normalizedEmail,
+      isActive: Boolean(input.isActive)
+    }
+  });
 }
 
 export function toPlatformError(error: unknown, fallback: string) {
