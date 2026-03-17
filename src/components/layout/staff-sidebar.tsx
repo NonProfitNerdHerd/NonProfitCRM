@@ -64,27 +64,14 @@ const BASE_MENU: MenuItem[] = [
     href: "/staff/memberships",
     label: "Memberships",
     matches: (pathname) => pathname.startsWith("/staff/memberships")
-  },
-  {
-    id: "administration",
-    href: "/staff/admin/users",
-    label: "Administration",
-    matches: (pathname) => pathname.startsWith("/staff/admin"),
-    children: [
-      { href: "/staff/admin/users", label: "Users" },
-      { href: "/staff/admin/roles", label: "Roles" },
-      { href: "/staff/admin/tags", label: "Tags" },
-      { href: "/staff/admin/contacts/merge", label: "Contact Merge" },
-      { href: "/staff/admin/integrations", label: "Integrations" }
-    ]
   }
 ];
 
 export function StaffSidebar({
-  canAccessImportCenter,
+  canAccessDataTools,
   canAccessVolunteerCoordination
 }: {
-  canAccessImportCenter?: boolean;
+  canAccessDataTools?: boolean;
   canAccessVolunteerCoordination?: boolean;
 }) {
   const pathname = usePathname();
@@ -118,20 +105,41 @@ export function StaffSidebar({
           } satisfies MenuItem
         ] as MenuItem[])
       : []),
-    ...(canAccessImportCenter
+    ...(canAccessDataTools
       ? ([
           {
-            id: "import-center",
-            href: "/staff/import-center",
-            label: "Import Center",
-            matches: (path: string) => path.startsWith("/staff/import-center"),
+            id: "data-tools",
+            href: "/staff/data-tools",
+            label: "Data Tools",
+            matches: (path: string) =>
+              path.startsWith("/staff/data-tools") ||
+              path.startsWith("/staff/import-center") ||
+              path.startsWith("/staff/admin/roles") ||
+              path.startsWith("/staff/admin/tags") ||
+              path.startsWith("/staff/admin/contacts/merge"),
             children: [
+              { href: "/staff/data-tools", label: "Overview" },
+              { href: "/staff/import-center", label: "Import Center" },
               { href: "/staff/import-center/contacts", label: "Contacts Import" },
-              { href: "/staff/import-center/transactions", label: "Transactions Import" }
+              { href: "/staff/import-center/transactions", label: "Transactions Import" },
+              { href: "/staff/data-tools/bulk-tag-contacts", label: "Bulk Tag Contacts" },
+              { href: "/staff/admin/roles", label: "Roles" },
+              { href: "/staff/admin/tags", label: "Tags" },
+              { href: "/staff/admin/contacts/merge", label: "Contact Merge" }
             ]
           } satisfies MenuItem
         ] as MenuItem[])
-      : [])
+      : []),
+    {
+      id: "administration",
+      href: "/staff/admin/users",
+      label: "Administration",
+      matches: (path: string) => path.startsWith("/staff/admin"),
+      children: [
+        { href: "/staff/admin/users", label: "Users" },
+        { href: "/staff/admin/integrations", label: "Integrations" }
+      ]
+    } satisfies MenuItem
   ];
 
   return (

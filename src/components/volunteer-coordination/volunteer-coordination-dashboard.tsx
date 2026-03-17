@@ -899,19 +899,18 @@ export function VolunteerCoordinationDashboard({
 
   if (!data) {
     return (
-      <div className="space-y-4">
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-          <p className="text-sm text-slate-700">
-            Volunteer Coordination data is not loaded yet. Click to initialize the module view.
-          </p>
-          <div className="mt-3">
-            <Button type="button" onClick={() => void loadData()} disabled={loading}>
-              Load Volunteer Coordination
+      <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+        <p className="text-sm text-slate-700">
+          {loading ? "Loading Volunteer Coordination..." : "Unable to load Volunteer Coordination data."}
+        </p>
+        {error ? <p className="text-sm text-red-700">{error}</p> : null}
+        {!loading ? (
+          <div>
+            <Button type="button" variant="secondary" onClick={() => void loadData()}>
+              Retry
             </Button>
           </div>
-          {loadingIndicator}
-          {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
-        </div>
+        ) : null}
       </div>
     );
   }

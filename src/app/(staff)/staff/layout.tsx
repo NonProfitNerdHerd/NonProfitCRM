@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export default async function StaffLayout({ children }: { children: ReactNode }) {
   const context = await requireStaffPermission("can_view_dashboard");
-  const canAccessImportCenter = await hasRoleKeys(["administrator", "data_steward"], context);
+  const canAccessDataTools = await hasRoleKeys(["administrator", "data_steward"], context);
   const canAccessVolunteerCoordination = await hasAnyStaffPermission(
     ["can_view_volunteer_coordination", "can_manage_volunteer_coordination"],
     context
@@ -32,7 +32,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     <div className="flex min-h-screen print:block">
       <div className="print:hidden">
         <StaffSidebar
-          canAccessImportCenter={canAccessImportCenter}
+          canAccessDataTools={canAccessDataTools}
           canAccessVolunteerCoordination={canAccessVolunteerCoordination}
         />
       </div>

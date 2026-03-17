@@ -77,13 +77,17 @@ function collectExpandableTagIds(nodes: TagNode[]) {
 export function TagsDashboard({
   initialTree,
   initialTags,
-  initialWarning
+  initialWarning,
+  initialTab = "taxonomy",
+  hideTabSelector = false
 }: {
   initialTree: TagNode[];
   initialTags: Array<TagNode>;
   initialWarning?: string | null;
+  initialTab?: "taxonomy" | "bulk" | "mappings";
+  hideTabSelector?: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState<"taxonomy" | "bulk" | "mappings">("taxonomy");
+  const [activeTab, setActiveTab] = useState<"taxonomy" | "bulk" | "mappings">(initialTab);
 
   const [tags, setTags] = useState<Array<TagNode>>(initialTags);
   const [tree, setTree] = useState<Array<TagNode>>(initialTree);
@@ -469,29 +473,31 @@ export function TagsDashboard({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        <Button
-          type="button"
-          variant={activeTab === "taxonomy" ? "primary" : "secondary"}
-          onClick={() => setActiveTab("taxonomy")}
-        >
-          Taxonomy
-        </Button>
-        <Button
-          type="button"
-          variant={activeTab === "bulk" ? "primary" : "secondary"}
-          onClick={() => setActiveTab("bulk")}
-        >
-          Bulk Jobs
-        </Button>
-        <Button
-          type="button"
-          variant={activeTab === "mappings" ? "primary" : "secondary"}
-          onClick={() => setActiveTab("mappings")}
-        >
-          Integration Mappings
-        </Button>
-      </div>
+      {!hideTabSelector ? (
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+          <Button
+            type="button"
+            variant={activeTab === "taxonomy" ? "primary" : "secondary"}
+            onClick={() => setActiveTab("taxonomy")}
+          >
+            Taxonomy
+          </Button>
+          <Button
+            type="button"
+            variant={activeTab === "bulk" ? "primary" : "secondary"}
+            onClick={() => setActiveTab("bulk")}
+          >
+            Bulk Jobs
+          </Button>
+          <Button
+            type="button"
+            variant={activeTab === "mappings" ? "primary" : "secondary"}
+            onClick={() => setActiveTab("mappings")}
+          >
+            Integration Mappings
+          </Button>
+        </div>
+      ) : null}
 
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
