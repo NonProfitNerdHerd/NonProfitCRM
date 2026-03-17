@@ -94,22 +94,14 @@ export async function getTenantDetail(tenantId: string) {
   await requirePlatformAccess();
   const supabase = await createClient();
 
-  const [
-    tenantRes,
-    metadataRes,
-    snapshotsRes,
-    restoreHistoryRes,
-    provisioningRes,
-    entitlementsRes,
-    tiersRes,
-    statsRes
-  ] =
+  const tenantRes = await supabase
+    .from("tenants")
+    .select("*, tenant_backup_tiers(*)")
+    .eq("id", tenantId)
+    .single();
+
+  const [metadataRes, snapshotsRes, restoreHistoryRes, provisioningRes, entitlementsRes, tiersRes, statsRes] =
     await Promise.all([
-      supabase
-        .from("tenants")
-        .select("*, tenant_backup_tiers(*)")
-        .eq("id", tenantId)
-        .single(),
       supabase.from("tenant_backup_metadata").select("*").eq("tenant_id", tenantId).maybeSingle(),
       supabase
         .from("tenant_backup_snapshots")
@@ -145,7 +137,9 @@ export async function getTenantDetail(tenantId: string) {
   if (provisioningRes.error) throw new Error(provisioningRes.error.message);
   if (entitlementsRes.error) throw new Error(entitlementsRes.error.message);
   if (tiersRes.error) throw new Error(tiersRes.error.message);
-  if (statsRes.error) throw new Error(statsRes.error.message);
+  const stats = statsRes.error
+    ? {}
+    : ((statsRes.data ?? {}) as Record<string, unknown>);
 
   return {
     tenant: tenantRes.data,
@@ -155,7 +149,7 @@ export async function getTenantDetail(tenantId: string) {
     provisioningRuns: provisioningRes.data ?? [],
     entitlements: entitlementsRes.data ?? [],
     backupTiers: tiersRes.data ?? [],
-    stats: (statsRes.data ?? {}) as Record<string, unknown>
+    stats
   };
 }
 

@@ -11,7 +11,16 @@ type PageProps = {
 export default async function PlatformTenantDetailPage({ params }: PageProps) {
   await requirePlatformAdminAccess();
   const { tenantId } = await params;
-  const detail = await getTenantDetail(tenantId).catch(() => null);
+  let detail: Awaited<ReturnType<typeof getTenantDetail>> | null = null;
+  try {
+    detail = await getTenantDetail(tenantId);
+  } catch (error) {
+    const message = String((error as { message?: string } | null)?.message ?? "").toLowerCase();
+    if (message.includes("no rows") || message.includes("pgrst116")) {
+      notFound();
+    }
+    throw error;
+  }
   if (!detail?.tenant) {
     notFound();
   }
