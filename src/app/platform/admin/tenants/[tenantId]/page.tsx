@@ -30,6 +30,7 @@ export default async function PlatformTenantDetailPage({ params }: PageProps) {
         initialProvisioningRuns={detail.provisioningRuns}
         initialEntitlements={detail.entitlements}
         backupTiers={detail.backupTiers}
+        initialStats={detail.stats}
       />
     </Card>
   );
