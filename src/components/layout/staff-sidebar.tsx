@@ -97,7 +97,24 @@ export function StaffSidebar({
             href: "/staff/volunteer-coordination",
             label: "Volunteer Coordination",
             matches: (path: string) => path.startsWith("/staff/volunteer-coordination"),
-            children: [{ href: "/staff/volunteer-coordination", label: "Dashboard" }]
+            children: [
+              { href: "/staff/volunteer-coordination", label: "Dashboard" },
+              {
+                href: "/staff/volunteer-coordination/volunteers-recruiting",
+                label: "Volunteers & Recruiting"
+              },
+              { href: "/staff/volunteer-coordination/events-roles", label: "Events & Roles" },
+              {
+                href: "/staff/volunteer-coordination/assignments-waitlists-substitutes",
+                label: "Assignments / Waitlists / Substitutes"
+              },
+              { href: "/staff/volunteer-coordination/families-groups", label: "Families & Groups" },
+              { href: "/staff/volunteer-coordination/hours-attendance", label: "Hours & Attendance" },
+              {
+                href: "/staff/volunteer-coordination/compliance-concerns-incidents",
+                label: "Compliance / Concerns / Incidents"
+              }
+            ]
           } satisfies MenuItem
         ] as MenuItem[])
       : []),

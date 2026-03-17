@@ -9,9 +9,9 @@ export default async function VolunteerCoordinationPage() {
     <Card>
       <CardHeader
         title="Volunteer Coordination"
-        subtitle="Operational volunteer recruitment, scheduling, assignments, hours, compliance, and reporting."
+        subtitle="Dashboard overview for volunteer recruitment, staffing health, attendance, and compliance."
       />
-      <VolunteerCoordinationDashboard />
+      <VolunteerCoordinationDashboard initialTab="overview" hideInternalTabs />
     </Card>
   );
 }

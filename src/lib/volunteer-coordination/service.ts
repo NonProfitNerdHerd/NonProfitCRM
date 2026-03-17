@@ -36,6 +36,25 @@ function normalizePhone(value: unknown) {
   return toText(value).replace(/\D+/g, "");
 }
 
+function normalizeTagLabel(value: unknown) {
+  return toText(value).replace(/\s+/g, " ");
+}
+
+function normalizeTagKey(value: unknown) {
+  return normalizeTagLabel(value).toLowerCase();
+}
+
+function uniqueTagLabels(input: unknown[] | undefined) {
+  const deduped = new Map<string, string>();
+  for (const value of input ?? []) {
+    const label = normalizeTagLabel(value);
+    if (!label) continue;
+    const key = normalizeTagKey(label);
+    if (!deduped.has(key)) deduped.set(key, label);
+  }
+  return Array.from(deduped.values());
+}
+
 function volunteerSchemaErrorMessage(error: unknown) {
   const value = error as { message?: string; details?: string; hint?: string; code?: string };
   return [value?.message, value?.details, value?.hint, value?.code]
@@ -108,6 +127,225 @@ export function buildVolunteerCoordinationEmptyState(schemaWarning?: string | nu
       roleOptions: [],
       volunteerOptions: []
     }
+  };
+}
+
+export async function listVolunteerCoordinationTags() {
+  const context = await requireVolunteerCoordinationAccess();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tags")
+    .select("id,name,path,parent_tag_id,module,is_active")
+    .eq("organization_id", context.organizationId)
+    .eq("module", "contacts")
+    .eq("is_active", true)
+    .order("path", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+async function ensureVolunteerRootTag(input: {
+  organizationId: string;
+  userId: string;
+  rootName: string;
+}) {
+  const supabase = await createClient();
+  const rootName = normalizeTagLabel(input.rootName);
+  const { data: existing, error: existingError } = await supabase
+    .from("tags")
+    .select("id,name,path,parent_tag_id")
+    .eq("organization_id", input.organizationId)
+    .eq("module", "contacts")
+    .is("parent_tag_id", null)
+    .ilike("name", rootName)
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) return existing;
+
+  const { data: created, error: createError } = await supabase
+    .from("tags")
+    .insert({
+      organization_id: input.organizationId,
+      module: "contacts",
+      name: rootName,
+      slug: null,
+      parent_tag_id: null,
+      is_active: true,
+      is_system: false,
+      created_by: input.userId,
+      updated_by: input.userId
+    })
+    .select("id,name,path,parent_tag_id")
+    .single();
+  if (createError) throw createError;
+  return created;
+}
+
+export async function ensureVolunteerTaxonomyTags(input: {
+  rootName: string;
+  values: string[];
+}) {
+  const context = await requireVolunteerCoordinationManager();
+  const supabase = await createClient();
+  const labels = uniqueTagLabels(input.values);
+  if (labels.length === 0) return [] as Array<Record<string, unknown>>;
+
+  const root = await ensureVolunteerRootTag({
+    organizationId: context.organizationId,
+    userId: context.userId,
+    rootName: input.rootName
+  });
+
+  const { data: existingChildren, error: childrenError } = await supabase
+    .from("tags")
+    .select("id,name,path,parent_tag_id")
+    .eq("organization_id", context.organizationId)
+    .eq("module", "contacts")
+    .eq("parent_tag_id", root.id);
+  if (childrenError) throw childrenError;
+
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const child of existingChildren ?? []) {
+    byName.set(normalizeTagKey(child.name), child);
+  }
+
+  for (const value of labels) {
+    const key = normalizeTagKey(value);
+    if (byName.has(key)) continue;
+    const { data: created, error: createError } = await supabase
+      .from("tags")
+      .insert({
+        organization_id: context.organizationId,
+        module: "contacts",
+        name: value,
+        slug: null,
+        parent_tag_id: root.id,
+        is_active: true,
+        is_system: false,
+        created_by: context.userId,
+        updated_by: context.userId
+      })
+      .select("id,name,path,parent_tag_id")
+      .single();
+    if (createError && createError.code !== "23505") throw createError;
+    if (created) byName.set(key, created);
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  for (const value of labels) {
+    const matched = byName.get(normalizeTagKey(value));
+    if (matched) {
+      results.push(matched);
+      continue;
+    }
+    const { data: fetched, error: fetchError } = await supabase
+      .from("tags")
+      .select("id,name,path,parent_tag_id")
+      .eq("organization_id", context.organizationId)
+      .eq("module", "contacts")
+      .eq("parent_tag_id", root.id)
+      .ilike("name", value)
+      .limit(1)
+      .maybeSingle();
+    if (fetchError) throw fetchError;
+    if (fetched) {
+      byName.set(normalizeTagKey(fetched.name), fetched);
+      results.push(fetched);
+    }
+  }
+  return results;
+}
+
+async function resolveVolunteerTaxonomyNames(input: {
+  organizationId: string;
+  userId: string;
+  rootName: string;
+  values?: string[];
+}) {
+  const labels = uniqueTagLabels(input.values);
+  if (labels.length === 0) return [] as string[];
+  const root = await ensureVolunteerRootTag({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    rootName: input.rootName
+  });
+  const supabase = await createClient();
+  const { data: existingChildren, error: childrenError } = await supabase
+    .from("tags")
+    .select("id,name")
+    .eq("organization_id", input.organizationId)
+    .eq("module", "contacts")
+    .eq("parent_tag_id", root.id);
+  if (childrenError) throw childrenError;
+
+  const byName = new Map<string, string>();
+  for (const child of existingChildren ?? []) {
+    byName.set(normalizeTagKey(child.name), normalizeTagLabel(child.name));
+  }
+
+  for (const value of labels) {
+    const key = normalizeTagKey(value);
+    if (byName.has(key)) continue;
+    const { data: created, error: createError } = await supabase
+      .from("tags")
+      .insert({
+        organization_id: input.organizationId,
+        module: "contacts",
+        name: value,
+        slug: null,
+        parent_tag_id: root.id,
+        is_active: true,
+        is_system: false,
+        created_by: input.userId,
+        updated_by: input.userId
+      })
+      .select("name")
+      .single();
+    if (createError && createError.code !== "23505") throw createError;
+    if (created) {
+      byName.set(key, normalizeTagLabel(created.name));
+      continue;
+    }
+    const { data: fetched, error: fetchError } = await supabase
+      .from("tags")
+      .select("name")
+      .eq("organization_id", input.organizationId)
+      .eq("module", "contacts")
+      .eq("parent_tag_id", root.id)
+      .ilike("name", value)
+      .limit(1)
+      .maybeSingle();
+    if (fetchError) throw fetchError;
+    if (fetched) byName.set(key, normalizeTagLabel(fetched.name));
+  }
+
+  return labels.map((value) => byName.get(normalizeTagKey(value)) ?? value);
+}
+
+export async function getVolunteerProfileForContact(contactId: string) {
+  const context = await requireVolunteerCoordinationAccess();
+  const supabase = await createClient();
+  const [{ data: profile, error: profileError }, { data: tags, error: tagsError }] = await Promise.all([
+    supabase
+      .from("volunteer_profiles")
+      .select("*")
+      .eq("organization_id", context.organizationId)
+      .eq("contact_id", contactId)
+      .maybeSingle(),
+    supabase
+      .from("tags")
+      .select("id,name,path,parent_tag_id,module,is_active")
+      .eq("organization_id", context.organizationId)
+      .eq("module", "contacts")
+      .eq("is_active", true)
+      .order("path", { ascending: true })
+  ]);
+  if (profileError) throw profileError;
+  if (tagsError) throw tagsError;
+  return {
+    profile: profile ?? null,
+    tags: tags ?? []
   };
 }
 
@@ -349,7 +587,7 @@ export async function getVolunteerCoordinationData(filters?: {
 
   const { data: tags, error: tagsError } = await supabase
     .from("tags")
-    .select("id,name,path,module,is_active")
+    .select("id,name,path,parent_tag_id,module,is_active")
     .eq("organization_id", context.organizationId)
     .eq("module", "contacts")
     .eq("is_active", true)
@@ -745,6 +983,26 @@ export async function upsertVolunteerProfile(input: {
 }) {
   const context = await requireVolunteerCoordinationManager();
   const supabase = await createClient();
+  const [interestNames, skillNames, certificationNames] = await Promise.all([
+    resolveVolunteerTaxonomyNames({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      rootName: "Interests",
+      values: input.interests
+    }),
+    resolveVolunteerTaxonomyNames({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      rootName: "Skills",
+      values: input.skills
+    }),
+    resolveVolunteerTaxonomyNames({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      rootName: "Certifications",
+      values: input.certifications
+    })
+  ]);
 
   const payload = {
     organization_id: context.organizationId,
@@ -752,9 +1010,9 @@ export async function upsertVolunteerProfile(input: {
     volunteer_status: toText(input.volunteerStatus) || "prospective",
     volunteer_type: toText(input.volunteerType) || "individual",
     availability_preferences: input.availabilityPreferences ?? {},
-    interests: input.interests ?? [],
-    skills: input.skills ?? [],
-    certifications: input.certifications ?? [],
+    interests: interestNames,
+    skills: skillNames,
+    certifications: certificationNames,
     accommodations: toText(input.accommodations) || null,
     physical_limitations: toText(input.physicalLimitations) || null,
     transportation_eligible: Boolean(input.transportationEligible),

@@ -5,6 +5,10 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  TagTypeaheadMulti,
+  type TagTypeaheadOption
+} from "@/components/tags/tag-typeahead-multi";
 
 type DashboardTab =
   | "overview"
@@ -64,8 +68,45 @@ function guessHourImportColumn(headers: string[], keys: string[]) {
   return "";
 }
 
-export function VolunteerCoordinationDashboard() {
-  const [tab, setTab] = useState<DashboardTab>("overview");
+function resolveVolunteerTaxonomyOptions(
+  tags: Array<{ id: string; name: string; label?: string; parentTagId?: string }>,
+  rootName: string
+) {
+  const root = tags.find(
+    (tag) => !tag.parentTagId && normalizeKey(tag.name) === normalizeKey(rootName)
+  );
+  if (!root) return [] as TagTypeaheadOption[];
+  const rootLabelPrefix = `${rootName.toLowerCase()} /`;
+  return tags
+    .filter((tag) => {
+      if (!tag.parentTagId || tag.id === root.id) return false;
+      const normalizedLabel = toText(tag.label).toLowerCase();
+      return tag.parentTagId === root.id || normalizedLabel.startsWith(rootLabelPrefix);
+    })
+    .map((tag) => ({
+      id: tag.id,
+      name: normalizeLabel(tag.name),
+      label: tag.label
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function normalizeLabel(value: unknown) {
+  return toText(value).replace(/\s+/g, " ");
+}
+
+function normalizeKey(value: unknown) {
+  return normalizeLabel(value).toLowerCase();
+}
+
+export function VolunteerCoordinationDashboard({
+  initialTab = "overview",
+  hideInternalTabs = false
+}: {
+  initialTab?: DashboardTab;
+  hideInternalTabs?: boolean;
+}) {
+  const [tab, setTab] = useState<DashboardTab>(initialTab);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -85,9 +126,9 @@ export function VolunteerCoordinationDashboard() {
     volunteerStatus: "prospective",
     volunteerType: "individual",
     availabilityPreferences: "",
-    interests: "",
-    skills: "",
-    certifications: "",
+    interests: [] as TagTypeaheadOption[],
+    skills: [] as TagTypeaheadOption[],
+    certifications: [] as TagTypeaheadOption[],
     accommodations: "",
     physicalLimitations: "",
     transportationEligible: false,
@@ -167,7 +208,7 @@ export function VolunteerCoordinationDashboard() {
     substituteEnabled: true,
     isLeadRole: false,
     requiredSkills: "",
-    requiredTags: "",
+    requiredTags: [] as TagTypeaheadOption[],
     requiredCertifications: "",
     requiredTraining: "",
     backgroundCheckRequired: false,
@@ -380,6 +421,33 @@ export function VolunteerCoordinationDashboard() {
     [data]
   );
   const tags = useMemo(() => ((data?.tags as Array<Record<string, unknown>> | undefined) ?? []), [data]);
+  const allTagOptions = useMemo(
+    () =>
+      tags.map((tag) => ({
+        id: toText(tag.id),
+        name: normalizeLabel(tag.name),
+        label: toText(tag.path) || normalizeLabel(tag.name),
+        parentTagId: toText(tag.parent_tag_id)
+      })),
+    [tags]
+  );
+  const tagById = useMemo(() => new Map(allTagOptions.map((tag) => [tag.id, tag])), [allTagOptions]);
+  const selectedFilterTags = useMemo(
+    () => selectedTagIds.map((id) => tagById.get(id)).filter(Boolean) as TagTypeaheadOption[],
+    [selectedTagIds, tagById]
+  );
+  const interestTagOptions = useMemo(
+    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Interests"),
+    [allTagOptions]
+  );
+  const skillTagOptions = useMemo(
+    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Skills"),
+    [allTagOptions]
+  );
+  const certificationTagOptions = useMemo(
+    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Certifications"),
+    [allTagOptions]
+  );
   const reports = useMemo(() => ((data?.reports as Record<string, unknown> | undefined) ?? {}), [data]);
   const summary = useMemo(() => ((data?.summary as Record<string, unknown> | undefined) ?? {}), [data]);
   const canViewSensitive = Boolean(data?.canViewSensitive);
@@ -391,6 +459,10 @@ export function VolunteerCoordinationDashboard() {
     }
     return map;
   }, [volunteers]);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     void loadData();
@@ -456,14 +528,38 @@ export function VolunteerCoordinationDashboard() {
     }
   }
 
+  async function createVolunteerTaxonomyTag(rootName: string, value: string) {
+    const response = await fetch("/api/volunteer-coordination/tags", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        rootName,
+        values: [value]
+      })
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { result?: Array<Record<string, unknown>>; message?: string }
+      | null;
+    if (!response.ok) {
+      throw new Error(toText(payload?.message) || `Unable to create ${rootName} tag.`);
+    }
+    const created = payload?.result?.[0];
+    const id = toText(created?.id);
+    const name = normalizeLabel(created?.name || value);
+    const label = toText(created?.path) || `${rootName} / ${name}`;
+    if (!id) return null;
+    await loadData();
+    return { id, name, label } satisfies TagTypeaheadOption;
+  }
+
   async function saveVolunteerProfile() {
     await runAction({
       endpoint: "/api/volunteer-coordination/volunteers",
       payload: {
         ...volunteerForm,
-        interests: splitList(volunteerForm.interests),
-        skills: splitList(volunteerForm.skills),
-        certifications: splitList(volunteerForm.certifications),
+        interests: volunteerForm.interests.map((entry) => entry.name),
+        skills: volunteerForm.skills.map((entry) => entry.name),
+        certifications: volunteerForm.certifications.map((entry) => entry.name),
         availabilityPreferences: volunteerForm.availabilityPreferences
           ? { text: volunteerForm.availabilityPreferences }
           : {}
@@ -534,7 +630,7 @@ export function VolunteerCoordinationDashboard() {
       payload: {
         ...roleForm,
         requiredSkills: splitList(roleForm.requiredSkills),
-        requiredTags: splitList(roleForm.requiredTags),
+        requiredTags: roleForm.requiredTags.map((entry) => entry.name),
         requiredCertifications: splitList(roleForm.requiredCertifications),
         requiredTraining: splitList(roleForm.requiredTraining)
       },
@@ -823,29 +919,32 @@ export function VolunteerCoordinationDashboard() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ["overview", "Overview"],
-              ["volunteers", "Volunteers & Recruiting"],
-              ["events", "Events & Roles"],
-              ["assignments", "Assignments / Waitlist / Substitutes"],
-              ["families-groups", "Families & Groups"],
-              ["hours", "Hours Import & Attendance"],
-              ["safety", "Compliance / Concerns / Incidents"],
-              ["reports", "Reporting"]
-            ] as Array<[DashboardTab, string]>
-          ).map(([key, label]) => (
-            <Button
-              key={key}
-              type="button"
-              variant={tab === key ? "primary" : "secondary"}
-              onClick={() => setTab(key)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
+        {!hideInternalTabs ? (
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["overview", "Overview"],
+                ["volunteers", "Volunteers & Recruiting"],
+                ["events", "Events & Roles"],
+                ["assignments", "Assignments / Waitlist / Substitutes"],
+                ["families-groups", "Families & Groups"],
+                ["hours", "Hours Import & Attendance"],
+                ["safety", "Compliance / Concerns / Incidents"]
+              ] as Array<[DashboardTab, string]>
+            ).map(([key, label]) => (
+              <Button
+                key={key}
+                type="button"
+                variant={tab === key ? "primary" : "secondary"}
+                onClick={() => setTab(key)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        ) : (
+          <div />
+        )}
         <Button type="button" variant="secondary" onClick={() => void loadData()} disabled={loading}>
           Refresh
         </Button>
@@ -996,25 +1095,13 @@ export function VolunteerCoordinationDashboard() {
                   <option value="archived">Archived</option>
                 </select>
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Tag filter</label>
-                <select
-                  className="h-24 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  multiple
-                  value={selectedTagIds}
-                  onChange={(event) =>
-                    setSelectedTagIds(
-                      Array.from(event.target.selectedOptions).map((option) => option.value)
-                    )
-                  }
-                >
-                  {tags.map((tag) => (
-                    <option key={toText(tag.id)} value={toText(tag.id)}>
-                      {toText(tag.path) || toText(tag.name)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <TagTypeaheadMulti
+                label="Tag filter"
+                selected={selectedFilterTags}
+                options={allTagOptions}
+                onChange={(next) => setSelectedTagIds(next.map((entry) => entry.id))}
+                placeholder="Type to filter by tags..."
+              />
               <div className="space-y-2 pt-6">
                 <label className="flex items-center gap-2 text-xs text-slate-700">
                   <input
@@ -1099,30 +1186,41 @@ export function VolunteerCoordinationDashboard() {
                 value={volunteerForm.availabilityPreferences}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, availabilityPreferences: value }))}
               />
-              <FormInput
-                label="Interests (comma separated)"
-                value={volunteerForm.interests}
+              <TagTypeaheadMulti
+                label="Interests"
+                selected={volunteerForm.interests}
+                options={interestTagOptions}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, interests: value }))}
+                onCreateOption={(value) => createVolunteerTaxonomyTag("Interests", value)}
+                placeholder="Type an interest and press Enter..."
               />
-              <FormInput
-                label="Skills (comma separated)"
-                value={volunteerForm.skills}
+              <TagTypeaheadMulti
+                label="Skills"
+                selected={volunteerForm.skills}
+                options={skillTagOptions}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, skills: value }))}
+                onCreateOption={(value) => createVolunteerTaxonomyTag("Skills", value)}
+                placeholder="Type a skill and press Enter..."
               />
-              <FormInput
-                label="Certifications (comma separated)"
-                value={volunteerForm.certifications}
+              <TagTypeaheadMulti
+                label="Certifications"
+                selected={volunteerForm.certifications}
+                options={certificationTagOptions}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, certifications: value }))}
+                onCreateOption={(value) => createVolunteerTaxonomyTag("Certifications", value)}
+                placeholder="Type a certification and press Enter..."
               />
               <FormInput
                 label="Accommodations"
                 value={volunteerForm.accommodations}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, accommodations: value }))}
+                multiline
               />
               <FormInput
                 label="Physical Limitations"
                 value={volunteerForm.physicalLimitations}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, physicalLimitations: value }))}
+                multiline
               />
               <FormInput
                 label="Emergency Contact Name"
@@ -1632,10 +1730,12 @@ export function VolunteerCoordinationDashboard() {
                 value={roleForm.requiredSkills}
                 onChange={(value) => setRoleForm((prev) => ({ ...prev, requiredSkills: value }))}
               />
-              <FormInput
+              <TagTypeaheadMulti
                 label="Required Tags"
-                value={roleForm.requiredTags}
+                selected={roleForm.requiredTags}
+                options={allTagOptions}
                 onChange={(value) => setRoleForm((prev) => ({ ...prev, requiredTags: value }))}
+                placeholder="Type and select required tags..."
               />
               <FormInput
                 label="Required Certifications"
@@ -3232,17 +3332,27 @@ function FormInput({
   label,
   value,
   onChange,
-  type = "text"
+  type = "text",
+  multiline = false
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  multiline?: boolean;
 }) {
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-slate-600">{label}</label>
-      <Input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      {multiline ? (
+        <textarea
+          className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
+        <Input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      )}
     </div>
   );
 }

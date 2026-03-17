@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
 import { DonationsManagement } from "@/components/donations/donations-management";
 import { ContactTagManager } from "@/components/contacts/contact-tag-manager";
+import { ContactVolunteerProfileTab } from "@/components/contacts/contact-volunteer-profile-tab";
 
 const recordTypeOptions = ["person", "organization"] as const;
 const trackingStatusOptions = ["donor", "lead", "non_lead"] as const;
@@ -73,13 +74,21 @@ export function ContactProfileTabs({
   staffUsers
 }: ContactProfileTabsProps) {
   const router = useRouter();
+  const isOrganizationContact = String(contactDetails.entity_type ?? "person") === "organization";
   const initialExternalSource = String(contactDetails.external_source ?? "").toLowerCase();
   const initialGivingFuelId =
     (initialExternalSource === "givingfuel" || initialExternalSource === "webconnex"
       ? String(contactDetails.external_source_id ?? "")
       : "") || String(contactDetails.webconnex_id ?? "");
   const [activeTab, setActiveTab] = useState<
-    "activity" | "contactInfo" | "tags" | "donations" | "notes" | "tasks" | "memberships"
+    | "activity"
+    | "contactInfo"
+    | "tags"
+    | "donations"
+    | "volunteer"
+    | "notes"
+    | "tasks"
+    | "memberships"
   >("activity");
   const [noteBody, setNoteBody] = useState("");
   const [followUpRequired, setFollowUpRequired] = useState(false);
@@ -352,6 +361,11 @@ export function ContactProfileTabs({
         <TabButton active={activeTab === "donations"} onClick={() => setActiveTab("donations")}>
           Donations
         </TabButton>
+        {!isOrganizationContact ? (
+          <TabButton active={activeTab === "volunteer"} onClick={() => setActiveTab("volunteer")}>
+            Volunteer
+          </TabButton>
+        ) : null}
         <TabButton active={activeTab === "notes"} onClick={() => setActiveTab("notes")}>
           Notes
         </TabButton>
@@ -552,6 +566,10 @@ export function ContactProfileTabs({
               `${contactInfo.firstName} ${contactInfo.lastName}`.trim()
           }}
         />
+      ) : null}
+
+      {!isOrganizationContact && activeTab === "volunteer" ? (
+        <ContactVolunteerProfileTab contactId={contactId} />
       ) : null}
 
       {activeTab === "notes" ? (
