@@ -79,6 +79,10 @@ export type MailBuilderTemplateInput = {
   includeMailer?: boolean;
   mailerType?: MailerType;
   mailerSizeKey?: string | null;
+  labelMarginTopIn?: number;
+  labelMarginLeftIn?: number;
+  labelMarginRightIn?: number;
+  labelMarginBottomIn?: number;
 };
 
 export async function listMailBuilderTemplates() {
@@ -87,7 +91,7 @@ export async function listMailBuilderTemplates() {
   const { data, error } = await supabase
     .from("mail_builder_templates")
     .select(
-      "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,created_at,updated_at"
+      "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,label_margin_top_in,label_margin_left_in,label_margin_right_in,label_margin_bottom_in,created_at,updated_at"
     )
     .eq("organization_id", context.organizationId)
     .order("name", { ascending: true });
@@ -111,6 +115,10 @@ export async function saveMailBuilderTemplate(input: MailBuilderTemplateInput) {
     include_mailer: Boolean(input.includeMailer),
     mailer_type: input.mailerType ?? "label",
     mailer_size_key: toText(input.mailerSizeKey) || null,
+    label_margin_top_in: Number(input.labelMarginTopIn ?? 0),
+    label_margin_left_in: Number(input.labelMarginLeftIn ?? 0),
+    label_margin_right_in: Number(input.labelMarginRightIn ?? 0),
+    label_margin_bottom_in: Number(input.labelMarginBottomIn ?? 0),
     updated_by: context.userId
   };
 
@@ -128,7 +136,7 @@ export async function saveMailBuilderTemplate(input: MailBuilderTemplateInput) {
       .eq("organization_id", context.organizationId)
       .eq("id", toText(input.id))
       .select(
-        "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,created_at,updated_at"
+        "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,label_margin_top_in,label_margin_left_in,label_margin_right_in,label_margin_bottom_in,created_at,updated_at"
       )
       .single();
     if (error) throw error;
@@ -142,7 +150,7 @@ export async function saveMailBuilderTemplate(input: MailBuilderTemplateInput) {
       created_by: context.userId
     })
     .select(
-      "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,created_at,updated_at"
+      "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,label_margin_top_in,label_margin_left_in,label_margin_right_in,label_margin_bottom_in,created_at,updated_at"
     )
     .single();
   if (error) throw error;

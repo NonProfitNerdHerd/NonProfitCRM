@@ -11,12 +11,26 @@ type ActivityType = "all" | "transactions";
 type PaperSize = "letter" | "legal" | "tabloid" | "a4" | "a5";
 type MailerType = "label" | "envelope";
 
-type MailerSizeOption = {
+type AveryLabelProduct = {
+  key: string;
+  label: string;
+  columns: number;
+  rows: number;
+  labelWidthIn: number;
+  labelHeightIn: number;
+  topMarginIn: number;
+  leftMarginIn: number;
+  horizontalGapIn: number;
+  verticalGapIn: number;
+  pageWidthIn: number;
+  pageHeightIn: number;
+};
+
+type EnvelopeSizeOption = {
   key: string;
   label: string;
   widthIn: number;
   heightIn: number;
-  type: MailerType;
 };
 
 type MailTemplate = {
@@ -32,6 +46,10 @@ type MailTemplate = {
   include_mailer: boolean;
   mailer_type: MailerType | null;
   mailer_size_key: string | null;
+  label_margin_top_in: number;
+  label_margin_left_in: number;
+  label_margin_right_in: number;
+  label_margin_bottom_in: number;
   created_at: string;
   updated_at: string;
 };
@@ -56,13 +74,83 @@ type MailRecipient = {
   lastTransactionDate: string;
 };
 
-const MAILER_SIZE_OPTIONS: MailerSizeOption[] = [
-  { key: "label_4x6", label: "Label 4 x 6", widthIn: 4, heightIn: 6, type: "label" },
-  { key: "label_3x2", label: "Label 3 x 2", widthIn: 3, heightIn: 2, type: "label" },
-  { key: "label_2x4", label: "Label 2 x 4", widthIn: 2, heightIn: 4, type: "label" },
-  { key: "envelope_10", label: "#10 Envelope (9.5 x 4.125)", widthIn: 9.5, heightIn: 4.125, type: "envelope" },
-  { key: "envelope_dl", label: "DL Envelope (8.66 x 4.33)", widthIn: 8.66, heightIn: 4.33, type: "envelope" },
-  { key: "envelope_c5", label: "C5 Envelope (9.0 x 6.4)", widthIn: 9, heightIn: 6.4, type: "envelope" }
+const AVERY_LABEL_PRODUCTS: AveryLabelProduct[] = [
+  {
+    key: "avery_5160",
+    label: "Avery 5160 / 8160 (30 per sheet, 1\" x 2.625\")",
+    columns: 3,
+    rows: 10,
+    labelWidthIn: 2.625,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.1875,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5161",
+    label: "Avery 5161 / 8161 (20 per sheet, 1\" x 4\")",
+    columns: 2,
+    rows: 10,
+    labelWidthIn: 4,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5162",
+    label: "Avery 5162 / 8162 (14 per sheet, 1.333\" x 4\")",
+    columns: 2,
+    rows: 7,
+    labelWidthIn: 4,
+    labelHeightIn: 1.333,
+    topMarginIn: 0.833,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5163",
+    label: "Avery 5163 / 8163 (10 per sheet, 2\" x 4\")",
+    columns: 2,
+    rows: 5,
+    labelWidthIn: 4,
+    labelHeightIn: 2,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5164",
+    label: "Avery 5164 / 8164 (6 per sheet, 3.333\" x 4\")",
+    columns: 2,
+    rows: 3,
+    labelWidthIn: 4,
+    labelHeightIn: 3.333,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  }
+];
+
+const ENVELOPE_SIZE_OPTIONS: EnvelopeSizeOption[] = [
+  { key: "envelope_10", label: "#10 Envelope (9.5 x 4.125)", widthIn: 9.5, heightIn: 4.125 },
+  { key: "envelope_dl", label: "DL Envelope (8.66 x 4.33)", widthIn: 8.66, heightIn: 4.33 },
+  { key: "envelope_c5", label: "C5 Envelope (9.0 x 6.4)", widthIn: 9, heightIn: 6.4 }
 ];
 
 function toCsvCell(value: unknown) {
@@ -146,9 +234,14 @@ function applyTemplate(templateBody: string, recipient: MailRecipient) {
   return mergedLines.join("\n");
 }
 
-function getMailerSizeOption(mailerSizeKey: string | null | undefined) {
+function getEnvelopeSizeOption(mailerSizeKey: string | null | undefined) {
   if (!mailerSizeKey) return null;
-  return MAILER_SIZE_OPTIONS.find((option) => option.key === mailerSizeKey) ?? null;
+  return ENVELOPE_SIZE_OPTIONS.find((option) => option.key === mailerSizeKey) ?? null;
+}
+
+function getAveryLabelProduct(mailerSizeKey: string | null | undefined) {
+  if (!mailerSizeKey) return null;
+  return AVERY_LABEL_PRODUCTS.find((option) => option.key === mailerSizeKey) ?? null;
 }
 
 function paperSizeToFormat(paperSize: PaperSize): string | number[] {
@@ -199,7 +292,11 @@ export function MailBuilderWizard() {
     marginBottomIn: "0.5",
     includeMailer: false,
     mailerType: "label" as MailerType,
-    mailerSizeKey: "label_4x6"
+    mailerSizeKey: "avery_5160",
+    labelMarginTopIn: "0",
+    labelMarginLeftIn: "0",
+    labelMarginRightIn: "0",
+    labelMarginBottomIn: "0"
   });
 
   const [recipients, setRecipients] = useState<MailRecipient[]>([]);
@@ -234,7 +331,10 @@ export function MailBuilderWizard() {
   ]);
 
   const availableMailerSizes = useMemo(
-    () => MAILER_SIZE_OPTIONS.filter((option) => option.type === templateForm.mailerType),
+    () =>
+      templateForm.mailerType === "label"
+        ? AVERY_LABEL_PRODUCTS.map((option) => ({ key: option.key, label: option.label }))
+        : ENVELOPE_SIZE_OPTIONS.map((option) => ({ key: option.key, label: option.label })),
     [templateForm.mailerType]
   );
 
@@ -273,7 +373,11 @@ export function MailBuilderWizard() {
         marginBottomIn: String(first.margin_bottom_in ?? 0.5),
         includeMailer: Boolean(first.include_mailer),
         mailerType: (first.mailer_type ?? "label") as MailerType,
-        mailerSizeKey: first.mailer_size_key ?? "label_4x6"
+        mailerSizeKey: first.mailer_size_key ?? "avery_5160",
+        labelMarginTopIn: String(first.label_margin_top_in ?? 0),
+        labelMarginLeftIn: String(first.label_margin_left_in ?? 0),
+        labelMarginRightIn: String(first.label_margin_right_in ?? 0),
+        labelMarginBottomIn: String(first.label_margin_bottom_in ?? 0)
       });
     }
   }
@@ -313,7 +417,11 @@ export function MailBuilderWizard() {
           marginBottomIn: Number(templateForm.marginBottomIn || 0.5),
           includeMailer: templateForm.includeMailer,
           mailerType: templateForm.mailerType,
-          mailerSizeKey: templateForm.includeMailer ? templateForm.mailerSizeKey : null
+          mailerSizeKey: templateForm.includeMailer ? templateForm.mailerSizeKey : null,
+          labelMarginTopIn: Number(templateForm.labelMarginTopIn || 0),
+          labelMarginLeftIn: Number(templateForm.labelMarginLeftIn || 0),
+          labelMarginRightIn: Number(templateForm.labelMarginRightIn || 0),
+          labelMarginBottomIn: Number(templateForm.labelMarginBottomIn || 0)
         })
       });
       const payload = await response.json().catch(() => null);
@@ -353,7 +461,11 @@ export function MailBuilderWizard() {
       marginBottomIn: "0.5",
       includeMailer: false,
       mailerType: "label",
-      mailerSizeKey: "label_4x6"
+      mailerSizeKey: "avery_5160",
+      labelMarginTopIn: "0",
+      labelMarginLeftIn: "0",
+      labelMarginRightIn: "0",
+      labelMarginBottomIn: "0"
     });
     setMessage("Template deleted.");
     await loadTemplates();
@@ -483,27 +595,24 @@ export function MailBuilderWizard() {
     setStep((prev) => Math.max(1, prev - 1) as MailStep);
   }
 
-  async function exportPdf() {
+  async function exportLettersPdf() {
     if (toText(templateForm.templateBody) === "" || recipients.length === 0) {
-      setError("Generate preview recipients and add template body before exporting PDFs.");
+      setError("Generate preview recipients and add template body before downloading letters.");
       return;
     }
     setExporting(true);
     clearMessages();
     try {
       const { jsPDF } = await import("jspdf");
-      const letterFormat = templateForm.paperSize;
       const marginTopPt = Math.max(0, Number(templateForm.marginTopIn || 0.5)) * 72;
       const marginLeftPt = Math.max(0, Number(templateForm.marginLeftIn || 0.5)) * 72;
       const marginRightPt = Math.max(0, Number(templateForm.marginRightIn || 0.5)) * 72;
       const marginBottomPt = Math.max(0, Number(templateForm.marginBottomIn || 0.5)) * 72;
-
       const lettersDoc = new jsPDF({
         orientation: "portrait",
         unit: "pt",
-        format: paperSizeToFormat(letterFormat)
+        format: paperSizeToFormat(templateForm.paperSize)
       });
-
       recipients.forEach((recipient, index) => {
         if (index > 0) lettersDoc.addPage();
         const textBlock = applyTemplate(templateForm.templateBody, recipient);
@@ -527,50 +636,136 @@ export function MailBuilderWizard() {
           y += lineHeight;
         }
       });
-
       const fileDate = new Date().toISOString().slice(0, 10);
       lettersDoc.save(`mail-builder-letters-${fileDate}.pdf`);
+      setMessage("Letter PDF downloaded.");
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Unable to download letter PDF.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
-      if (templateForm.includeMailer) {
-        const mailerSize = getMailerSizeOption(templateForm.mailerSizeKey);
-        if (mailerSize) {
-          const widthPt = mailerSize.widthIn * 72;
-          const heightPt = mailerSize.heightIn * 72;
-          const mailerDoc = new jsPDF({
-            orientation: widthPt >= heightPt ? "landscape" : "portrait",
-            unit: "pt",
-            format: [widthPt, heightPt]
-          });
+  async function exportMailerPdf() {
+    if (!templateForm.includeMailer) {
+      setError("Enable labels/envelopes first.");
+      return;
+    }
+    if (recipients.length === 0) {
+      setError("Generate preview recipients before downloading labels/envelopes.");
+      return;
+    }
+    setExporting(true);
+    clearMessages();
+    try {
+      const { jsPDF } = await import("jspdf");
+      const fileDate = new Date().toISOString().slice(0, 10);
 
-          recipients.forEach((recipient, index) => {
-            if (index > 0) mailerDoc.addPage();
-            const lines = [
-              recipient.name,
-              recipient.addressLine1,
-              recipient.addressLine2,
-              [recipient.city, recipient.state, recipient.postalCode].filter(Boolean).join(", ")
-            ].filter((line) => toText(line));
-            const pageWidth = mailerDoc.internal.pageSize.getWidth();
-            const pageHeight = mailerDoc.internal.pageSize.getHeight();
-            const fontSize = templateForm.mailerType === "envelope" ? 13 : 12;
-            const lineHeight = fontSize * 1.3;
-            const blockHeight = lines.length * lineHeight;
-            const startY = Math.max(26, (pageHeight - blockHeight) / 2);
-            mailerDoc.setFont("helvetica", "normal");
-            mailerDoc.setFontSize(fontSize);
-            lines.forEach((line, lineIndex) => {
-              mailerDoc.text(line, pageWidth / 2, startY + lineIndex * lineHeight, { align: "center" });
-            });
-          });
-
-          const suffix = templateForm.mailerType === "envelope" ? "envelopes" : "labels";
-          mailerDoc.save(`mail-builder-${suffix}-${fileDate}.pdf`);
+      if (templateForm.mailerType === "label") {
+        const product = getAveryLabelProduct(templateForm.mailerSizeKey);
+        if (!product) {
+          setError("Select an Avery product.");
+          setExporting(false);
+          return;
         }
+        const labelMarginTopPt = Math.max(0, Number(templateForm.labelMarginTopIn || 0)) * 72;
+        const labelMarginLeftPt = Math.max(0, Number(templateForm.labelMarginLeftIn || 0)) * 72;
+        const labelMarginRightPt = Math.max(0, Number(templateForm.labelMarginRightIn || 0)) * 72;
+        const labelMarginBottomPt = Math.max(0, Number(templateForm.labelMarginBottomIn || 0)) * 72;
+
+        const doc = new jsPDF({
+          orientation: "portrait",
+          unit: "pt",
+          format: [product.pageWidthIn * 72, product.pageHeightIn * 72]
+        });
+
+        const labelsPerSheet = product.columns * product.rows;
+        const labelWidthPt = product.labelWidthIn * 72;
+        const labelHeightPt = product.labelHeightIn * 72;
+        const pageMarginTopPt = product.topMarginIn * 72;
+        const pageMarginLeftPt = product.leftMarginIn * 72;
+        const hGapPt = product.horizontalGapIn * 72;
+        const vGapPt = product.verticalGapIn * 72;
+        const fontSize = 10;
+
+        recipients.forEach((recipient, index) => {
+          if (index > 0 && index % labelsPerSheet === 0) doc.addPage();
+          const indexOnSheet = index % labelsPerSheet;
+          const row = Math.floor(indexOnSheet / product.columns);
+          const col = indexOnSheet % product.columns;
+          const labelX = pageMarginLeftPt + col * (labelWidthPt + hGapPt);
+          const labelY = pageMarginTopPt + row * (labelHeightPt + vGapPt);
+          const contentX = labelX + labelMarginLeftPt;
+          const contentYStart = labelY + labelMarginTopPt + fontSize;
+          const contentWidth = Math.max(40, labelWidthPt - labelMarginLeftPt - labelMarginRightPt);
+          const contentBottom = labelY + labelHeightPt - labelMarginBottomPt;
+
+          const blockText = [
+            recipient.name,
+            recipient.addressLine1,
+            recipient.addressLine2,
+            [recipient.city, recipient.state, recipient.postalCode].filter(Boolean).join(", ")
+          ]
+            .filter((line) => toText(line))
+            .join("\n");
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(fontSize);
+          const wrapped = doc.splitTextToSize(blockText, contentWidth);
+          let y = contentYStart;
+          const lineHeight = fontSize * 1.25;
+          for (const line of wrapped) {
+            if (y > contentBottom) break;
+            doc.text(line, contentX, y);
+            y += lineHeight;
+          }
+        });
+
+        doc.save(`mail-builder-labels-${fileDate}.pdf`);
+        setMessage("Labels PDF downloaded.");
+        setExporting(false);
+        return;
       }
 
-      setMessage("PDF export generated.");
+      const envelope = getEnvelopeSizeOption(templateForm.mailerSizeKey);
+      if (!envelope) {
+        setError("Select an envelope size.");
+        setExporting(false);
+        return;
+      }
+      const widthPt = envelope.widthIn * 72;
+      const heightPt = envelope.heightIn * 72;
+      const envelopeDoc = new jsPDF({
+        orientation: widthPt >= heightPt ? "landscape" : "portrait",
+        unit: "pt",
+        format: [widthPt, heightPt]
+      });
+      recipients.forEach((recipient, index) => {
+        if (index > 0) envelopeDoc.addPage();
+        const lines = [
+          recipient.name,
+          recipient.addressLine1,
+          recipient.addressLine2,
+          [recipient.city, recipient.state, recipient.postalCode].filter(Boolean).join(", ")
+        ].filter((line) => toText(line));
+        const pageWidth = envelopeDoc.internal.pageSize.getWidth();
+        const pageHeight = envelopeDoc.internal.pageSize.getHeight();
+        const fontSize = 13;
+        const lineHeight = fontSize * 1.3;
+        const blockHeight = lines.length * lineHeight;
+        const startY = Math.max(26, (pageHeight - blockHeight) / 2);
+        envelopeDoc.setFont("helvetica", "normal");
+        envelopeDoc.setFontSize(fontSize);
+        lines.forEach((line, lineIndex) => {
+          envelopeDoc.text(line, pageWidth / 2, startY + lineIndex * lineHeight, { align: "center" });
+        });
+      });
+      envelopeDoc.save(`mail-builder-envelopes-${fileDate}.pdf`);
+      setMessage("Envelopes PDF downloaded.");
     } catch (exportError) {
-      setError(exportError instanceof Error ? exportError.message : "Unable to export PDF.");
+      setError(
+        exportError instanceof Error ? exportError.message : "Unable to download labels/envelopes PDF."
+      );
     } finally {
       setExporting(false);
     }
@@ -825,7 +1020,11 @@ export function MailBuilderWizard() {
                       marginBottomIn: String(nextTemplate.margin_bottom_in ?? 0.5),
                       includeMailer: Boolean(nextTemplate.include_mailer),
                       mailerType: (nextTemplate.mailer_type ?? "label") as MailerType,
-                      mailerSizeKey: nextTemplate.mailer_size_key ?? "label_4x6"
+                      mailerSizeKey: nextTemplate.mailer_size_key ?? "avery_5160",
+                      labelMarginTopIn: String(nextTemplate.label_margin_top_in ?? 0),
+                      labelMarginLeftIn: String(nextTemplate.label_margin_left_in ?? 0),
+                      labelMarginRightIn: String(nextTemplate.label_margin_right_in ?? 0),
+                      labelMarginBottomIn: String(nextTemplate.label_margin_bottom_in ?? 0)
                     });
                   }}
                 >
@@ -952,7 +1151,11 @@ export function MailBuilderWizard() {
                     marginBottomIn: "0.5",
                     includeMailer: false,
                     mailerType: "label",
-                    mailerSizeKey: "label_4x6"
+                    mailerSizeKey: "avery_5160",
+                    labelMarginTopIn: "0",
+                    labelMarginLeftIn: "0",
+                    labelMarginRightIn: "0",
+                    labelMarginBottomIn: "0"
                   });
                 }}
               >
@@ -1001,42 +1204,106 @@ export function MailBuilderWizard() {
               </label>
             </div>
             {templateForm.includeMailer ? (
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
-                  <select
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={templateForm.mailerType}
-                    onChange={(event) =>
-                      setTemplateForm((prev) => ({
-                        ...prev,
-                        mailerType: event.target.value as MailerType,
-                        mailerSizeKey:
-                          MAILER_SIZE_OPTIONS.find((option) => option.type === (event.target.value as MailerType))
-                            ?.key ?? prev.mailerSizeKey
-                      }))
-                    }
-                  >
-                    <option value="label">Labels</option>
-                    <option value="envelope">Envelopes</option>
-                  </select>
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={templateForm.mailerType}
+                      onChange={(event) =>
+                        setTemplateForm((prev) => ({
+                          ...prev,
+                          mailerType: event.target.value as MailerType,
+                          mailerSizeKey:
+                            event.target.value === "label"
+                              ? AVERY_LABEL_PRODUCTS[0]?.key ?? prev.mailerSizeKey
+                              : ENVELOPE_SIZE_OPTIONS[0]?.key ?? prev.mailerSizeKey
+                        }))
+                      }
+                    >
+                      <option value="label">Labels</option>
+                      <option value="envelope">Envelopes</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {templateForm.mailerType === "label" ? "Avery product" : "Envelope size"}
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={templateForm.mailerSizeKey}
+                      onChange={(event) =>
+                        setTemplateForm((prev) => ({ ...prev, mailerSizeKey: event.target.value }))
+                      }
+                    >
+                      {availableMailerSizes.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Size</label>
-                  <select
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={templateForm.mailerSizeKey}
-                    onChange={(event) =>
-                      setTemplateForm((prev) => ({ ...prev, mailerSizeKey: event.target.value }))
-                    }
-                  >
-                    {availableMailerSizes.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {templateForm.mailerType === "label" ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-700">Label Margins (inches, inside each label)</p>
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Top</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={templateForm.labelMarginTopIn}
+                          onChange={(event) =>
+                            setTemplateForm((prev) => ({ ...prev, labelMarginTopIn: event.target.value }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Left</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={templateForm.labelMarginLeftIn}
+                          onChange={(event) =>
+                            setTemplateForm((prev) => ({ ...prev, labelMarginLeftIn: event.target.value }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Right</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={templateForm.labelMarginRightIn}
+                          onChange={(event) =>
+                            setTemplateForm((prev) => ({ ...prev, labelMarginRightIn: event.target.value }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Bottom</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={templateForm.labelMarginBottomIn}
+                          onChange={(event) =>
+                            setTemplateForm((prev) => ({ ...prev, labelMarginBottomIn: event.target.value }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <p className="text-sm text-slate-500">
@@ -1109,9 +1376,18 @@ export function MailBuilderWizard() {
               Export letter PDF and, if enabled, a second PDF for labels/envelopes.
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" onClick={() => void exportPdf()} disabled={exporting}>
-                {exporting ? "Exporting..." : "Export PDFs"}
+              <Button type="button" onClick={() => void exportLettersPdf()} disabled={exporting}>
+                {exporting ? "Working..." : "Download Letter"}
               </Button>
+              {templateForm.includeMailer ? (
+                <Button type="button" variant="secondary" onClick={() => void exportMailerPdf()} disabled={exporting}>
+                  {exporting
+                    ? "Working..."
+                    : templateForm.mailerType === "envelope"
+                      ? "Download Envelopes"
+                      : "Download Labels"}
+                </Button>
+              ) : null}
               <span className="text-xs text-slate-600">Recipient count: {recipients.length}</span>
             </div>
             {templateForm.includeMailer ? (

@@ -13,7 +13,11 @@ const templateUpdateSchema = z.object({
   marginBottomIn: z.coerce.number().min(0).max(3).optional(),
   includeMailer: z.boolean().optional(),
   mailerType: z.enum(["label", "envelope"]).optional(),
-  mailerSizeKey: z.string().trim().optional().nullable()
+  mailerSizeKey: z.string().trim().optional().nullable(),
+  labelMarginTopIn: z.coerce.number().min(0).max(1).optional(),
+  labelMarginLeftIn: z.coerce.number().min(0).max(1).optional(),
+  labelMarginRightIn: z.coerce.number().min(0).max(1).optional(),
+  labelMarginBottomIn: z.coerce.number().min(0).max(1).optional()
 });
 
 type Params = {
