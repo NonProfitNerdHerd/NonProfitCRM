@@ -231,8 +231,20 @@ export async function createTenantProvisioning(input: {
   if (rpcError) {
     const details = [rpcError.message, rpcError.details, rpcError.hint].filter(Boolean).join(" ").toLowerCase();
     if (rpcError.code === "23505" || details.includes("slug")) {
+      const requestedSlug = toText(input.slug).toLowerCase();
+      const { data: existingTenant } = await supabase
+        .from("tenants")
+        .select("id,slug,organization_name,status")
+        .eq("slug", requestedSlug)
+        .limit(1)
+        .maybeSingle();
+      if (existingTenant?.id) {
+        throw new Error(
+          `Tenant slug already exists for "${toText(existingTenant.organization_name)}". Open: /platform/admin/tenants/${toText(existingTenant.id)}`
+        );
+      }
       throw new Error(
-        "Tenant slug already exists. Please change the slug (for example add -2) and try again."
+        "Tenant slug already exists. If it does not appear in Tenant Registry yet, retry once to recover the reserved slug, or choose a different slug (for example add -2)."
       );
     }
     if (details.includes("platform_provision_tenant")) {
