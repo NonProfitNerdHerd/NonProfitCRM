@@ -231,7 +231,23 @@ export async function createTenantProvisioning(input: {
     })
     .select("id,name,slug")
     .single();
-  if (organizationError) throw new Error(organizationError.message);
+  if (organizationError) {
+    const details = [organizationError.message, organizationError.details, organizationError.hint]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (organizationError.code === "23505" || details.includes("organizations_slug_key")) {
+      throw new Error(
+        "Tenant slug already exists. Please change the slug (for example add -2) and try again."
+      );
+    }
+    if (details.includes("row-level security")) {
+      throw new Error(
+        "Platform provisioning is blocked by database policy. Apply migration 202603182345 and retry."
+      );
+    }
+    throw new Error(organizationError.message);
+  }
 
   const { data: tenant, error: tenantError } = await supabase
     .from("tenants")
@@ -258,7 +274,18 @@ export async function createTenantProvisioning(input: {
     )
     .select("*")
     .single();
-  if (tenantError) throw new Error(tenantError.message);
+  if (tenantError) {
+    const details = [tenantError.message, tenantError.details, tenantError.hint]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (tenantError.code === "23505" || details.includes("tenants_slug_key")) {
+      throw new Error(
+        "Tenant slug already exists. Please change the slug (for example add -2) and try again."
+      );
+    }
+    throw new Error(tenantError.message);
+  }
 
   if (toText(input.firstTenantAdminUserId)) {
     const { data: roleTemplate } = await supabase
