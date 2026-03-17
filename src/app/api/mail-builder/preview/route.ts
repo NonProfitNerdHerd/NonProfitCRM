@@ -26,8 +26,14 @@ export async function POST(request: Request) {
     const preview = await getMailBuilderPreview(parsed.data);
     return NextResponse.json({ ok: true, ...preview });
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : String((error as { message?: string })?.message ?? "Unable to build mail preview.");
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : "Unable to build mail preview." },
+      { message },
       { status: 500 }
     );
   }

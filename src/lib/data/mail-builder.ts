@@ -25,6 +25,30 @@ function parseDate(value: unknown) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const withMessage = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const message = toText(withMessage.message);
+    const details = toText(withMessage.details);
+    const hint = toText(withMessage.hint);
+    return [message, details, hint].filter(Boolean).join(" | ") || fallback;
+  }
+  return fallback;
+}
+
+function isMissingMailingColumnError(error: unknown) {
+  const message = errorMessage(error, "").toLowerCase();
+  return (
+    message.includes("mailing_address_line_1") ||
+    message.includes("mailing_address_line_2") ||
+    message.includes("mailing_city") ||
+    message.includes("mailing_state") ||
+    message.includes("mailing_postal_code")
+  );
+}
+
 export type MailBuilderTemplateInput = {
   id?: string;
   name: string;
@@ -117,14 +141,17 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
   const dateTo = parseDate(input.transactionsTo);
   const normalizedTagId = toText(input.tagId);
 
+  const enrichedContactSelect =
+    "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,address_line_1,address_line_2,city,state,postal_code,mailing_address_line_1,mailing_address_line_2,mailing_city,mailing_state,mailing_postal_code";
+  const legacyContactSelect =
+    "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,address_line_1,address_line_2,city,state,postal_code";
+
   let contactQuery = supabase
     .from("contacts_safe_view")
-    .select(
-      "id,first_name,last_name,preferred_name,organization_name,email,phone,entity_type,tracking_status,address_line_1,address_line_2,city,state,postal_code,mailing_address_line_1,mailing_address_line_2,mailing_city,mailing_state,mailing_postal_code"
-    )
+    .select(enrichedContactSelect)
     .eq("organization_id", context.organizationId)
     .order("last_name", { ascending: true })
-    .limit(5000);
+    .limit(50000);
 
   if (segment === "persons") {
     contactQuery = contactQuery.eq("entity_type", "person");
@@ -132,8 +159,22 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     contactQuery = contactQuery.eq("entity_type", "organization");
   }
 
-  const { data: contacts, error: contactsError } = await contactQuery;
-  if (contactsError) throw contactsError;
+  const contactResult = await contactQuery;
+  let contacts = (contactResult.data ?? null) as Array<Record<string, unknown>> | null;
+  let contactsError = contactResult.error;
+  if (contactsError && isMissingMailingColumnError(contactsError)) {
+    const fallbackResult = await supabase
+      .from("contacts_safe_view")
+      .select(legacyContactSelect)
+      .eq("organization_id", context.organizationId)
+      .order("last_name", { ascending: true })
+      .limit(50000);
+    contacts = (fallbackResult.data ?? null) as Array<Record<string, unknown>> | null;
+    contactsError = fallbackResult.error;
+  }
+  if (contactsError) {
+    throw new Error(errorMessage(contactsError, "Unable to load contacts for mail builder."));
+  }
 
   const contactRows = (contacts ?? []) as Array<Record<string, unknown>>;
   const contactIds = contactRows.map((row) => toText(row.id)).filter(Boolean);
@@ -178,22 +219,30 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
   let transactionRows: Array<Record<string, unknown>> = [];
   let transactionRollup = new Map<string, { count: number; total: number; lastDate: string }>();
   if (activityType === "transactions") {
+    const filteredContactSet = new Set(filteredContactIds);
     let donationQuery = supabase
       .from("donations")
       .select("contact_id,amount,donation_date")
       .eq("organization_id", context.organizationId)
-      .in("contact_id", filteredContactIds)
       .not("contact_id", "is", null)
-      .limit(20000);
+      .limit(100000);
     if (dateFrom) donationQuery = donationQuery.gte("donation_date", dateFrom);
     if (dateTo) donationQuery = donationQuery.lte("donation_date", dateTo);
     const { data: donations, error: donationsError } = await donationQuery;
-    if (donationsError) throw donationsError;
+    if (donationsError) {
+      throw new Error(
+        errorMessage(
+          donationsError,
+          "Unable to load transactions for mail builder. Check donations permission and filters."
+        )
+      );
+    }
     transactionRows = (donations ?? []) as Array<Record<string, unknown>>;
     transactionRollup = new Map<string, { count: number; total: number; lastDate: string }>();
     for (const donation of transactionRows) {
       const contactId = toText(donation.contact_id);
       if (!contactId) continue;
+      if (!filteredContactSet.has(contactId)) continue;
       const current = transactionRollup.get(contactId) ?? { count: 0, total: 0, lastDate: "" };
       current.count += 1;
       current.total += toNumber(donation.amount);
