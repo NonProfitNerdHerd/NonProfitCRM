@@ -4,9 +4,16 @@ import { deleteMailBuilderTemplate, saveMailBuilderTemplate } from "@/lib/data/m
 
 const templateUpdateSchema = z.object({
   name: z.string().trim().min(1),
-  paperSize: z.enum(["letter", "a4", "label_4x6"]),
+  paperSize: z.enum(["letter", "legal", "tabloid", "a4", "a5"]),
   templateBody: z.string().trim().min(1),
-  isActive: z.boolean().optional()
+  isActive: z.boolean().optional(),
+  marginTopIn: z.coerce.number().min(0).max(3).optional(),
+  marginLeftIn: z.coerce.number().min(0).max(3).optional(),
+  marginRightIn: z.coerce.number().min(0).max(3).optional(),
+  marginBottomIn: z.coerce.number().min(0).max(3).optional(),
+  includeMailer: z.boolean().optional(),
+  mailerType: z.enum(["label", "envelope"]).optional(),
+  mailerSizeKey: z.string().trim().optional().nullable()
 });
 
 type Params = {

@@ -3,6 +3,8 @@ import { requireAnyStaffPermission, requireStaffPermission } from "@/lib/auth/gu
 
 type ContactSegment = "donors" | "donor_organizations" | "all";
 type ActivityType = "all" | "transactions";
+type LetterPaperSize = "letter" | "legal" | "tabloid" | "a4" | "a5";
+type MailerType = "label" | "envelope";
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -67,9 +69,16 @@ function isClassificationSchemaMissingError(error: unknown) {
 export type MailBuilderTemplateInput = {
   id?: string;
   name: string;
-  paperSize: "letter" | "a4" | "label_4x6";
+  paperSize: LetterPaperSize;
   templateBody: string;
   isActive?: boolean;
+  marginTopIn?: number;
+  marginLeftIn?: number;
+  marginRightIn?: number;
+  marginBottomIn?: number;
+  includeMailer?: boolean;
+  mailerType?: MailerType;
+  mailerSizeKey?: string | null;
 };
 
 export async function listMailBuilderTemplates() {
@@ -77,7 +86,9 @@ export async function listMailBuilderTemplates() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("mail_builder_templates")
-    .select("id,name,paper_size,template_body,is_active,created_at,updated_at")
+    .select(
+      "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,created_at,updated_at"
+    )
     .eq("organization_id", context.organizationId)
     .order("name", { ascending: true });
   if (error) throw error;
@@ -93,6 +104,13 @@ export async function saveMailBuilderTemplate(input: MailBuilderTemplateInput) {
     paper_size: input.paperSize,
     template_body: toText(input.templateBody),
     is_active: input.isActive !== false,
+    margin_top_in: Number(input.marginTopIn ?? 0.5),
+    margin_left_in: Number(input.marginLeftIn ?? 0.5),
+    margin_right_in: Number(input.marginRightIn ?? 0.5),
+    margin_bottom_in: Number(input.marginBottomIn ?? 0.5),
+    include_mailer: Boolean(input.includeMailer),
+    mailer_type: input.mailerType ?? "label",
+    mailer_size_key: toText(input.mailerSizeKey) || null,
     updated_by: context.userId
   };
 
@@ -109,7 +127,9 @@ export async function saveMailBuilderTemplate(input: MailBuilderTemplateInput) {
       .update(payload)
       .eq("organization_id", context.organizationId)
       .eq("id", toText(input.id))
-      .select("id,name,paper_size,template_body,is_active,created_at,updated_at")
+      .select(
+        "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,created_at,updated_at"
+      )
       .single();
     if (error) throw error;
     return data;
@@ -121,7 +141,9 @@ export async function saveMailBuilderTemplate(input: MailBuilderTemplateInput) {
       ...payload,
       created_by: context.userId
     })
-    .select("id,name,paper_size,template_body,is_active,created_at,updated_at")
+    .select(
+      "id,name,paper_size,template_body,is_active,margin_top_in,margin_left_in,margin_right_in,margin_bottom_in,include_mailer,mailer_type,mailer_size_key,created_at,updated_at"
+    )
     .single();
   if (error) throw error;
   return data;
@@ -139,11 +161,12 @@ export async function deleteMailBuilderTemplate(templateId: string) {
 }
 
 export async function listMailBuilderCampaignOptions() {
-  await requireAnyStaffPermission(["can_view_contacts", "can_view_donations"]);
+  const context = await requireAnyStaffPermission(["can_view_contacts", "can_view_donations"]);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("campaigns")
     .select("id,name,status")
+    .eq("organization_id", context.organizationId)
     .order("name", { ascending: true })
     .limit(1000);
   if (error) throw error;
@@ -223,7 +246,10 @@ export async function getMailBuilderPreview(input: MailBuilderPreviewFilter) {
     if (segment === "donor_organizations") {
       return entityType === "organization" && (allowByTransactionMode || isDonorFlag);
     }
-    return true;
+    if (!allowByTransactionMode) {
+      return isDonorFlag && (entityType === "person" || entityType === "organization");
+    }
+    return entityType === "person" || entityType === "organization";
   });
   const contactIds = normalizedContactRows.map((row) => toText(row.id)).filter(Boolean);
   if (contactIds.length === 0) {
