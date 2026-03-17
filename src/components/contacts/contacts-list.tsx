@@ -36,12 +36,14 @@ export function ContactsList({
   title,
   subtitle,
   contacts,
-  mode = "all"
+  mode = "all",
+  showMailBuilderLink = false
 }: {
   title: string;
   subtitle: string;
   contacts: Array<Record<string, unknown>>;
   mode?: ContactMode;
+  showMailBuilderLink?: boolean;
 }) {
   const [rows, setRows] = useState<ContactRow[]>(contacts as ContactRow[]);
   const [loading, setLoading] = useState(false);
@@ -101,12 +103,22 @@ export function ContactsList({
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <p className="text-sm text-slate-600">{subtitle}</p>
         </div>
-        <Link
-          className="inline-flex rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
-          href="/staff/contacts/new"
-        >
-          New contact
-        </Link>
+        <div className="flex items-center gap-2">
+          {showMailBuilderLink ? (
+            <Link
+              className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              href="/staff/contacts/mail-builder"
+            >
+              Mail Builder
+            </Link>
+          ) : null}
+          <Link
+            className="inline-flex rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            href="/staff/contacts/new"
+          >
+            New contact
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 p-3">

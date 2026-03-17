@@ -21,6 +21,7 @@ export default async function ContactsPage() {
         subtitle="Unfiltered directory of contacts"
         contacts={contacts as Array<Record<string, unknown>>}
         mode="all"
+        showMailBuilderLink
       />
     </Card>
   );

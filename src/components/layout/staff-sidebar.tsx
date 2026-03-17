@@ -33,7 +33,8 @@ const BASE_MENU: MenuItem[] = [
       { href: "/staff/donors", label: "Donors" },
       { href: "/staff/contacts/personal", label: "Contacts" },
       { href: "/staff/donor-organizations", label: "Donor Organizations" },
-      { href: "/staff/organizations", label: "Organizations" }
+      { href: "/staff/organizations", label: "Organizations" },
+      { href: "/staff/contacts/mail-builder", label: "Mail Builder" }
     ]
   },
   {
