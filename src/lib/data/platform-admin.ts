@@ -198,7 +198,7 @@ export async function createTenantProvisioning(input: {
   branding?: Record<string, unknown>;
   internalNotes?: string;
 }) {
-  const context = await requirePlatformAccess([
+  await requirePlatformAccess([
     "super_admin",
     "build_team_admin",
     "implementation_specialist"
@@ -210,161 +210,57 @@ export async function createTenantProvisioning(input: {
     input.enabledModulesCsv ??
       "contacts,financial,projects,memberships,reports,import_center,volunteer_coordination"
   );
-
-  let backupTierId = toText(input.backupTierId);
-  if (!backupTierId) {
-    const { data: standardTier } = await supabase
-      .from("tenant_backup_tiers")
-      .select("id")
-      .eq("key", "standard")
-      .limit(1)
-      .maybeSingle();
-    backupTierId = toText(standardTier?.id);
-  }
-
-  const { data: organization, error: organizationError } = await supabase
-    .from("organizations")
-    .insert({
-      name: toText(input.organizationName),
-      slug: toText(input.slug),
-      is_active: saveMode === "active"
-    })
-    .select("id,name,slug")
-    .single();
-  if (organizationError) {
-    const details = [organizationError.message, organizationError.details, organizationError.hint]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    if (organizationError.code === "23505" || details.includes("organizations_slug_key")) {
-      throw new Error(
-        "Tenant slug already exists. Please change the slug (for example add -2) and try again."
-      );
-    }
-    if (details.includes("row-level security")) {
-      throw new Error(
-        "Platform provisioning is blocked by database policy. Apply migration 202603182345 and retry."
-      );
-    }
-    throw new Error(organizationError.message);
-  }
-
-  const { data: tenant, error: tenantError } = await supabase
-    .from("tenants")
-    .upsert(
-      {
-        id: organization.id,
-        organization_name: toText(input.organizationName),
-        slug: toText(input.slug),
-        status: saveMode === "active" ? "active" : "draft",
-        primary_contact_name: toText(input.primaryContactName) || null,
-        primary_contact_email: toText(input.primaryContactEmail) || null,
-        primary_contact_phone: toText(input.primaryContactPhone) || null,
-        plan_package: toText(input.planPackage) || "standard",
-        enabled_modules: modules,
-        onboarding_stage: toText(input.onboardingStage) || "new",
-        backup_tier_id: backupTierId || null,
-        internal_notes: toText(input.internalNotes) || null,
-        backup_metadata: {
-          firstTenantAdminEmail: toText(input.firstTenantAdminEmail) || null,
-          appliedTemplate: toText(input.appliedTemplate) || null
-        }
-      },
-      { onConflict: "id" }
-    )
-    .select("*")
-    .single();
-  if (tenantError) {
-    const details = [tenantError.message, tenantError.details, tenantError.hint]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    if (tenantError.code === "23505" || details.includes("tenants_slug_key")) {
-      throw new Error(
-        "Tenant slug already exists. Please change the slug (for example add -2) and try again."
-      );
-    }
-    throw new Error(tenantError.message);
-  }
-
-  if (toText(input.firstTenantAdminUserId)) {
-    const { data: roleTemplate } = await supabase
-      .from("role_templates")
-      .select("id")
-      .is("organization_id", null)
-      .eq("key", "administrator")
-      .maybeSingle();
-
-    if (roleTemplate?.id) {
-      await supabase.from("organization_memberships").upsert(
-        {
-          organization_id: organization.id,
-          user_id: toText(input.firstTenantAdminUserId),
-          role_template_id: roleTemplate.id,
-          is_active: true
-        },
-        { onConflict: "organization_id,user_id" }
-      );
-    }
-  }
-
-  if (modules.length > 0) {
-    const entitlements = modules.map((moduleKey) => ({
-      tenant_id: organization.id,
-      module_key: moduleKey,
-      is_enabled: true,
-      source: "provisioning"
-    }));
-    await supabase.from("tenant_module_entitlements").upsert(entitlements, {
-      onConflict: "tenant_id,module_key"
-    });
-  }
-
-  const { data: provisioningRun, error: provisioningError } = await supabase
-    .from("tenant_provisioning_runs")
-    .insert({
-      tenant_id: organization.id,
-      requested_by: context.userId,
-      status: saveMode,
-      organization_name: toText(input.organizationName),
-      slug: toText(input.slug),
-      primary_contact_name: toText(input.primaryContactName) || null,
-      primary_contact_email: toText(input.primaryContactEmail) || null,
-      first_tenant_admin_email: toText(input.firstTenantAdminEmail) || null,
-      selected_modules: modules,
-      applied_template: toText(input.appliedTemplate) || null,
-      selected_plan: toText(input.planPackage) || "standard",
-      selected_backup_tier_key: backupTierId || null,
-      branding: input.branding ?? {},
-      payload: {
-        firstTenantAdminUserId: toText(input.firstTenantAdminUserId) || null
-      },
-      provisioning_log: [
-        {
-          at: new Date().toISOString(),
-          message:
-            saveMode === "active"
-              ? "Tenant activated from provisioning workflow."
-              : "Tenant saved as draft."
-        }
-      ],
-      activated_at: saveMode === "active" ? new Date().toISOString() : null
-    })
-    .select("*")
-    .single();
-  if (provisioningError) throw new Error(provisioningError.message);
-
-  await logPlatformEvent({
-    actionType: "tenant_provisioned",
-    targetEntityType: "tenants",
-    targetEntityId: organization.id,
-    tenantId: organization.id,
-    metadata: {
-      status: saveMode,
-      enabledModules: modules,
-      backupTierId: backupTierId || null
-    }
+  const { data: rpcData, error: rpcError } = await supabase.rpc("platform_provision_tenant", {
+    input_organization_name: toText(input.organizationName),
+    input_slug: toText(input.slug),
+    input_primary_contact_name: toText(input.primaryContactName) || null,
+    input_primary_contact_email: toText(input.primaryContactEmail) || null,
+    input_primary_contact_phone: toText(input.primaryContactPhone) || null,
+    input_plan_package: toText(input.planPackage) || "standard",
+    input_enabled_modules: modules,
+    input_onboarding_stage: toText(input.onboardingStage) || "new",
+    input_backup_tier_id: toText(input.backupTierId) || null,
+    input_first_tenant_admin_user_id: toText(input.firstTenantAdminUserId) || null,
+    input_first_tenant_admin_email: toText(input.firstTenantAdminEmail) || null,
+    input_save_mode: saveMode,
+    input_applied_template: toText(input.appliedTemplate) || null,
+    input_branding: input.branding ?? {},
+    input_internal_notes: toText(input.internalNotes) || null
   });
+
+  if (rpcError) {
+    const details = [rpcError.message, rpcError.details, rpcError.hint].filter(Boolean).join(" ").toLowerCase();
+    if (rpcError.code === "23505" || details.includes("slug")) {
+      throw new Error(
+        "Tenant slug already exists. Please change the slug (for example add -2) and try again."
+      );
+    }
+    if (details.includes("platform_provision_tenant")) {
+      throw new Error(
+        "Tenant provisioning function is not installed in this environment. Apply migration 202603182355 and retry."
+      );
+    }
+    throw new Error(rpcError.message);
+  }
+
+  const resultRow = Array.isArray(rpcData)
+    ? (rpcData[0] as Record<string, unknown> | undefined)
+    : (rpcData as Record<string, unknown> | null);
+  const tenantId = toText(resultRow?.tenant_id);
+  const provisioningRunId = toText(resultRow?.provisioning_run_id);
+  if (!tenantId) {
+    throw new Error("Tenant provisioning did not return a tenant id.");
+  }
+
+  const [{ data: tenant, error: tenantError }, { data: provisioningRun, error: provisioningError }] =
+    await Promise.all([
+      supabase.from("tenants").select("*").eq("id", tenantId).single(),
+      provisioningRunId
+        ? supabase.from("tenant_provisioning_runs").select("*").eq("id", provisioningRunId).single()
+        : Promise.resolve({ data: null, error: null })
+    ]);
+  if (tenantError) throw new Error(tenantError.message);
+  if (provisioningError) throw new Error(provisioningError.message);
 
   return {
     tenant,
