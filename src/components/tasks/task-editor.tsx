@@ -275,16 +275,45 @@ export function TaskEditor({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="fixed right-4 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-2">
-        <Button type="button" onClick={openSubtasksList}>
+    <div className="space-y-4 pr-24 md:pr-28">
+      <div
+        className="fixed inset-y-0 right-0 z-40 flex w-24 min-w-[88px] cursor-pointer flex-col border-l border-slate-200 bg-white/95 px-2 py-4 shadow-sm"
+        role="button"
+        tabIndex={0}
+        onClick={openSubtasksList}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openSubtasksList();
+          }
+        }}
+        aria-label="Open subtasks drawer"
+      >
+        <div className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+          Subtasks
+        </div>
+        <Button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            openSubtasksList();
+          }}
+        >
           See Sub Tasks
         </Button>
-        <Button type="button" variant="secondary" onClick={openNewSubtaskForm}>
+        <Button
+          type="button"
+          variant="secondary"
+          className="mt-2"
+          onClick={(event) => {
+            event.stopPropagation();
+            openNewSubtaskForm();
+          }}
+        >
           Add Subtask
         </Button>
         {overdueSubtaskCount > 0 ? (
-          <div className="mt-1 flex flex-col items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-2">
+          <div className="mt-3 flex flex-col items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-2">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-xs font-semibold text-white">
               {overdueSubtaskCount}
             </span>
@@ -301,7 +330,11 @@ export function TaskEditor({
               />
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-center text-[11px] text-slate-500">
+            No overdue subtasks
+          </div>
+        )}
       </div>
 
       <section className="rounded-md border border-slate-200 p-4">
