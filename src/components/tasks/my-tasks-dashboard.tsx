@@ -25,7 +25,14 @@ type MyTaskRow = {
   projects?: TaskRelation;
 };
 
-type TaskDashboardTab = "overdue" | "upcoming" | "completed" | "all" | "gantt" | "calendar";
+type TaskDashboardTab =
+  | "overdue"
+  | "upcoming"
+  | "completed"
+  | "all"
+  | "gantt"
+  | "calendar"
+  | "thirty_sixty_ninety";
 
 const STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "todo", label: "Open" },
@@ -34,6 +41,8 @@ const STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" }
 ];
+
+const GANTT_ZOOM_LEVELS = [30, 60, 90, 120, 180, 365] as const;
 
 function parseDate(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -90,6 +99,8 @@ export function MyTasksDashboard({
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+  const [ganttZoomDays, setGanttZoomDays] = useState<number>(90);
+  const [ganttWindowStart, setGanttWindowStart] = useState(() => startOfDay(new Date()));
 
   const projectFilteredTasks = useMemo(() => {
     if (projectFilter === "all") return tasks;
@@ -157,18 +168,60 @@ export function MyTasksDashboard({
     [statusFilteredRows]
   );
 
-  const ganttRange = useMemo(() => {
-    if (ganttRows.length === 0) return null;
-    const start = ganttRows.reduce(
-      (min, row) => (row.start < min ? row.start : min),
-      ganttRows[0].start
-    );
-    const end = ganttRows.reduce((max, row) => (row.end > max ? row.end : max), ganttRows[0].end);
-    const paddedEnd = new Date(end);
-    paddedEnd.setDate(paddedEnd.getDate() + 1);
-    const spanMs = paddedEnd.getTime() - start.getTime();
-    return { start, end: paddedEnd, spanMs: spanMs === 0 ? 24 * 60 * 60 * 1000 : spanMs };
-  }, [ganttRows]);
+  const ganttWindow = useMemo(() => {
+    const start = startOfDay(ganttWindowStart);
+    const end = new Date(start);
+    end.setDate(end.getDate() + ganttZoomDays);
+    const spanMs = Math.max(24 * 60 * 60 * 1000, end.getTime() - start.getTime());
+    return { start, end, spanMs };
+  }, [ganttWindowStart, ganttZoomDays]);
+
+  const ganttViewportRows = useMemo(() => {
+    return ganttRows
+      .filter((row) => row.end >= ganttWindow.start && row.start <= ganttWindow.end)
+      .map((row) => {
+        const clampedStart =
+          row.start < ganttWindow.start ? ganttWindow.start : row.start;
+        const clampedEnd = row.end > ganttWindow.end ? ganttWindow.end : row.end;
+        const left =
+          ((clampedStart.getTime() - ganttWindow.start.getTime()) / ganttWindow.spanMs) * 100;
+        const width =
+          (((clampedEnd.getTime() - clampedStart.getTime()) / ganttWindow.spanMs) * 100 || 0) + 1.5;
+        return { ...row, left, width };
+      });
+  }, [ganttRows, ganttWindow]);
+
+  const tasksDueBuckets = useMemo(() => {
+    const today = startOfDay(new Date());
+    const days30 = new Date(today);
+    days30.setDate(days30.getDate() + 30);
+    const days60 = new Date(today);
+    days60.setDate(days60.getDate() + 60);
+    const days90 = new Date(today);
+    days90.setDate(days90.getDate() + 90);
+
+    const dueCandidates = projectFilteredTasks.filter((task) => {
+      const due = parseDate(task.due_date);
+      if (!due) return false;
+      const status = String(task.status ?? "").toLowerCase();
+      return !["completed", "cancelled"].includes(status);
+    });
+
+    const first = dueCandidates.filter((task) => {
+      const due = startOfDay(parseDate(task.due_date)!);
+      return due < today || due <= days30;
+    });
+    const second = dueCandidates.filter((task) => {
+      const due = startOfDay(parseDate(task.due_date)!);
+      return due > days30 && due <= days60;
+    });
+    const third = dueCandidates.filter((task) => {
+      const due = startOfDay(parseDate(task.due_date)!);
+      return due > days60 && due <= days90;
+    });
+
+    return { first, second, third };
+  }, [projectFilteredTasks]);
 
   const calendarDays = useMemo(() => {
     const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
@@ -274,34 +327,94 @@ export function MyTasksDashboard({
             onClick={() => setActiveTab("calendar")}
             label="Calendar View"
           />
+          <TaskTabButton
+            active={activeTab === "thirty_sixty_ninety"}
+            onClick={() => setActiveTab("thirty_sixty_ninety")}
+            label="30-60-90"
+          />
         </div>
       </section>
 
       {activeTab === "gantt" ? (
         <section className="rounded-md border border-slate-200 bg-white p-4">
-          {ganttRows.length === 0 || !ganttRange ? (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-slate-600">
+              Viewing {formatDate(ganttWindow.start)} - {formatDate(ganttWindow.end)}
+            </p>
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                onClick={() =>
+                  setGanttWindowStart((prev) => {
+                    const next = new Date(prev);
+                    next.setDate(next.getDate() - Math.max(1, Math.floor(ganttZoomDays / 2)));
+                    return next;
+                  })
+                }
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                onClick={() => setGanttWindowStart(startOfDay(new Date()))}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                onClick={() =>
+                  setGanttWindowStart((prev) => {
+                    const next = new Date(prev);
+                    next.setDate(next.getDate() + Math.max(1, Math.floor(ganttZoomDays / 2)));
+                    return next;
+                  })
+                }
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                onClick={() => {
+                  const currentIdx = GANTT_ZOOM_LEVELS.indexOf(ganttZoomDays as (typeof GANTT_ZOOM_LEVELS)[number]);
+                  if (currentIdx <= 0) return;
+                  setGanttZoomDays(GANTT_ZOOM_LEVELS[currentIdx - 1]);
+                }}
+              >
+                Zoom In
+              </button>
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                onClick={() => {
+                  const currentIdx = GANTT_ZOOM_LEVELS.indexOf(ganttZoomDays as (typeof GANTT_ZOOM_LEVELS)[number]);
+                  if (currentIdx === -1 || currentIdx >= GANTT_ZOOM_LEVELS.length - 1) return;
+                  setGanttZoomDays(GANTT_ZOOM_LEVELS[currentIdx + 1]);
+                }}
+              >
+                Zoom Out
+              </button>
+            </div>
+          </div>
+          {ganttViewportRows.length === 0 ? (
             <p className="text-sm text-slate-500">No tasks available for the selected status filter.</p>
           ) : (
-            <div className="space-y-3">
-              <p className="text-xs text-slate-600">
-                Timeline: {formatDate(ganttRange.start)} - {formatDate(ganttRange.end)}
-              </p>
-              {ganttRows.map((row) => {
-                const left =
-                  ((row.start.getTime() - ganttRange.start.getTime()) / ganttRange.spanMs) * 100;
-                const width =
-                  (((row.end.getTime() - row.start.getTime()) / ganttRange.spanMs) * 100 || 0) + 2;
+            <div className="space-y-2 overflow-hidden">
+              {ganttViewportRows.map((row) => {
                 return (
                   <div key={row.task.id} className="grid items-center gap-2 md:grid-cols-[260px_1fr]">
                     <Link href={`/staff/tasks/${row.task.id}`} className="text-sm font-medium text-brand-700">
                       {row.task.title}
                     </Link>
-                    <div className="relative h-8 rounded-md border border-slate-200 bg-slate-50">
+                    <div className="relative h-8 w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50">
                       <div
                         className={`absolute top-1/2 h-4 -translate-y-1/2 rounded ${taskStatusTone(row.task.status)}`}
                         style={{
-                          left: `${Math.max(0, Math.min(98, left))}%`,
-                          width: `${Math.max(2, Math.min(100 - left, width))}%`
+                          left: `${Math.max(0, Math.min(98, row.left))}%`,
+                          width: `${Math.max(2, Math.min(100 - row.left, row.width))}%`
                         }}
                       />
                     </div>
@@ -387,7 +500,29 @@ export function MyTasksDashboard({
         </section>
       ) : null}
 
-      {activeTab !== "gantt" && activeTab !== "calendar" ? (
+      {activeTab === "thirty_sixty_ninety" ? (
+        <section className="rounded-md border border-slate-200 bg-white p-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <TaskDueColumn
+              title="Overdue + Next 30 Days"
+              rows={tasksDueBuckets.first}
+              emptyMessage="No overdue or 30-day tasks."
+            />
+            <TaskDueColumn
+              title="Days 31 - 60"
+              rows={tasksDueBuckets.second}
+              emptyMessage="No tasks due in days 31-60."
+            />
+            <TaskDueColumn
+              title="Days 61 - 90"
+              rows={tasksDueBuckets.third}
+              emptyMessage="No tasks due in days 61-90."
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab !== "gantt" && activeTab !== "calendar" && activeTab !== "thirty_sixty_ninety" ? (
         <section className="rounded-md border border-slate-200 bg-white p-4">
           {rowsForTable.length === 0 ? (
             <p className="text-sm text-slate-500">No tasks in this view.</p>
@@ -454,6 +589,40 @@ function TaskTabButton({
     >
       {label}
     </button>
+  );
+}
+
+function TaskDueColumn({
+  title,
+  rows,
+  emptyMessage
+}: {
+  title: string;
+  rows: MyTaskRow[];
+  emptyMessage: string;
+}) {
+  return (
+    <section className="rounded-md border border-slate-200 p-3">
+      <h5 className="text-sm font-semibold text-slate-900">{title}</h5>
+      {rows.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">{emptyMessage}</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {rows.map((task) => (
+            <Link
+              key={task.id}
+              href={`/staff/tasks/${task.id}`}
+              className="block rounded border border-slate-100 px-2 py-2 hover:bg-slate-50"
+            >
+              <p className="text-sm font-medium text-brand-700">{task.title}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Due: {formatDate(task.due_date)} • Status: {task.status}
+              </p>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
