@@ -135,6 +135,15 @@ const actionSchema = z.discriminatedUnion("action", [
     notes: z.string().optional()
   }),
   z.object({
+    action: z.literal("upsert_project_expense"),
+    id: z.string().uuid().optional(),
+    expenseType: z.enum(["debit", "credit"]),
+    amount: z.coerce.number().positive(),
+    entryDate: z.string().optional(),
+    description: z.string().optional(),
+    campaignId: z.string().uuid().nullable().optional()
+  }),
+  z.object({
     action: z.literal("upsert_resource"),
     id: z.string().uuid().optional(),
     resourceName: z.string().min(1),
@@ -485,6 +494,81 @@ export async function PATCH(request: Request, { params }: RouteProps) {
           { onConflict: "project_id" }
         );
         if (error) throw error;
+        return NextResponse.json({ ok: true });
+      }
+
+      if (action.action === "upsert_project_expense") {
+        if (action.expenseType === "credit" && !action.campaignId) {
+          return NextResponse.json(
+            { message: "Credits must be tied to a campaign." },
+            { status: 400 }
+          );
+        }
+        if (action.expenseType === "debit" && action.campaignId) {
+          return NextResponse.json(
+            { message: "Debits cannot be tied to a campaign." },
+            { status: 400 }
+          );
+        }
+
+        if (action.campaignId) {
+          const { data: campaign, error: campaignError } = await supabase
+            .from("campaigns")
+            .select("id")
+            .eq("organization_id", context.organizationId)
+            .eq("id", action.campaignId)
+            .maybeSingle();
+          if (campaignError) throw campaignError;
+          if (!campaign) {
+            return NextResponse.json(
+              { message: "Selected campaign was not found for this tenant." },
+              { status: 400 }
+            );
+          }
+        }
+
+        const entryDate = action.entryDate || new Date().toISOString().slice(0, 10);
+        const expensePayload = {
+          tenant_id: context.organizationId,
+          organization_id: context.organizationId,
+          project_id: id,
+          expense_type: action.expenseType,
+          amount: action.amount,
+          entry_date: entryDate,
+          description: action.description ?? null,
+          campaign_id: action.expenseType === "credit" ? action.campaignId ?? null : null,
+          updated_by: context.userId
+        };
+
+        const query = action.id
+          ? supabase
+              .from("project_expenses")
+              .update(expensePayload)
+              .eq("organization_id", context.organizationId)
+              .eq("project_id", id)
+              .eq("id", action.id)
+          : supabase.from("project_expenses").insert({
+              ...expensePayload,
+              created_by: context.userId
+            });
+
+        const { error } = await query;
+        if (error) throw error;
+
+        await logAuditEvent({
+          organizationId: context.organizationId,
+          actorUserId: context.userId,
+          actionType: "project_expense_saved",
+          targetEntityType: "project_expenses",
+          targetEntityId: action.id ?? id,
+          metadata: {
+            projectId: id,
+            expenseType: action.expenseType,
+            amount: action.amount,
+            campaignId: action.campaignId ?? null
+          }
+        });
+
         return NextResponse.json({ ok: true });
       }
 

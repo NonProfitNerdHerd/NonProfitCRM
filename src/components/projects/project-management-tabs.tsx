@@ -43,7 +43,7 @@ type LifecycleStatus =
   | "cancelled"
   | "archived";
 
-type ProjectWorkspaceTab = "dashboard" | "planning" | "tasks";
+type ProjectWorkspaceTab = "dashboard" | "planning" | "tasks" | "expenses";
 
 const PHASE_DETAILS: Array<{
   key: LifecyclePhase;
@@ -163,6 +163,8 @@ export function ProjectManagementTabs({
   decisionLog,
   updates,
   review,
+  projectExpenses,
+  campaignOptions,
   taskDependencies,
   dashboard,
   guardrails,
@@ -183,6 +185,8 @@ export function ProjectManagementTabs({
   decisionLog?: Array<Record<string, unknown>>;
   updates?: Array<Record<string, unknown>>;
   review?: Record<string, unknown> | null;
+  projectExpenses?: Array<Record<string, unknown>>;
+  campaignOptions?: Array<Record<string, unknown>>;
   taskDependencies?: Array<Record<string, unknown>>;
   dashboard?: {
     lifecycleStatus?: string;
@@ -344,6 +348,13 @@ export function ProjectManagementTabs({
     decisionSummary: "",
     decisionDetails: ""
   });
+  const [expenseForm, setExpenseForm] = useState({
+    expenseType: "debit" as "debit" | "credit",
+    amount: "",
+    entryDate: new Date().toISOString().slice(0, 10),
+    description: "",
+    campaignId: ""
+  });
   const [updateForm, setUpdateForm] = useState({
     updateTitle: "",
     updateBody: "",
@@ -387,6 +398,24 @@ export function ProjectManagementTabs({
     });
   }, [tasks, statusFilter]);
 
+  const expenseTotals = useMemo(() => {
+    const totals = (projectExpenses ?? []).reduce<{ debits: number; credits: number }>(
+      (acc, row) => {
+        const amount = Number(row.amount ?? 0);
+        const type = String(row.expense_type ?? "");
+        if (type === "debit") acc.debits += amount;
+        if (type === "credit") acc.credits += amount;
+        return acc;
+      },
+      { debits: 0, credits: 0 }
+    );
+    return {
+      debits: totals.debits,
+      credits: totals.credits,
+      net: totals.credits - totals.debits
+    };
+  }, [projectExpenses]);
+
   async function saveLifecycleAction(payload: Record<string, unknown>) {
     setSaving(true);
     setSharedError(null);
@@ -410,6 +439,25 @@ export function ProjectManagementTabs({
   async function saveAndRefresh(payload: Record<string, unknown>) {
     const ok = await saveLifecycleAction(payload);
     if (!ok) return;
+    router.refresh();
+  }
+
+  async function saveExpenseEntry() {
+    const ok = await saveLifecycleAction({
+      action: "upsert_project_expense",
+      expenseType: expenseForm.expenseType,
+      amount: numberOrZero(expenseForm.amount),
+      entryDate: expenseForm.entryDate || null,
+      description: expenseForm.description,
+      campaignId: expenseForm.expenseType === "credit" ? expenseForm.campaignId || null : null
+    });
+    if (!ok) return;
+    setExpenseForm((prev) => ({
+      ...prev,
+      amount: "",
+      description: "",
+      campaignId: ""
+    }));
     router.refresh();
   }
 
@@ -527,6 +575,12 @@ export function ProjectManagementTabs({
         <TabButton active={activeWorkspaceTab === "tasks"} onClick={() => setActiveWorkspaceTab("tasks")}>
           Tasks
         </TabButton>
+        <TabButton
+          active={activeWorkspaceTab === "expenses"}
+          onClick={() => setActiveWorkspaceTab("expenses")}
+        >
+          Project Expenses
+        </TabButton>
       </div>
 
       {activeWorkspaceTab === "dashboard" ? (
@@ -588,7 +642,11 @@ export function ProjectManagementTabs({
           <p className="text-xs text-slate-600">
             This dashboard helps leadership see reality without asking staff for daily update emails.
           </p>
+        </>
+      ) : null}
 
+      {activeWorkspaceTab === "planning" ? (
+        <>
           <section className="rounded-md border border-slate-200 p-4">
             <h4 className="text-sm font-semibold text-slate-900">Lifecycle Status Engine</h4>
             <p className="mt-1 text-xs text-slate-600">
@@ -681,11 +739,116 @@ export function ProjectManagementTabs({
               {guardrails?.reviewComplete ? "complete" : "incomplete"}
             </p>
           </section>
-        </>
-      ) : null}
 
-      {activeWorkspaceTab === "planning" ? (
-        <>
+          <section className="rounded-md border border-slate-200 p-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h4 className="text-sm font-semibold text-slate-900">Risk Register</h4>
+              <p className="text-xs text-slate-500">Use this to track and reduce project risk early.</p>
+            </div>
+            <div className="space-y-2">
+              {(risks ?? []).length === 0 ? (
+                <p className="text-xs text-slate-500">No risks logged yet.</p>
+              ) : (
+                (risks ?? []).map((risk) => (
+                  <div key={String(risk.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                    <p className="font-semibold text-slate-900">{String(risk.risk_title ?? "-")}</p>
+                    <p className="text-slate-600">
+                      Status: {String(risk.status ?? "open")} • Likelihood{" "}
+                      {String(risk.likelihood ?? "-")} • Impact {String(risk.impact ?? "-")}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <Input
+                value={riskForm.riskTitle}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, riskTitle: event.target.value }))
+                }
+                placeholder="Risk title"
+              />
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={riskForm.status}
+                onChange={(event) => setRiskForm((prev) => ({ ...prev, status: event.target.value }))}
+              >
+                <option value="open">Open</option>
+                <option value="monitoring">Monitoring</option>
+                <option value="mitigated">Mitigated</option>
+                <option value="closed">Closed</option>
+              </select>
+              <Input
+                value={riskForm.likelihood}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, likelihood: event.target.value }))
+                }
+                placeholder="Likelihood (1-5)"
+              />
+              <Input
+                value={riskForm.impact}
+                onChange={(event) => setRiskForm((prev) => ({ ...prev, impact: event.target.value }))}
+                placeholder="Impact (1-5)"
+              />
+              <Input
+                type="date"
+                value={riskForm.targetResolutionDate}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, targetResolutionDate: event.target.value }))
+                }
+              />
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={riskForm.ownerUserId}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                }
+              >
+                <option value="">Risk owner (optional)</option>
+                {users.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>
+                    {user.display_name ?? user.user_id}
+                  </option>
+                ))}
+              </select>
+              <div className="md:col-span-2">
+                <LabeledTextarea
+                  label="Risk description"
+                  value={riskForm.riskDescription}
+                  onChange={(value) =>
+                    setRiskForm((prev) => ({ ...prev, riskDescription: value }))
+                  }
+                />
+              </div>
+              <div className="md:col-span-2">
+                <LabeledTextarea
+                  label="Mitigation plan"
+                  value={riskForm.mitigationPlan}
+                  onChange={(value) =>
+                    setRiskForm((prev) => ({ ...prev, mitigationPlan: value }))
+                  }
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!riskForm.riskTitle.trim()}
+                  onClick={() =>
+                    saveAndRefresh({
+                      action: "upsert_risk",
+                      ...riskForm,
+                      likelihood: numberOrNull(riskForm.likelihood),
+                      impact: numberOrNull(riskForm.impact)
+                    })
+                  }
+                >
+                  Add Risk
+                </Button>
+              </div>
+            </div>
+          </section>
+
           <div className="flex flex-wrap gap-2">
             {PHASE_DETAILS.map((phase) => (
               <TabButton
@@ -1297,55 +1460,11 @@ export function ProjectManagementTabs({
 
       {activeTab === "monitoring" ? (
         <section className="rounded-md border border-slate-200 p-4">
-          <h4 className="text-sm font-semibold text-slate-900">Risk, Budget, Decisions, and Updates</h4>
+          <h4 className="text-sm font-semibold text-slate-900">Budget, Decisions, and Updates</h4>
           <p className="mt-1 text-xs text-slate-600">
-            Risk tracking is stewardship, not pessimism. Monitoring variance protects donor trust.
+            Monitoring variance and communication protects donor trust and team alignment.
           </p>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-md border border-slate-200 p-3">
-              <h5 className="text-sm font-semibold text-slate-900">Risk Register</h5>
-              <div className="mt-2 space-y-2">
-                {(risks ?? []).map((risk) => (
-                  <div key={String(risk.id)} className="rounded-md border border-slate-100 p-2 text-xs">
-                    <p className="font-semibold text-slate-900">{String(risk.risk_title ?? "-")}</p>
-                    <p className="text-slate-600">
-                      Likelihood {String(risk.likelihood ?? "-")} • Impact {String(risk.impact ?? "-")}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2 grid gap-2">
-                <Input
-                  value={riskForm.riskTitle}
-                  onChange={(event) =>
-                    setRiskForm((prev) => ({ ...prev, riskTitle: event.target.value }))
-                  }
-                  placeholder="Risk title"
-                />
-                <LabeledTextarea
-                  label="Risk description"
-                  value={riskForm.riskDescription}
-                  onChange={(value) =>
-                    setRiskForm((prev) => ({ ...prev, riskDescription: value }))
-                  }
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    saveAndRefresh({
-                      action: "upsert_risk",
-                      ...riskForm,
-                      likelihood: numberOrNull(riskForm.likelihood),
-                      impact: numberOrNull(riskForm.impact)
-                    })
-                  }
-                >
-                  Add Risk
-                </Button>
-              </div>
-            </section>
-
             <section className="rounded-md border border-slate-200 p-3">
               <h5 className="text-sm font-semibold text-slate-900">Budget</h5>
               <p className="mt-1 text-xs text-slate-600">
@@ -1812,6 +1931,140 @@ export function ProjectManagementTabs({
               </table>
             </div>
           )}
+        </section>
+      ) : null}
+
+      {activeWorkspaceTab === "expenses" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <h4 className="text-sm font-semibold text-slate-900">Project Expenses</h4>
+          <p className="mt-1 text-xs text-slate-600">
+            Enter debits and credits for this project. Credits are required to be tied to a campaign.
+          </p>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <SummaryBox label="Total Debits" value={`$${expenseTotals.debits.toFixed(2)}`} tone="red" compact />
+            <SummaryBox
+              label="Total Credits"
+              value={`$${expenseTotals.credits.toFixed(2)}`}
+              tone="green"
+              compact
+            />
+            <SummaryBox
+              label="Net (Credits - Debits)"
+              value={`$${expenseTotals.net.toFixed(2)}`}
+              tone={expenseTotals.net >= 0 ? "green" : "amber"}
+              compact
+            />
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Expense Ledger</h5>
+              {(projectExpenses ?? []).length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">No expenses recorded yet.</p>
+              ) : (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-600">
+                        <th className="py-2">Date</th>
+                        <th className="py-2">Type</th>
+                        <th className="py-2">Amount</th>
+                        <th className="py-2">Campaign</th>
+                        <th className="py-2">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(projectExpenses ?? []).map((row) => {
+                        const campaignRow =
+                          row.campaigns && typeof row.campaigns === "object"
+                            ? (row.campaigns as Record<string, unknown>)
+                            : null;
+                        return (
+                          <tr key={String(row.id)} className="border-b border-slate-100">
+                            <td className="py-2">{formatDate(String(row.entry_date ?? ""))}</td>
+                            <td className="py-2 capitalize">{String(row.expense_type ?? "-")}</td>
+                            <td className="py-2">${Number(row.amount ?? 0).toFixed(2)}</td>
+                            <td className="py-2">{String(campaignRow?.name ?? "-")}</td>
+                            <td className="py-2">{String(row.description ?? "-")}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Add Expense Entry</h5>
+              <div className="mt-2 grid gap-2">
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={expenseForm.expenseType}
+                  onChange={(event) =>
+                    setExpenseForm((prev) => ({
+                      ...prev,
+                      expenseType: event.target.value as "debit" | "credit",
+                      campaignId: event.target.value === "credit" ? prev.campaignId : ""
+                    }))
+                  }
+                >
+                  <option value="debit">Debit</option>
+                  <option value="credit">Credit</option>
+                </select>
+                <Input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={expenseForm.amount}
+                  onChange={(event) =>
+                    setExpenseForm((prev) => ({ ...prev, amount: event.target.value }))
+                  }
+                  placeholder="Amount"
+                />
+                <Input
+                  type="date"
+                  value={expenseForm.entryDate}
+                  onChange={(event) =>
+                    setExpenseForm((prev) => ({ ...prev, entryDate: event.target.value }))
+                  }
+                />
+                <LabeledTextarea
+                  label="Description"
+                  value={expenseForm.description}
+                  onChange={(value) => setExpenseForm((prev) => ({ ...prev, description: value }))}
+                />
+                {expenseForm.expenseType === "credit" ? (
+                  <select
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    value={expenseForm.campaignId}
+                    onChange={(event) =>
+                      setExpenseForm((prev) => ({ ...prev, campaignId: event.target.value }))
+                    }
+                  >
+                    <option value="">Select campaign for credit</option>
+                    {(campaignOptions ?? []).map((campaign) => (
+                      <option key={String(campaign.id)} value={String(campaign.id)}>
+                        {String(campaign.name ?? campaign.id)}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    Number(expenseForm.amount) <= 0 ||
+                    (expenseForm.expenseType === "credit" && !expenseForm.campaignId)
+                  }
+                  onClick={saveExpenseEntry}
+                >
+                  Add Expense
+                </Button>
+              </div>
+            </section>
+          </div>
         </section>
       ) : null}
 

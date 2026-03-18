@@ -116,7 +116,9 @@ export async function getProject(projectId: string) {
     { data: resources, error: resourcesError },
     { data: decisions, error: decisionsError },
     { data: updates, error: updatesError },
-    { data: review, error: reviewError }
+    { data: review, error: reviewError },
+    { data: projectExpenses, error: projectExpensesError },
+    { data: campaigns, error: campaignsError }
   ] =
     await Promise.all([
       supabase
@@ -210,7 +212,19 @@ export async function getProject(projectId: string) {
         )
         .eq("organization_id", context.organizationId)
         .eq("project_id", projectId)
-        .maybeSingle()
+        .maybeSingle(),
+      supabase
+        .from("project_expenses")
+        .select("id, expense_type, amount, entry_date, description, campaign_id, campaigns(id,name)")
+        .eq("organization_id", context.organizationId)
+        .eq("project_id", projectId)
+        .order("entry_date", { ascending: false })
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("campaigns")
+        .select("id, name, status")
+        .eq("organization_id", context.organizationId)
+        .order("name", { ascending: true })
     ]);
 
   const taskIds = (tasks ?? []).map((task) => String(task.id));
@@ -238,6 +252,8 @@ export async function getProject(projectId: string) {
   if (decisionsError) throw decisionsError;
   if (updatesError) throw updatesError;
   if (reviewError) throw reviewError;
+  if (projectExpensesError) throw projectExpensesError;
+  if (campaignsError) throw campaignsError;
 
   const now = new Date();
   const inThirtyDays = new Date(now);
@@ -354,6 +370,8 @@ export async function getProject(projectId: string) {
     decisionLog: decisions ?? [],
     updates: updates ?? [],
     review: review ?? null,
+    projectExpenses: projectExpenses ?? [],
+    campaignOptions: campaigns ?? [],
     taskDependencies: taskDependencies ?? [],
     dashboard: {
       lifecycleStatus: String(project?.lifecycle_status ?? project?.status ?? "idea"),

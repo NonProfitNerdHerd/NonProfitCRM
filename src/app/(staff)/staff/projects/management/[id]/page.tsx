@@ -28,6 +28,8 @@ export default async function ProjectManagementPage({ params }: PageProps) {
       decisionLog,
       updates,
       review,
+      projectExpenses,
+      campaignOptions,
       taskDependencies,
       dashboard,
       guardrails,
@@ -61,6 +63,8 @@ export default async function ProjectManagementPage({ params }: PageProps) {
         decisionLog={(decisionLog ?? []) as Array<Record<string, unknown>>}
         updates={(updates ?? []) as Array<Record<string, unknown>>}
         review={(review ?? null) as Record<string, unknown> | null}
+        projectExpenses={(projectExpenses ?? []) as Array<Record<string, unknown>>}
+        campaignOptions={(campaignOptions ?? []) as Array<Record<string, unknown>>}
         taskDependencies={(taskDependencies ?? []) as Array<Record<string, unknown>>}
         dashboard={dashboard ?? {}}
         guardrails={guardrails ?? {}}
