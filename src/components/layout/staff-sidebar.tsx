@@ -57,7 +57,7 @@ const BASE_MENU: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/projects") || pathname.startsWith("/staff/tasks"),
     children: [
       { href: "/staff/projects/management", label: "Project Management" },
-      { href: "/staff/tasks", label: "Tasks" }
+      { href: "/staff/tasks", label: "My Tasks" }
     ]
   },
   {
