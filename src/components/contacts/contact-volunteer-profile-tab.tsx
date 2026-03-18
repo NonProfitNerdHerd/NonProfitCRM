@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  ensureTagAutocompleteOption,
+  searchTagAutocompleteOptions
+} from "@/lib/tags/tag-autocomplete-client";
 import {
   TagTypeaheadMulti,
   type TagTypeaheadOption
@@ -18,29 +22,6 @@ function normalizeLabel(value: unknown) {
 
 function normalizeKey(value: unknown) {
   return normalizeLabel(value).toLowerCase();
-}
-
-function resolveVolunteerTaxonomyOptions(
-  tags: Array<{ id: string; name: string; label?: string; parentTagId?: string }>,
-  rootName: string
-) {
-  const root = tags.find(
-    (tag) => !tag.parentTagId && normalizeKey(tag.name) === normalizeKey(rootName)
-  );
-  if (!root) return [] as TagTypeaheadOption[];
-  const rootLabelPrefix = `${rootName.toLowerCase()} /`;
-  return tags
-    .filter((tag) => {
-      if (!tag.parentTagId || tag.id === root.id) return false;
-      const normalizedLabel = toText(tag.label).toLowerCase();
-      return tag.parentTagId === root.id || normalizedLabel.startsWith(rootLabelPrefix);
-    })
-    .map((tag) => ({
-      id: tag.id,
-      name: normalizeLabel(tag.name),
-      label: tag.label
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 type VolunteerFormState = {
@@ -65,8 +46,6 @@ type VolunteerFormState = {
   orientationCompletedAt: string;
   confidentialityAcknowledgedAt: string;
 };
-
-type TaxonomyOption = TagTypeaheadOption & { parentTagId?: string };
 
 function defaultVolunteerForm(): VolunteerFormState {
   return {
@@ -98,20 +77,6 @@ export function ContactVolunteerProfileTab({ contactId }: { contactId: string })
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<VolunteerFormState>(defaultVolunteerForm());
-  const [allTagOptions, setAllTagOptions] = useState<TaxonomyOption[]>([]);
-
-  const interestTagOptions = useMemo(
-    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Interests"),
-    [allTagOptions]
-  );
-  const skillTagOptions = useMemo(
-    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Skills"),
-    [allTagOptions]
-  );
-  const certificationTagOptions = useMemo(
-    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Certifications"),
-    [allTagOptions]
-  );
 
   useEffect(() => {
     void loadVolunteerProfile();
@@ -137,15 +102,6 @@ export function ContactVolunteerProfileTab({ contactId }: { contactId: string })
         throw new Error(toText(payload?.message) || "Unable to load volunteer profile.");
       }
 
-      const tags = (payload?.tags ?? []).map((tag) => ({
-        id: toText(tag.id),
-        name: normalizeLabel(tag.name),
-        label: toText(tag.path) || normalizeLabel(tag.name),
-        parentTagId: toText(tag.parent_tag_id)
-      }));
-      setAllTagOptions(tags);
-
-      const byName = new Map(tags.map((tag) => [normalizeKey(tag.name), tag]));
       const profile = payload?.profile ?? null;
       if (!profile) {
         setForm(defaultVolunteerForm());
@@ -154,11 +110,7 @@ export function ContactVolunteerProfileTab({ contactId }: { contactId: string })
 
       const mapNamesToOptions = (input: unknown) => {
         const values = Array.isArray(input) ? input.map((entry) => normalizeLabel(entry)).filter(Boolean) : [];
-        return values.map((name) => {
-          const existing = byName.get(normalizeKey(name));
-          if (existing) return existing;
-          return { id: `name:${name.toLowerCase()}`, name, label: name, parentTagId: "" };
-        });
+        return values.map((name) => ({ id: `name:${normalizeKey(name)}`, name, label: name }));
       };
 
       const availabilityRaw = profile.availability_preferences as Record<string, unknown> | null;
@@ -191,31 +143,22 @@ export function ContactVolunteerProfileTab({ contactId }: { contactId: string })
     }
   }
 
-  async function createVolunteerTaxonomyTag(rootName: string, value: string) {
-    const response = await fetch("/api/volunteer-coordination/tags", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        rootName,
-        values: [value]
-      })
+  async function searchVolunteerTaxonomyTags(rootName: string, query: string) {
+    return searchTagAutocompleteOptions({
+      query,
+      activeOnly: true,
+      limit: 20,
+      module: "contacts",
+      rootName
     });
-    const payload = (await response.json().catch(() => null)) as
-      | { result?: Array<Record<string, unknown>>; message?: string }
-      | null;
-    if (!response.ok) {
-      throw new Error(toText(payload?.message) || `Unable to create ${rootName} tag.`);
-    }
-    const created = payload?.result?.[0];
-    const id = toText(created?.id);
-    const name = normalizeLabel(created?.name || value);
-    const label = toText(created?.path) || `${rootName} / ${name}`;
-    if (!id) return null;
-    const option = { id, name, label };
-    setAllTagOptions((prev) =>
-      prev.some((entry) => entry.id === option.id) ? prev : [...prev, { ...option, parentTagId: "" }]
-    );
-    return option;
+  }
+
+  async function createVolunteerTaxonomyTag(rootName: string, value: string) {
+    return ensureTagAutocompleteOption({
+      name: value,
+      module: "contacts",
+      rootName
+    });
   }
 
   async function saveVolunteerProfile() {
@@ -321,7 +264,7 @@ export function ContactVolunteerProfileTab({ contactId }: { contactId: string })
         <TagTypeaheadMulti
           label="Interests"
           selected={form.interests}
-          options={interestTagOptions}
+          loadOptions={(query) => searchVolunteerTaxonomyTags("Interests", query)}
           onChange={(value) => setForm((prev) => ({ ...prev, interests: value }))}
           onCreateOption={(value) => createVolunteerTaxonomyTag("Interests", value)}
           placeholder="Type an interest..."
@@ -329,7 +272,7 @@ export function ContactVolunteerProfileTab({ contactId }: { contactId: string })
         <TagTypeaheadMulti
           label="Skills"
           selected={form.skills}
-          options={skillTagOptions}
+          loadOptions={(query) => searchVolunteerTaxonomyTags("Skills", query)}
           onChange={(value) => setForm((prev) => ({ ...prev, skills: value }))}
           onCreateOption={(value) => createVolunteerTaxonomyTag("Skills", value)}
           placeholder="Type a skill..."
@@ -337,7 +280,7 @@ export function ContactVolunteerProfileTab({ contactId }: { contactId: string })
         <TagTypeaheadMulti
           label="Certifications"
           selected={form.certifications}
-          options={certificationTagOptions}
+          loadOptions={(query) => searchVolunteerTaxonomyTags("Certifications", query)}
           onChange={(value) => setForm((prev) => ({ ...prev, certifications: value }))}
           onCreateOption={(value) => createVolunteerTaxonomyTag("Certifications", value)}
           placeholder="Type a certification..."

@@ -329,26 +329,15 @@ async function resolveVolunteerTaxonomyNames(input: {
 export async function getVolunteerProfileForContact(contactId: string) {
   const context = await requireVolunteerCoordinationAccess();
   const supabase = await createClient();
-  const [{ data: profile, error: profileError }, { data: tags, error: tagsError }] = await Promise.all([
-    supabase
-      .from("volunteer_profiles")
-      .select("*")
-      .eq("organization_id", context.organizationId)
-      .eq("contact_id", contactId)
-      .maybeSingle(),
-    supabase
-      .from("tags")
-      .select("id,name,path,parent_tag_id,module,is_active")
-      .eq("organization_id", context.organizationId)
-      .eq("module", "contacts")
-      .eq("is_active", true)
-      .order("path", { ascending: true })
-  ]);
+  const { data: profile, error: profileError } = await supabase
+    .from("volunteer_profiles")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("contact_id", contactId)
+    .maybeSingle();
   if (profileError) throw profileError;
-  if (tagsError) throw tagsError;
   return {
-    profile: profile ?? null,
-    tags: tags ?? []
+    profile: profile ?? null
   };
 }
 
@@ -602,15 +591,6 @@ export async function getVolunteerCoordinationData(filters?: {
     .limit(600);
   if (contactsError) throw contactsError;
 
-  const { data: tags, error: tagsError } = await supabase
-    .from("tags")
-    .select("id,name,path,parent_tag_id,module,is_active")
-    .eq("organization_id", context.organizationId)
-    .eq("module", "contacts")
-    .eq("is_active", true)
-    .order("path", { ascending: true });
-  if (tagsError) throw tagsError;
-
   const { data: complianceItems } = canViewSensitive
     ? await supabase
         .from("volunteer_compliance_items")
@@ -719,7 +699,6 @@ export async function getVolunteerCoordinationData(filters?: {
     burnoutFlags: burnoutFlags ?? [],
     hourImports: hourImports ?? [],
     contacts: contacts ?? [],
-    tags: tags ?? [],
     reports: {
       monthlyHours: monthlyHoursReport,
       topVolunteers,

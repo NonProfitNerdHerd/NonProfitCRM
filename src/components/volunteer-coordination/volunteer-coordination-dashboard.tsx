@@ -6,6 +6,10 @@ import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  ensureTagAutocompleteOption,
+  searchTagAutocompleteOptions
+} from "@/lib/tags/tag-autocomplete-client";
+import {
   TagTypeaheadMulti,
   type TagTypeaheadOption
 } from "@/components/tags/tag-typeahead-multi";
@@ -68,37 +72,6 @@ function guessHourImportColumn(headers: string[], keys: string[]) {
   return "";
 }
 
-function resolveVolunteerTaxonomyOptions(
-  tags: Array<{ id: string; name: string; label?: string; parentTagId?: string }>,
-  rootName: string
-) {
-  const root = tags.find(
-    (tag) => !tag.parentTagId && normalizeKey(tag.name) === normalizeKey(rootName)
-  );
-  if (!root) return [] as TagTypeaheadOption[];
-  const rootLabelPrefix = `${rootName.toLowerCase()} /`;
-  return tags
-    .filter((tag) => {
-      if (!tag.parentTagId || tag.id === root.id) return false;
-      const normalizedLabel = toText(tag.label).toLowerCase();
-      return tag.parentTagId === root.id || normalizedLabel.startsWith(rootLabelPrefix);
-    })
-    .map((tag) => ({
-      id: tag.id,
-      name: normalizeLabel(tag.name),
-      label: tag.label
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function normalizeLabel(value: unknown) {
-  return toText(value).replace(/\s+/g, " ");
-}
-
-function normalizeKey(value: unknown) {
-  return normalizeLabel(value).toLowerCase();
-}
-
 export function VolunteerCoordinationDashboard({
   initialTab = "overview",
   hideInternalTabs = false
@@ -113,7 +86,7 @@ export function VolunteerCoordinationDashboard({
   const [schemaWarning, setSchemaWarning] = useState<string | null>(null);
 
   const [data, setData] = useState<Record<string, unknown> | null>(null);
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [selectedFilterTags, setSelectedFilterTags] = useState<TagTypeaheadOption[]>([]);
   const [volunteerStatusFilter, setVolunteerStatusFilter] = useState("");
   const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("");
   const [eventTypeFilter, setEventTypeFilter] = useState("");
@@ -420,33 +393,9 @@ export function VolunteerCoordinationDashboard({
     () => ((data?.incidents as Array<Record<string, unknown>> | undefined) ?? []),
     [data]
   );
-  const tags = useMemo(() => ((data?.tags as Array<Record<string, unknown>> | undefined) ?? []), [data]);
-  const allTagOptions = useMemo(
-    () =>
-      tags.map((tag) => ({
-        id: toText(tag.id),
-        name: normalizeLabel(tag.name),
-        label: toText(tag.path) || normalizeLabel(tag.name),
-        parentTagId: toText(tag.parent_tag_id)
-      })),
-    [tags]
-  );
-  const tagById = useMemo(() => new Map(allTagOptions.map((tag) => [tag.id, tag])), [allTagOptions]);
-  const selectedFilterTags = useMemo(
-    () => selectedTagIds.map((id) => tagById.get(id)).filter(Boolean) as TagTypeaheadOption[],
-    [selectedTagIds, tagById]
-  );
-  const interestTagOptions = useMemo(
-    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Interests"),
-    [allTagOptions]
-  );
-  const skillTagOptions = useMemo(
-    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Skills"),
-    [allTagOptions]
-  );
-  const certificationTagOptions = useMemo(
-    () => resolveVolunteerTaxonomyOptions(allTagOptions, "Certifications"),
-    [allTagOptions]
+  const selectedTagIds = useMemo(
+    () => selectedFilterTags.map((entry) => entry.id).filter(Boolean),
+    [selectedFilterTags]
   );
   const reports = useMemo(() => ((data?.reports as Record<string, unknown> | undefined) ?? {}), [data]);
   const summary = useMemo(() => ((data?.summary as Record<string, unknown> | undefined) ?? {}), [data]);
@@ -529,27 +478,32 @@ export function VolunteerCoordinationDashboard({
   }
 
   async function createVolunteerTaxonomyTag(rootName: string, value: string) {
-    const response = await fetch("/api/volunteer-coordination/tags", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        rootName,
-        values: [value]
-      })
+    const option = await ensureTagAutocompleteOption({
+      name: value,
+      module: "contacts",
+      rootName
     });
-    const payload = (await response.json().catch(() => null)) as
-      | { result?: Array<Record<string, unknown>>; message?: string }
-      | null;
-    if (!response.ok) {
-      throw new Error(toText(payload?.message) || `Unable to create ${rootName} tag.`);
-    }
-    const created = payload?.result?.[0];
-    const id = toText(created?.id);
-    const name = normalizeLabel(created?.name || value);
-    const label = toText(created?.path) || `${rootName} / ${name}`;
-    if (!id) return null;
     await loadData();
-    return { id, name, label } satisfies TagTypeaheadOption;
+    return option;
+  }
+
+  async function searchContactTags(query: string) {
+    return searchTagAutocompleteOptions({
+      query,
+      activeOnly: true,
+      limit: 20,
+      module: "contacts"
+    });
+  }
+
+  async function searchVolunteerTaxonomyTags(rootName: string, query: string) {
+    return searchTagAutocompleteOptions({
+      query,
+      activeOnly: true,
+      limit: 20,
+      module: "contacts",
+      rootName
+    });
   }
 
   async function saveVolunteerProfile() {
@@ -1097,8 +1051,8 @@ export function VolunteerCoordinationDashboard({
               <TagTypeaheadMulti
                 label="Tag filter"
                 selected={selectedFilterTags}
-                options={allTagOptions}
-                onChange={(next) => setSelectedTagIds(next.map((entry) => entry.id))}
+                loadOptions={searchContactTags}
+                onChange={setSelectedFilterTags}
                 placeholder="Type to filter by tags..."
               />
               <div className="space-y-2 pt-6">
@@ -1188,7 +1142,7 @@ export function VolunteerCoordinationDashboard({
               <TagTypeaheadMulti
                 label="Interests"
                 selected={volunteerForm.interests}
-                options={interestTagOptions}
+                loadOptions={(query) => searchVolunteerTaxonomyTags("Interests", query)}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, interests: value }))}
                 onCreateOption={(value) => createVolunteerTaxonomyTag("Interests", value)}
                 placeholder="Type an interest and press Enter..."
@@ -1196,7 +1150,7 @@ export function VolunteerCoordinationDashboard({
               <TagTypeaheadMulti
                 label="Skills"
                 selected={volunteerForm.skills}
-                options={skillTagOptions}
+                loadOptions={(query) => searchVolunteerTaxonomyTags("Skills", query)}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, skills: value }))}
                 onCreateOption={(value) => createVolunteerTaxonomyTag("Skills", value)}
                 placeholder="Type a skill and press Enter..."
@@ -1204,7 +1158,7 @@ export function VolunteerCoordinationDashboard({
               <TagTypeaheadMulti
                 label="Certifications"
                 selected={volunteerForm.certifications}
-                options={certificationTagOptions}
+                loadOptions={(query) => searchVolunteerTaxonomyTags("Certifications", query)}
                 onChange={(value) => setVolunteerForm((prev) => ({ ...prev, certifications: value }))}
                 onCreateOption={(value) => createVolunteerTaxonomyTag("Certifications", value)}
                 placeholder="Type a certification and press Enter..."
@@ -1732,7 +1686,7 @@ export function VolunteerCoordinationDashboard({
               <TagTypeaheadMulti
                 label="Required Tags"
                 selected={roleForm.requiredTags}
-                options={allTagOptions}
+                loadOptions={searchContactTags}
                 onChange={(value) => setRoleForm((prev) => ({ ...prev, requiredTags: value }))}
                 placeholder="Type and select required tags..."
               />

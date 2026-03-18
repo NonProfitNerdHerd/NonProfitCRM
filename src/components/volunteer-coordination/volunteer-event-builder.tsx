@@ -4,6 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  ensureTagAutocompleteOption,
+  searchTagAutocompleteOptions
+} from "@/lib/tags/tag-autocomplete-client";
+import {
+  TagTypeaheadMulti,
+  type TagTypeaheadOption
+} from "@/components/tags/tag-typeahead-multi";
 
 type BuilderStep = 1 | 2 | 3 | 4 | 5 | 6;
 type CallStatus =
@@ -50,6 +58,32 @@ function splitCsv(value: string) {
 function joinCsv(values: unknown) {
   if (!Array.isArray(values)) return "";
   return values.map((entry) => toText(entry)).filter(Boolean).join(", ");
+}
+
+function toTagOptions(value: unknown): TagTypeaheadOption[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      if (entry && typeof entry === "object") {
+        const row = entry as Record<string, unknown>;
+        const id = toText(row.id);
+        const name = toText(row.name);
+        if (!name) return null;
+        return {
+          id: id || `name:${normalizeText(name)}`,
+          name,
+          label: toText(row.label) || name
+        } satisfies TagTypeaheadOption;
+      }
+      const text = toText(entry);
+      if (!text) return null;
+      return {
+        id: `name:${normalizeText(text)}`,
+        name: text,
+        label: text
+      } satisfies TagTypeaheadOption;
+    })
+    .filter(Boolean) as TagTypeaheadOption[];
 }
 
 function displayContactName(contact: Record<string, unknown> | null | undefined) {
@@ -165,7 +199,7 @@ export function VolunteerEventBuilder() {
     roleDescription: "",
     isLeadRole: false,
     requiredSkills: "",
-    requiredTags: "",
+    requiredTags: [] as TagTypeaheadOption[],
     requiredCertifications: "",
     requiredTraining: "",
     minorAllowed: true,
@@ -199,7 +233,7 @@ export function VolunteerEventBuilder() {
   const [selectedShiftId, setSelectedShiftId] = useState("");
   const [staffFilter, setStaffFilter] = useState({
     search: "",
-    tags: "",
+    tags: [] as TagTypeaheadOption[],
     skills: "",
     includeBurnout: false,
     includeCaution: false,
@@ -280,7 +314,12 @@ export function VolunteerEventBuilder() {
         setRecurrenceForm((prev) => ({ ...prev, ...(parsed.recurrenceForm as typeof prev) }));
       }
       if (parsed.roleForm && typeof parsed.roleForm === "object") {
-        setRoleForm((prev) => ({ ...prev, ...(parsed.roleForm as typeof prev) }));
+        const nextRoleForm = parsed.roleForm as typeof roleForm & { requiredTags?: unknown };
+        setRoleForm((prev) => ({
+          ...prev,
+          ...nextRoleForm,
+          requiredTags: toTagOptions(nextRoleForm.requiredTags)
+        }));
       }
       if (parsed.shiftForm && typeof parsed.shiftForm === "object") {
         setShiftForm((prev) => ({ ...prev, ...(parsed.shiftForm as typeof prev) }));
@@ -312,6 +351,22 @@ export function VolunteerEventBuilder() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function searchContactTags(query: string) {
+    return searchTagAutocompleteOptions({
+      query,
+      activeOnly: true,
+      limit: 20,
+      module: "contacts"
+    });
+  }
+
+  async function createContactTag(value: string) {
+    return ensureTagAutocompleteOption({
+      name: value,
+      module: "contacts"
+    });
   }
 
   const events = useMemo(
@@ -610,7 +665,7 @@ export function VolunteerEventBuilder() {
       substituteEnabled: roleForm.substituteEnabled,
       isLeadRole: roleForm.isLeadRole,
       requiredSkills: splitCsv(roleForm.requiredSkills),
-      requiredTags: splitCsv(roleForm.requiredTags),
+      requiredTags: roleForm.requiredTags.map((entry) => toText(entry.name)).filter(Boolean),
       requiredCertifications: splitCsv(roleForm.requiredCertifications),
       requiredTraining: splitCsv(roleForm.requiredTraining),
       backgroundCheckRequired: roleForm.backgroundCheckRequired,
@@ -628,7 +683,7 @@ export function VolunteerEventBuilder() {
       roleDescription: "",
       isLeadRole: false,
       requiredSkills: "",
-      requiredTags: "",
+      requiredTags: [],
       requiredCertifications: "",
       requiredTraining: "",
       minorAllowed: true,
@@ -847,7 +902,7 @@ export function VolunteerEventBuilder() {
   const staffingContext = useMemo(() => {
     const selectedShift = shiftById.get(selectedShiftId) ?? null;
     const selectedRole = selectedShift ? roleById.get(toText(selectedShift.role_id)) ?? null : null;
-    const requestedTags = splitCsv(staffFilter.tags).map((entry) => entry.toLowerCase());
+    const requestedTags = staffFilter.tags.map((entry) => normalizeText(entry.name));
     const requestedSkills = splitCsv(staffFilter.skills).map((entry) => entry.toLowerCase());
     const roleRequiredTags = Array.isArray(selectedRole?.required_tags)
       ? (selectedRole?.required_tags as Array<unknown>).map((entry) => normalizeText(entry))
@@ -1400,10 +1455,13 @@ export function VolunteerEventBuilder() {
               value={roleForm.requiredSkills}
               onChange={(value) => setRoleForm((prev) => ({ ...prev, requiredSkills: value }))}
             />
-            <FormField
-              label="Required Tags (comma-separated)"
-              value={roleForm.requiredTags}
+            <TagTypeaheadMulti
+              label="Required Tags"
+              selected={roleForm.requiredTags}
+              loadOptions={searchContactTags}
               onChange={(value) => setRoleForm((prev) => ({ ...prev, requiredTags: value }))}
+              onCreateOption={createContactTag}
+              placeholder="Type and select required tags..."
             />
             <FormField
               label="Required Certifications / Training"
@@ -1450,7 +1508,7 @@ export function VolunteerEventBuilder() {
                   roleDescription: "",
                   isLeadRole: false,
                   requiredSkills: "",
-                  requiredTags: "",
+                  requiredTags: [],
                   requiredCertifications: "",
                   requiredTraining: "",
                   minorAllowed: true,
@@ -1513,7 +1571,7 @@ export function VolunteerEventBuilder() {
                               roleDescription: toText(role.role_description),
                               isLeadRole: Boolean(role.is_lead_role),
                               requiredSkills: joinCsv(role.required_skills),
-                              requiredTags: joinCsv(role.required_tags),
+                              requiredTags: toTagOptions(role.required_tags),
                               requiredCertifications: joinCsv(role.required_certifications),
                               requiredTraining: joinCsv(role.required_training),
                               minorAllowed: Boolean(role.minor_allowed),
@@ -1777,10 +1835,13 @@ export function VolunteerEventBuilder() {
               value={staffFilter.search}
               onChange={(value) => setStaffFilter((prev) => ({ ...prev, search: value }))}
             />
-            <FormField
-              label="Tags Filter (comma-separated)"
-              value={staffFilter.tags}
+            <TagTypeaheadMulti
+              label="Tags Filter"
+              selected={staffFilter.tags}
+              loadOptions={searchContactTags}
               onChange={(value) => setStaffFilter((prev) => ({ ...prev, tags: value }))}
+              onCreateOption={createContactTag}
+              placeholder="Type to filter by tags..."
             />
             <FormField
               label="Skills Filter (comma-separated)"

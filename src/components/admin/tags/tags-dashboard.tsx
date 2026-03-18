@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  TagTypeaheadMulti,
+  type TagTypeaheadOption
+} from "@/components/tags/tag-typeahead-multi";
+import { searchTagAutocompleteOptions } from "@/lib/tags/tag-autocomplete-client";
 
 type TagNode = {
   id: string;
@@ -59,6 +64,14 @@ const CONTACT_MODE_OPTIONS = [
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function toTagOption(tag: TagNode): TagTypeaheadOption {
+  return {
+    id: tag.id,
+    name: toText(tag.name),
+    label: toText(tag.path) || toText(tag.name)
+  };
 }
 
 function collectExpandableTagIds(nodes: TagNode[]) {
@@ -147,18 +160,34 @@ export function TagsDashboard({
     return map;
   }, [tags]);
 
-  const parentTagOptions = useMemo(() => {
-    return [...tags]
-      .sort((a, b) => a.path.localeCompare(b.path))
-      .map((tag) => {
-        const level = Math.max(Number(tag.level || 1), 1);
-        const prefix = level > 1 ? `${"   ".repeat(level - 1)}└─ ` : "";
-        return {
-          id: tag.id,
-          label: `${prefix}${tag.name}`
-        };
-      });
+  const tagOptionById = useMemo(() => {
+    const map = new Map<string, TagTypeaheadOption>();
+    for (const tag of tags) {
+      map.set(tag.id, toTagOption(tag));
+    }
+    return map;
   }, [tags]);
+
+  const bulkTargetTagOptions = useMemo(
+    () => bulkTagIds.map((id) => tagOptionById.get(id)).filter(Boolean) as TagTypeaheadOption[],
+    [bulkTagIds, tagOptionById]
+  );
+  const bulkFilterTagOptions = useMemo(
+    () => bulkFilterTagIds.map((id) => tagOptionById.get(id)).filter(Boolean) as TagTypeaheadOption[],
+    [bulkFilterTagIds, tagOptionById]
+  );
+  const mappingTagOption = useMemo(
+    () =>
+      (mappingForm.internalTagId
+        ? [tagOptionById.get(mappingForm.internalTagId)].filter(Boolean)
+        : []) as TagTypeaheadOption[],
+    [mappingForm.internalTagId, tagOptionById]
+  );
+  const parentTagOption = useMemo(
+    () =>
+      (form.parentTagId ? [tagOptionById.get(form.parentTagId)].filter(Boolean) : []) as TagTypeaheadOption[],
+    [form.parentTagId, tagOptionById]
+  );
 
   const pathPreview = useMemo(() => {
     const parentPath = form.parentTagId ? toText(tagById.get(form.parentTagId)?.path) : "";
@@ -222,6 +251,15 @@ export function TagsDashboard({
   useEffect(() => {
     setExpandedTagIds(collectExpandableTagIds(tree));
   }, [tree]);
+
+  async function searchContactTags(query: string, activeOnly = true) {
+    return searchTagAutocompleteOptions({
+      query,
+      activeOnly,
+      limit: 20,
+      module: "contacts"
+    });
+  }
 
   async function saveTag() {
     setError(null);
@@ -463,14 +501,6 @@ export function TagsDashboard({
     await loadMappings();
   }
 
-  function toggleSelection(setter: (next: string[]) => void, selected: string[], value: string) {
-    if (selected.includes(value)) {
-      setter(selected.filter((entry) => entry !== value));
-    } else {
-      setter([...selected, value]);
-    }
-  }
-
   return (
     <div className="space-y-4">
       {!hideTabSelector ? (
@@ -679,47 +709,23 @@ export function TagsDashboard({
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
                 Target tags (for action)
               </p>
-              <div className="max-h-44 overflow-auto space-y-1">
-                {tags
-                  .filter((tag) => tag.is_active)
-                  .map((tag) => (
-                    <label key={`target-${tag.id}`} className="flex items-start gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={bulkTagIds.includes(tag.id)}
-                        onChange={() =>
-                          toggleSelection((next) => setBulkTagIds(next), bulkTagIds, tag.id)
-                        }
-                      />
-                      <span title={tag.path}>{tag.path}</span>
-                    </label>
-                  ))}
-              </div>
+              <TagTypeaheadMulti
+                selected={bulkTargetTagOptions}
+                loadOptions={(query) => searchContactTags(query, true)}
+                onChange={(next) => setBulkTagIds(next.map((entry) => entry.id))}
+                placeholder="Search and select tags..."
+              />
             </div>
             <div className="rounded-md border border-slate-200 p-2">
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
                 Existing tag filter
               </p>
-              <div className="max-h-44 overflow-auto space-y-1">
-                {tags
-                  .filter((tag) => tag.is_active)
-                  .map((tag) => (
-                    <label key={`filter-${tag.id}`} className="flex items-start gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={bulkFilterTagIds.includes(tag.id)}
-                        onChange={() =>
-                          toggleSelection(
-                            (next) => setBulkFilterTagIds(next),
-                            bulkFilterTagIds,
-                            tag.id
-                          )
-                        }
-                      />
-                      <span title={tag.path}>{tag.path}</span>
-                    </label>
-                  ))}
-              </div>
+              <TagTypeaheadMulti
+                selected={bulkFilterTagOptions}
+                loadOptions={(query) => searchContactTags(query, true)}
+                onChange={(next) => setBulkFilterTagIds(next.map((entry) => entry.id))}
+                placeholder="Search existing tags filter..."
+              />
             </div>
           </div>
 
@@ -837,20 +843,18 @@ export function TagsDashboard({
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Internal Tag</label>
-              <select
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={mappingForm.internalTagId}
-                onChange={(event) =>
-                  setMappingForm((prev) => ({ ...prev, internalTagId: event.target.value }))
+              <TagTypeaheadMulti
+                selected={mappingTagOption}
+                loadOptions={(query) => searchContactTags(query, false)}
+                onChange={(next) =>
+                  setMappingForm((prev) => ({
+                    ...prev,
+                    internalTagId: next[0]?.id ?? ""
+                  }))
                 }
-              >
-                <option value="">Select tag</option>
-                {tags.map((tag) => (
-                  <option key={tag.id} value={tag.id}>
-                    {tag.path}
-                  </option>
-                ))}
-              </select>
+                maxSelections={1}
+                placeholder="Search internal tag..."
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">External System</label>
@@ -1031,22 +1035,30 @@ export function TagsDashboard({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Parent</label>
-                <select
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={form.parentTagId}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, parentTagId: event.target.value }))
+                <TagTypeaheadMulti
+                  selected={parentTagOption}
+                  loadOptions={async (query) => {
+                    const results = await searchContactTags(query, false);
+                    return results.filter((entry) => entry.id !== editingTagId);
+                  }}
+                  onChange={(next) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      parentTagId: next[0]?.id ?? ""
+                    }))
                   }
-                >
-                  <option value="">Top-level</option>
-                  {parentTagOptions
-                    .filter((tag) => tag.id !== editingTagId)
-                    .map((tag) => (
-                      <option key={tag.id} value={tag.id}>
-                        {tag.label}
-                      </option>
-                    ))}
-                </select>
+                  maxSelections={1}
+                  placeholder="Search parent tag or leave blank for top-level"
+                />
+                {form.parentTagId ? (
+                  <button
+                    type="button"
+                    className="mt-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                    onClick={() => setForm((prev) => ({ ...prev, parentTagId: "" }))}
+                  >
+                    Clear parent (Top-level)
+                  </button>
+                ) : null}
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Sort Order</label>

@@ -311,6 +311,7 @@ export async function createTagDefinition(input: {
   slug?: string | null;
   description?: string | null;
   parentTagId?: string | null;
+  module?: string | null;
   isActive?: boolean;
   isSystem?: boolean;
   color?: string | null;
@@ -326,6 +327,7 @@ export async function createTagDefinition(input: {
     slug: toText(input.slug) || null,
     description: toText(input.description) || null,
     parent_tag_id: toText(input.parentTagId) || null,
+    module: toText(input.module) || "contacts",
     is_active: input.isActive ?? true,
     is_system: input.isSystem ?? false,
     color: toText(input.color) || null,
@@ -339,7 +341,7 @@ export async function createTagDefinition(input: {
     .from("tags")
     .insert(payload)
     .select(
-      "id,organization_id,name,slug,description,parent_tag_id,level,path,is_active,is_system,color,sort_order,external_key,created_at,updated_at"
+      "id,organization_id,name,slug,description,parent_tag_id,module,level,path,is_active,is_system,color,sort_order,external_key,created_at,updated_at"
     )
     .single();
   if (error) throw error;
@@ -502,7 +504,13 @@ export async function getTagUsage(tagId: string) {
   };
 }
 
-export async function searchTags(input?: { q?: string; activeOnly?: boolean; limit?: number }) {
+export async function searchTags(input?: {
+  q?: string;
+  activeOnly?: boolean;
+  limit?: number;
+  rootName?: string;
+  module?: string;
+}) {
   const context = await requireAnyStaffPermission([
     "can_assign_contact_tags",
     "can_manage_contact_tags",
@@ -522,6 +530,15 @@ export async function searchTags(input?: { q?: string; activeOnly?: boolean; lim
 
   if (toBool(input?.activeOnly, true)) {
     query = query.eq("is_active", true);
+  }
+  const module = toText(input?.module);
+  if (module) {
+    query = query.eq("module", module);
+  }
+  const rootName = toText(input?.rootName);
+  if (rootName) {
+    const escapedRoot = rootName.replace(/[%_]/g, "");
+    query = query.ilike("path", `${escapedRoot}%`);
   }
   const q = toText(input?.q);
   if (q) {

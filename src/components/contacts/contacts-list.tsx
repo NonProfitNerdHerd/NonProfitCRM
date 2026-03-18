@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TagMultiSelectAutocomplete, type TagMultiSelectOption } from "@/components/tags/tag-multi-select-autocomplete";
+import {
+  ensureTagAutocompleteOption,
+  searchTagAutocompleteOptions
+} from "@/lib/tags/tag-autocomplete-client";
 
 type TagChip = {
   id: string;
@@ -46,8 +51,7 @@ export function ContactsList({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [selectedTagId, setSelectedTagId] = useState("");
-  const [availableTags, setAvailableTags] = useState<Array<{ id: string; path: string }>>([]);
+  const [selectedTags, setSelectedTags] = useState<TagMultiSelectOption[]>([]);
   const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
   const [page, setPage] = useState(1);
 
@@ -59,23 +63,9 @@ export function ContactsList({
   }, [contacts]);
 
   useEffect(() => {
-    void loadTagOptions();
-  }, []);
-
-  useEffect(() => {
     void fetchRows(page, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, page, pageSize]);
-
-  async function loadTagOptions() {
-    const response = await fetch(
-      `/api/admin/tags/search?activeOnly=true&limit=100`
-    );
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) return;
-    const tags = (payload?.tags ?? []) as Array<{ id: string; path: string }>;
-    setAvailableTags(tags);
-  }
 
   async function fetchRows(nextPage = page, nextPageSize = pageSize) {
     setLoading(true);
@@ -85,8 +75,8 @@ export function ContactsList({
     params.set("offset", String((nextPage - 1) * nextPageSize));
     params.set("limit", String(nextPageSize));
     if (query.trim()) params.set("q", query.trim());
-    if (selectedTagId) {
-      params.set("tagIds", selectedTagId);
+    if (selectedTags.length > 0) {
+      params.set("tagIds", selectedTags.map((tag) => tag.id).join(","));
       params.set("tagMatch", "any");
       params.set("includeDescendants", "true");
     }
@@ -139,18 +129,28 @@ export function ContactsList({
           placeholder="Search Contacts"
           className="min-w-[220px] flex-1"
         />
-        <select
-          className="min-w-[220px] rounded-md border border-slate-300 px-3 py-2 text-sm"
-          value={selectedTagId}
-          onChange={(event) => setSelectedTagId(event.target.value)}
-        >
-          <option value="">All Tags</option>
-          {availableTags.map((tag) => (
-            <option key={tag.id} value={tag.id}>
-              {tag.path}
-            </option>
-          ))}
-        </select>
+        <div className="min-w-[260px] flex-1">
+          <TagMultiSelectAutocomplete
+            selected={selectedTags}
+            onChange={setSelectedTags}
+            loadOptions={(value) =>
+              searchTagAutocompleteOptions({
+                query: value,
+                activeOnly: true,
+                limit: 20,
+                module: "contacts"
+              })
+            }
+            onCreateOption={(value) =>
+              ensureTagAutocompleteOption({
+                name: value,
+                module: "contacts"
+              })
+            }
+            placeholder="Filter by tags"
+            emptyHint="No matching tags."
+          />
+        </div>
         <Button type="button" variant="secondary" onClick={() => void applyFilters()} disabled={loading}>
           {loading ? "Filtering..." : "Apply Filters"}
         </Button>

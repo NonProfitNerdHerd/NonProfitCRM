@@ -9,7 +9,9 @@ export async function GET(request: Request) {
       (url.searchParams.get("activeOnly") ?? "true").toLowerCase()
     );
     const limit = Number(url.searchParams.get("limit") ?? 25);
-    const tags = await searchTags({ q, activeOnly, limit });
+    const rootName = url.searchParams.get("rootName") ?? "";
+    const module = url.searchParams.get("module") ?? "";
+    const tags = await searchTags({ q, activeOnly, limit, rootName, module });
     return NextResponse.json({ tags });
   } catch (error) {
     return NextResponse.json(
