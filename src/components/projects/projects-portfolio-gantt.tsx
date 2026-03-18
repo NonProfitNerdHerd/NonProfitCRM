@@ -69,12 +69,16 @@ export function ProjectsPortfolioGantt({
 }) {
   const [activeTab, setActiveTab] = useState<PortfolioTab>("gantt");
   const [zoomDays, setZoomDays] = useState<number>(90);
-  const [ganttScale, setGanttScale] = useState<GanttScale>("month");
   const [windowStart, setWindowStart] = useState<Date>(() => initialWindowStart(projects));
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+  const ganttScale: GanttScale = useMemo(() => {
+    if (zoomDays <= 60) return "week";
+    if (zoomDays <= 180) return "month";
+    return "year";
+  }, [zoomDays]);
 
   const projectRows = useMemo(
     () =>
@@ -256,18 +260,9 @@ export function ProjectsPortfolioGantt({
               Window: {formatDate(windowRange.start)} - {formatDate(windowRange.end)}
             </p>
             <div className="flex flex-wrap items-center gap-1">
-              <label className="mr-1 flex items-center gap-1 text-xs text-slate-700">
-                Scale
-                <select
-                  className="rounded border border-slate-300 px-2 py-1 text-xs"
-                  value={ganttScale}
-                  onChange={(event) => setGanttScale(event.target.value as GanttScale)}
-                >
-                  <option value="week">Week</option>
-                  <option value="month">Month</option>
-                  <option value="year">Year</option>
-                </select>
-              </label>
+              <span className="mr-1 rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                Scale: {ganttScale} (auto)
+              </span>
               <button
                 type="button"
                 className="rounded border border-slate-300 px-2 py-1 text-xs"
