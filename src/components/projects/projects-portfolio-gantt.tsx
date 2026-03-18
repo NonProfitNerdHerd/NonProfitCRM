@@ -18,6 +18,7 @@ export type PortfolioTaskRow = {
   title: string;
   due_date: string | null;
   status: string;
+  assigned_to?: string | null;
   project_id: string | null;
   projects?: Array<{ name?: string }> | { name?: string } | null;
 };
@@ -62,10 +63,12 @@ function initialWindowStart(projects: ProjectPortfolioRow[]) {
 
 export function ProjectsPortfolioGantt({
   projects,
-  tasks
+  tasks,
+  assigneeById
 }: {
   projects: ProjectPortfolioRow[];
   tasks: PortfolioTaskRow[];
+  assigneeById?: Record<string, string>;
 }) {
   const [activeTab, setActiveTab] = useState<PortfolioTab>("gantt");
   const [zoomDays, setZoomDays] = useState<number>(90);
@@ -186,24 +189,60 @@ export function ProjectsPortfolioGantt({
     return days;
   }, [calendarMonth]);
 
-  const projectCalendarMap = useMemo(() => {
-    const map = new Map<string, Array<{ id: string; name: string; kind: "start" | "end" }>>();
-    for (const row of projectRows) {
-      if (row.start) {
-        const key = toDateKey(row.start);
-        const existing = map.get(key) ?? [];
-        existing.push({ id: row.id, name: row.name, kind: "start" });
-        map.set(key, existing);
-      }
-      if (row.end) {
-        const key = toDateKey(row.end);
-        const existing = map.get(key) ?? [];
-        existing.push({ id: row.id, name: row.name, kind: "end" });
-        map.set(key, existing);
-      }
+  const calendarWeeks = useMemo(() => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const weeks: Array<{
+      days: Date[];
+      bars: Array<{ id: string; name: string; lane: number; left: number; width: number }>;
+      laneCount: number;
+    }> = [];
+
+    for (let index = 0; index < calendarDays.length; index += 7) {
+      const days = calendarDays.slice(index, index + 7);
+      if (days.length !== 7) continue;
+      const weekStart = startOfDay(days[0]);
+      const weekEnd = startOfDay(days[6]);
+
+      const candidates = projectRows
+        .filter((project) => project.start && project.end && project.end >= weekStart && project.start <= weekEnd)
+        .sort((a, b) => a.start!.getTime() - b.start!.getTime());
+
+      const laneEnds: Date[] = [];
+      const bars = candidates.map((project) => {
+        const segmentStart = project.start! < weekStart ? weekStart : project.start!;
+        const segmentEnd = project.end! > weekEnd ? weekEnd : project.end!;
+
+        let lane = 0;
+        while (laneEnds[lane] && laneEnds[lane] >= segmentStart) lane += 1;
+        laneEnds[lane] = segmentEnd;
+
+        const startOffsetDays = Math.max(
+          0,
+          Math.floor((segmentStart.getTime() - weekStart.getTime()) / DAY_MS)
+        );
+        const endOffsetDays = Math.min(
+          6,
+          Math.floor((segmentEnd.getTime() - weekStart.getTime()) / DAY_MS)
+        );
+
+        return {
+          id: project.id,
+          name: project.name,
+          lane,
+          left: (startOffsetDays / 7) * 100,
+          width: ((endOffsetDays - startOffsetDays + 1) / 7) * 100
+        };
+      });
+
+      weeks.push({
+        days,
+        bars,
+        laneCount: Math.max(1, laneEnds.length)
+      });
     }
-    return map;
-  }, [projectRows]);
+
+    return weeks;
+  }, [calendarDays, projectRows]);
 
   const taskBuckets = useMemo(() => {
     const today = startOfDay(new Date());
@@ -410,37 +449,55 @@ export function ProjectsPortfolioGantt({
             <div>Fri</div>
             <div>Sat</div>
           </div>
-          <div className="mt-2 grid grid-cols-7 gap-2">
-            {calendarDays.map((day) => {
-              const key = toDateKey(day);
-              const entries = projectCalendarMap.get(key) ?? [];
-              const inMonth = day.getMonth() === calendarMonth.getMonth();
-              return (
+          <div className="mt-2 space-y-2">
+            {calendarWeeks.map((week, index) => (
+              <div key={`week-${index}`} className="rounded-md border border-slate-200 overflow-hidden">
                 <div
-                  key={key}
-                  className={`min-h-[95px] rounded-md border p-2 ${
-                    inMonth ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50"
-                  }`}
+                  className="relative border-b border-slate-200 bg-white"
+                  style={{ height: `${Math.max(28, week.laneCount * 22 + 6)}px` }}
                 >
-                  <p className={`text-xs ${inMonth ? "text-slate-700" : "text-slate-400"}`}>{day.getDate()}</p>
-                  <div className="mt-1 space-y-1">
-                    {entries.slice(0, 2).map((entry) => (
-                      <Link
-                        key={`${entry.id}-${entry.kind}`}
-                        href={`/staff/projects/management/${entry.id}`}
-                        className="block truncate rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700"
-                        title={`${entry.kind === "start" ? "Start" : "End"}: ${entry.name}`}
-                      >
-                        {entry.kind === "start" ? "S" : "E"}: {entry.name}
-                      </Link>
+                  <div className="absolute inset-0 grid grid-cols-7">
+                    {week.days.map((day) => (
+                      <div key={`week-line-${toDateKey(day)}`} className="border-r border-slate-100 last:border-r-0" />
                     ))}
-                    {entries.length > 2 ? (
-                      <p className="text-[11px] text-slate-500">+{entries.length - 2} more</p>
-                    ) : null}
                   </div>
+                  {week.bars.map((bar) => (
+                    <Link
+                      key={`week-bar-${index}-${bar.id}-${bar.lane}`}
+                      href={`/staff/projects/management/${bar.id}`}
+                      className="absolute rounded bg-brand-200 px-2 text-[11px] font-medium text-brand-900 hover:bg-brand-300"
+                      style={{
+                        top: `${4 + bar.lane * 22}px`,
+                        left: `${bar.left}%`,
+                        width: `${bar.width}%`,
+                        height: "18px"
+                      }}
+                      title={bar.name}
+                    >
+                      <span className="line-clamp-1">{bar.name}</span>
+                    </Link>
+                  ))}
                 </div>
-              );
-            })}
+                <div className="grid grid-cols-7 bg-white">
+                  {week.days.map((day) => {
+                    const key = toDateKey(day);
+                    const inMonth = day.getMonth() === calendarMonth.getMonth();
+                    return (
+                      <div
+                        key={`week-day-${key}`}
+                        className={`min-h-[52px] border-r border-slate-100 p-2 last:border-r-0 ${
+                          inMonth ? "bg-white" : "bg-slate-50"
+                        }`}
+                      >
+                        <p className={`text-xs ${inMonth ? "text-slate-700" : "text-slate-400"}`}>
+                          {day.getDate()}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       ) : null}
@@ -452,9 +509,20 @@ export function ProjectsPortfolioGantt({
               title="Overdue + Next 30 Days"
               rows={taskBuckets.first}
               emptyMessage="No overdue or next 30-day tasks."
+              assigneeById={assigneeById}
             />
-            <TaskColumn title="Days 31-60" rows={taskBuckets.second} emptyMessage="No tasks due in days 31-60." />
-            <TaskColumn title="Days 61-90" rows={taskBuckets.third} emptyMessage="No tasks due in days 61-90." />
+            <TaskColumn
+              title="Days 31-60"
+              rows={taskBuckets.second}
+              emptyMessage="No tasks due in days 31-60."
+              assigneeById={assigneeById}
+            />
+            <TaskColumn
+              title="Days 61-90"
+              rows={taskBuckets.third}
+              emptyMessage="No tasks due in days 61-90."
+              assigneeById={assigneeById}
+            />
           </div>
         </section>
       ) : null}
@@ -489,11 +557,13 @@ function TabButton({
 function TaskColumn({
   title,
   rows,
-  emptyMessage
+  emptyMessage,
+  assigneeById
 }: {
   title: string;
   rows: PortfolioTaskRow[];
   emptyMessage: string;
+  assigneeById?: Record<string, string>;
 }) {
   return (
     <section className="rounded-md border border-slate-200 p-3">
@@ -511,6 +581,12 @@ function TaskColumn({
               <p className="text-sm font-medium text-brand-700">{task.title}</p>
               <p className="mt-1 text-xs text-slate-500">
                 Due: {formatDate(task.due_date)} • Project: {projectNameFromTask(task)}
+              </p>
+              <p className="text-xs text-slate-500">
+                Assigned:{" "}
+                {task.assigned_to
+                  ? (assigneeById?.[task.assigned_to] ?? task.assigned_to)
+                  : "-"}
               </p>
             </Link>
           ))}

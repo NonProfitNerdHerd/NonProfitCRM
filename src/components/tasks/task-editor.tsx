@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/utils";
@@ -95,6 +95,19 @@ export function TaskEditor({
   const [subtaskSaving, setSubtaskSaving] = useState(false);
   const [subtaskError, setSubtaskError] = useState<string | null>(null);
   const [subtaskMessage, setSubtaskMessage] = useState<string | null>(null);
+  const overdueSubtaskCount = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return subtaskRows.filter((row) => {
+      const status = String(row.status ?? "").toLowerCase();
+      if (["completed", "cancelled"].includes(status)) return false;
+      const due = String(row.due_date ?? "");
+      if (!due) return false;
+      const dueDate = new Date(due);
+      dueDate.setHours(0, 0, 0, 0);
+      return dueDate < now;
+    }).length;
+  }, [subtaskRows]);
 
   async function saveTask() {
     setSaving(true);
@@ -270,107 +283,167 @@ export function TaskEditor({
         <Button type="button" variant="secondary" onClick={openNewSubtaskForm}>
           Add Subtask
         </Button>
+        {overdueSubtaskCount > 0 ? (
+          <div className="mt-1 flex flex-col items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-2">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-xs font-semibold text-white">
+              {overdueSubtaskCount}
+            </span>
+            <span className="text-[11px] font-medium text-red-700">Overdue subtasks</span>
+            <div className="h-1.5 w-full rounded bg-red-200">
+              <div
+                className="h-1.5 rounded bg-red-600"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    Math.round((overdueSubtaskCount / Math.max(1, subtaskRows.length)) * 100)
+                  )}%`
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <section className="rounded-md border border-slate-200 p-4">
         <h4 className="text-sm font-semibold">Task Details</h4>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
-          <Input
-            value={form.title}
-            onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
-            placeholder="Title"
-          />
-          <Input
-            value={form.description}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, description: event.target.value }))
-            }
-            placeholder="Description"
-          />
-          <select
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-            value={form.status}
-            onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}
-          >
-            <option value="todo">Open</option>
-            <option value="in_progress">In Progress</option>
-            <option value="completed">Completed</option>
-            <option value="blocked">Blocked</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-            value={form.priority}
-            onChange={(event) => setForm((prev) => ({ ...prev, priority: event.target.value }))}
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
-          </select>
-          <Input
-            type="date"
-            value={form.suspenseDate}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, suspenseDate: event.target.value }))
-            }
-          />
-          <Input
-            type="date"
-            value={form.startDate}
-            onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))}
-          />
-          <Input
-            type="date"
-            value={form.endDate}
-            onChange={(event) => setForm((prev) => ({ ...prev, endDate: event.target.value }))}
-          />
-          <select
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-            value={form.assignedToUserId}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, assignedToUserId: event.target.value }))
-            }
-          >
-            <option value="">Unassigned</option>
-            {users.map((user) => (
-              <option key={user.user_id} value={user.user_id}>
-                {user.display_name ?? user.user_id}
-              </option>
-            ))}
-          </select>
-          <select
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-            value={form.ownerUserId}
-            onChange={(event) => setForm((prev) => ({ ...prev, ownerUserId: event.target.value }))}
-          >
-            <option value="">Task owner</option>
-            {users.map((user) => (
-              <option key={user.user_id} value={user.user_id}>
-                {user.display_name ?? user.user_id}
-              </option>
-            ))}
-          </select>
-          <Input
-            value={form.estimatedHours}
-            onChange={(event) => setForm((prev) => ({ ...prev, estimatedHours: event.target.value }))}
-            placeholder="Estimated hours"
-          />
-          <Input
-            value={form.actualHours}
-            onChange={(event) => setForm((prev) => ({ ...prev, actualHours: event.target.value }))}
-            placeholder="Actual hours"
-          />
-          <Input
-            value={form.percentComplete}
-            onChange={(event) => setForm((prev) => ({ ...prev, percentComplete: event.target.value }))}
-            placeholder="Percent complete"
-          />
-          <Input
-            value={form.blockingNote}
-            onChange={(event) => setForm((prev) => ({ ...prev, blockingNote: event.target.value }))}
-            placeholder="Blocking notes / dependency notes"
-          />
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Task Title</span>
+            <Input
+              value={form.title}
+              onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
+              placeholder="Task title"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Status</span>
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={form.status}
+              onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}
+            >
+              <option value="todo">Open</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="blocked">Blocked</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Priority</span>
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={form.priority}
+              onChange={(event) => setForm((prev) => ({ ...prev, priority: event.target.value }))}
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Due Date</span>
+            <Input
+              type="date"
+              value={form.suspenseDate}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, suspenseDate: event.target.value }))
+              }
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Start Date</span>
+            <Input
+              type="date"
+              value={form.startDate}
+              onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))}
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>End Date</span>
+            <Input
+              type="date"
+              value={form.endDate}
+              onChange={(event) => setForm((prev) => ({ ...prev, endDate: event.target.value }))}
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Assigned To</span>
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={form.assignedToUserId}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, assignedToUserId: event.target.value }))
+              }
+            >
+              <option value="">Unassigned</option>
+              {users.map((user) => (
+                <option key={user.user_id} value={user.user_id}>
+                  {user.display_name ?? user.user_id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Task Owner</span>
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={form.ownerUserId}
+              onChange={(event) => setForm((prev) => ({ ...prev, ownerUserId: event.target.value }))}
+            >
+              <option value="">Task owner</option>
+              {users.map((user) => (
+                <option key={user.user_id} value={user.user_id}>
+                  {user.display_name ?? user.user_id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Estimated Hours</span>
+            <Input
+              value={form.estimatedHours}
+              onChange={(event) => setForm((prev) => ({ ...prev, estimatedHours: event.target.value }))}
+              placeholder="Estimated hours"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Actual Hours</span>
+            <Input
+              value={form.actualHours}
+              onChange={(event) => setForm((prev) => ({ ...prev, actualHours: event.target.value }))}
+              placeholder="Actual hours"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700">
+            <span>Percent Complete</span>
+            <Input
+              value={form.percentComplete}
+              onChange={(event) => setForm((prev) => ({ ...prev, percentComplete: event.target.value }))}
+              placeholder="Percent complete"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700 md:col-span-2">
+            <span>Description</span>
+            <textarea
+              className="min-h-[84px] rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={form.description}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, description: event.target.value }))
+              }
+              placeholder="Task description"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-700 md:col-span-2">
+            <span>Blocking Notes / Dependency Notes</span>
+            <textarea
+              className="min-h-[84px] rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={form.blockingNote}
+              onChange={(event) => setForm((prev) => ({ ...prev, blockingNote: event.target.value }))}
+              placeholder="Blocking notes and dependency details"
+            />
+          </label>
         </div>
         <Button className="mt-3" type="button" onClick={saveTask} disabled={saving}>
           {saving ? "Saving..." : "Save Task"}
@@ -401,21 +474,6 @@ export function TaskEditor({
           />
           <Button type="button" onClick={addComment} disabled={saving}>
             Add Comment
-          </Button>
-        </div>
-      </section>
-
-      <section className="rounded-md border border-slate-200 p-4">
-        <h4 className="text-sm font-semibold">Subtasks</h4>
-        <p className="mt-1 text-xs text-slate-500">
-          Use the right-side fly-in to view, add, and edit subtask items.
-        </p>
-        <div className="mt-2 flex gap-2">
-          <Button type="button" variant="secondary" onClick={openSubtasksList}>
-            See Sub Tasks
-          </Button>
-          <Button type="button" onClick={openNewSubtaskForm}>
-            Add Subtask
           </Button>
         </div>
       </section>
@@ -477,121 +535,152 @@ export function TaskEditor({
               </div>
             ) : (
               <form className="space-y-3" onSubmit={saveSubtask}>
-                <Input
-                  value={subtaskForm.title}
-                  onChange={(event) =>
-                    setSubtaskForm((prev) => ({ ...prev, title: event.target.value }))
-                  }
-                  placeholder="Subtask title"
-                  required
-                />
-                <Input
-                  value={subtaskForm.description}
-                  onChange={(event) =>
-                    setSubtaskForm((prev) => ({ ...prev, description: event.target.value }))
-                  }
-                  placeholder="Description"
-                />
+                <label className="grid gap-1 text-xs text-slate-700">
+                  <span>Subtask Title</span>
+                  <Input
+                    value={subtaskForm.title}
+                    onChange={(event) =>
+                      setSubtaskForm((prev) => ({ ...prev, title: event.target.value }))
+                    }
+                    placeholder="Subtask title"
+                    required
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-slate-700">
+                  <span>Description</span>
+                  <textarea
+                    className="min-h-[80px] rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    value={subtaskForm.description}
+                    onChange={(event) =>
+                      setSubtaskForm((prev) => ({ ...prev, description: event.target.value }))
+                    }
+                    placeholder="Description"
+                  />
+                </label>
                 <div className="grid gap-2 md:grid-cols-2">
-                  <select
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={subtaskForm.status}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({
-                        ...prev,
-                        status: event.target.value as SubtaskFormState["status"]
-                      }))
-                    }
-                  >
-                    <option value="todo">Open</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="completed">Completed</option>
-                    <option value="blocked">Blocked</option>
-                    <option value="cancelled">Cancelled</option>
-                  </select>
-                  <select
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={subtaskForm.priority}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({
-                        ...prev,
-                        priority: event.target.value as SubtaskFormState["priority"]
-                      }))
-                    }
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                  <Input
-                    type="date"
-                    value={subtaskForm.dueDate}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
-                    }
-                  />
-                  <select
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={subtaskForm.ownerUserId}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
-                    }
-                  >
-                    <option value="">Subtask owner</option>
-                    {users.map((user) => (
-                      <option key={user.user_id} value={user.user_id}>
-                        {user.display_name ?? user.user_id}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={subtaskForm.assignedToUserId}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({
-                        ...prev,
-                        assignedToUserId: event.target.value
-                      }))
-                    }
-                  >
-                    <option value="">Assigned to</option>
-                    {users.map((user) => (
-                      <option key={user.user_id} value={user.user_id}>
-                        {user.display_name ?? user.user_id}
-                      </option>
-                    ))}
-                  </select>
-                  <Input
-                    value={subtaskForm.estimatedHours}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({
-                        ...prev,
-                        estimatedHours: event.target.value
-                      }))
-                    }
-                    placeholder="Estimated hours"
-                  />
-                  <Input
-                    value={subtaskForm.actualHours}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({
-                        ...prev,
-                        actualHours: event.target.value
-                      }))
-                    }
-                    placeholder="Actual hours"
-                  />
-                  <Input
-                    value={subtaskForm.percentComplete}
-                    onChange={(event) =>
-                      setSubtaskForm((prev) => ({
-                        ...prev,
-                        percentComplete: event.target.value
-                      }))
-                    }
-                    placeholder="Percent complete"
-                  />
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Status</span>
+                    <select
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={subtaskForm.status}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({
+                          ...prev,
+                          status: event.target.value as SubtaskFormState["status"]
+                        }))
+                      }
+                    >
+                      <option value="todo">Open</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                      <option value="blocked">Blocked</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Priority</span>
+                    <select
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={subtaskForm.priority}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({
+                          ...prev,
+                          priority: event.target.value as SubtaskFormState["priority"]
+                        }))
+                      }
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Due Date</span>
+                    <Input
+                      type="date"
+                      value={subtaskForm.dueDate}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Subtask Owner</span>
+                    <select
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={subtaskForm.ownerUserId}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                      }
+                    >
+                      <option value="">Subtask owner</option>
+                      {users.map((user) => (
+                        <option key={user.user_id} value={user.user_id}>
+                          {user.display_name ?? user.user_id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Assigned To</span>
+                    <select
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={subtaskForm.assignedToUserId}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({
+                          ...prev,
+                          assignedToUserId: event.target.value
+                        }))
+                      }
+                    >
+                      <option value="">Assigned to</option>
+                      {users.map((user) => (
+                        <option key={user.user_id} value={user.user_id}>
+                          {user.display_name ?? user.user_id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Estimated Hours</span>
+                    <Input
+                      value={subtaskForm.estimatedHours}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({
+                          ...prev,
+                          estimatedHours: event.target.value
+                        }))
+                      }
+                      placeholder="Estimated hours"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Actual Hours</span>
+                    <Input
+                      value={subtaskForm.actualHours}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({
+                          ...prev,
+                          actualHours: event.target.value
+                        }))
+                      }
+                      placeholder="Actual hours"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-700">
+                    <span>Percent Complete</span>
+                    <Input
+                      value={subtaskForm.percentComplete}
+                      onChange={(event) =>
+                        setSubtaskForm((prev) => ({
+                          ...prev,
+                          percentComplete: event.target.value
+                        }))
+                      }
+                      placeholder="Percent complete"
+                    />
+                  </label>
                 </div>
                 <div className="flex gap-2">
                   <Button type="submit" disabled={subtaskSaving}>

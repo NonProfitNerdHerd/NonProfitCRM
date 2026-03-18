@@ -2,6 +2,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { listProjects } from "@/lib/data/projects";
 import { listTasks } from "@/lib/data/tasks";
 import { requireStaffPermission } from "@/lib/auth/guards";
+import { listOrganizationUsers } from "@/lib/data/users";
 import {
   ProjectsPortfolioGantt,
   type PortfolioTaskRow,
@@ -11,7 +12,14 @@ import Link from "next/link";
 
 export default async function ProjectsPage() {
   await requireStaffPermission("can_view_dashboard");
-  const [projects, tasks] = await Promise.all([listProjects({ status: "all" }), listTasks()]);
+  const [projects, tasks, users] = await Promise.all([
+    listProjects({ status: "all" }),
+    listTasks(),
+    listOrganizationUsers()
+  ]);
+  const assigneeById = Object.fromEntries(
+    users.map((user) => [user.user_id, user.display_name || user.user_id])
+  );
 
   return (
     <Card>
@@ -30,6 +38,7 @@ export default async function ProjectsPage() {
       <ProjectsPortfolioGantt
         projects={projects as ProjectPortfolioRow[]}
         tasks={tasks as PortfolioTaskRow[]}
+        assigneeById={assigneeById}
       />
     </Card>
   );
