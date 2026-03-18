@@ -16,6 +16,116 @@ const LIFECYCLE_TO_STATUS: Record<string, "active" | "on_hold" | "completed" | "
   archived: "completed"
 };
 
+export const CONSTITUENT_OUTREACH_SYSTEM_KEY = "consituent_outreach";
+export const CONSTITUENT_OUTREACH_PROJECT_NAME = "consituent-outreach";
+
+function isSystemProjectSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("system_key") || message.includes("is_system_project");
+}
+
+export function isConstituentOutreachProjectRecord(project: Record<string, unknown> | null | undefined) {
+  if (!project) return false;
+  const systemKey = String(project.system_key ?? "").trim().toLowerCase();
+  if (systemKey === CONSTITUENT_OUTREACH_SYSTEM_KEY) return true;
+  if (Boolean(project.is_system_project) && !systemKey) {
+    const normalizedName = String(project.name ?? "").trim().toLowerCase();
+    return normalizedName === CONSTITUENT_OUTREACH_PROJECT_NAME;
+  }
+  return String(project.name ?? "").trim().toLowerCase() === CONSTITUENT_OUTREACH_PROJECT_NAME;
+}
+
+export async function ensureConstituentOutreachProject(input?: {
+  organizationId?: string;
+  userId?: string;
+}) {
+  const context = input?.organizationId ? null : await requireSessionContext();
+  const organizationId = input?.organizationId ?? context?.organizationId;
+  const userId = input?.userId ?? context?.userId ?? null;
+  if (!organizationId) throw new Error("Organization context is required.");
+  const supabase = await createClient();
+
+  const bySystemKey = await supabase
+    .from("projects")
+    .select("id,name,system_key,is_system_project")
+    .eq("organization_id", organizationId)
+    .eq("system_key", CONSTITUENT_OUTREACH_SYSTEM_KEY)
+    .maybeSingle();
+  const supportsSystemProjectColumns = !bySystemKey.error;
+  if (bySystemKey.error && !isSystemProjectSchemaMissingError(bySystemKey.error)) {
+    throw bySystemKey.error;
+  }
+  if (bySystemKey.data) return String(bySystemKey.data.id);
+
+  const byName = await supabase
+    .from("projects")
+    .select("id,name")
+    .eq("organization_id", organizationId)
+    .ilike("name", CONSTITUENT_OUTREACH_PROJECT_NAME)
+    .maybeSingle();
+  if (byName.error) throw byName.error;
+  if (byName.data?.id) {
+    if (supportsSystemProjectColumns) {
+      await supabase
+        .from("projects")
+        .update({
+          is_system_project: true,
+          system_key: CONSTITUENT_OUTREACH_SYSTEM_KEY
+        })
+        .eq("organization_id", organizationId)
+        .eq("id", byName.data.id);
+    }
+    return String(byName.data.id);
+  }
+
+  const insertPayload: Record<string, unknown> = {
+    tenant_id: organizationId,
+    organization_id: organizationId,
+    name: CONSTITUENT_OUTREACH_PROJECT_NAME,
+    description: "System project for constituent follow-up and outreach tasks.",
+    status: "active",
+    lifecycle_status: "active",
+    owner_user_id: userId,
+    project_manager_user_id: userId,
+    created_by: userId
+  };
+  if (supportsSystemProjectColumns) {
+    insertPayload.is_system_project = true;
+    insertPayload.system_key = CONSTITUENT_OUTREACH_SYSTEM_KEY;
+  }
+
+  const inserted = await supabase.from("projects").insert(insertPayload).select("id").maybeSingle();
+  if (inserted.error) {
+    const fallbackByName = await supabase
+      .from("projects")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .ilike("name", CONSTITUENT_OUTREACH_PROJECT_NAME)
+      .maybeSingle();
+    if (fallbackByName.error || !fallbackByName.data?.id) throw inserted.error;
+    if (supportsSystemProjectColumns) {
+      await supabase
+        .from("projects")
+        .update({
+          is_system_project: true,
+          system_key: CONSTITUENT_OUTREACH_SYSTEM_KEY
+        })
+        .eq("organization_id", organizationId)
+        .eq("id", fallbackByName.data.id);
+    }
+    return String(fallbackByName.data.id);
+  }
+
+  const insertedId = String(inserted.data?.id ?? "");
+  if (!insertedId) throw new Error("Unable to provision constituent outreach system project.");
+  return insertedId;
+}
+
 function isProjectExpensesSchemaMissingError(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const message = String((error as { message?: unknown }).message ?? "").toLowerCase();

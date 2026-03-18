@@ -3,6 +3,7 @@ import { requireStaffPermission } from "@/lib/auth/guards";
 import { recordActivity } from "@/lib/data/activity-log";
 import { createNotification } from "@/lib/data/notifications";
 import { resolveMentions } from "@/lib/data/users";
+import { ensureConstituentOutreachProject } from "@/lib/data/projects";
 
 function effectiveTaskStatus(task: {
   status: string;
@@ -123,6 +124,12 @@ export async function createTask(input: {
 }) {
   const context = await requireStaffPermission("can_create_tasks");
   const supabase = await createClient();
+  const projectId =
+    input.projectId ??
+    (await ensureConstituentOutreachProject({
+      organizationId: context.organizationId,
+      userId: context.userId
+    }));
 
   const normalizedPriority: "low" | "medium" | "high" | "urgent" =
     input.priority === "low" ||
@@ -148,7 +155,7 @@ export async function createTask(input: {
       owner_user_id: input.ownerUserId ?? input.assignedToUserId ?? context.userId,
       contact_id: input.contactId ?? null,
       crm_organization_id: input.crmOrganizationId ?? null,
-      project_id: input.projectId ?? null,
+      project_id: projectId,
       parent_task_id: input.parentTaskId ?? null,
       estimated_hours: typeof input.estimatedHours === "number" ? input.estimatedHours : null,
       actual_hours: typeof input.actualHours === "number" ? input.actualHours : null,

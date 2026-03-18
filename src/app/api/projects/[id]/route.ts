@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getProject } from "@/lib/data/projects";
+import { getProject, isConstituentOutreachProjectRecord } from "@/lib/data/projects";
 import { requireStaffPermission } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 import { logAuditEvent } from "@/lib/data/audit";
@@ -251,6 +251,16 @@ function isProjectCloseoutSchemaMissingError(error: unknown) {
   );
 }
 
+function isSystemProjectSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: unknown; details?: unknown; hint?: unknown })?.message ??
+      (error as { details?: unknown })?.details ??
+      (error as { hint?: unknown })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("is_system_project") || message.includes("system_key");
+}
+
 async function evaluateGuardrails(
   supabase: Awaited<ReturnType<typeof createClient>>,
   organizationId: string,
@@ -330,6 +340,40 @@ export async function PATCH(request: Request, { params }: RouteProps) {
     const payload = await request.json();
     const context = await requireStaffPermission("can_create_projects");
     const supabase = await createClient();
+    let projectMeta: Record<string, unknown> | null = null;
+    const projectMetaWithSystem = await supabase
+      .from("projects")
+      .select("id,name,is_system_project,system_key")
+      .eq("organization_id", context.organizationId)
+      .eq("id", id)
+      .maybeSingle();
+    if (projectMetaWithSystem.error && !isSystemProjectSchemaMissingError(projectMetaWithSystem.error)) {
+      throw projectMetaWithSystem.error;
+    }
+    if (projectMetaWithSystem.data) {
+      projectMeta = projectMetaWithSystem.data as Record<string, unknown>;
+    } else {
+      const projectMetaFallback = await supabase
+        .from("projects")
+        .select("id,name")
+        .eq("organization_id", context.organizationId)
+        .eq("id", id)
+        .maybeSingle();
+      if (projectMetaFallback.error) throw projectMetaFallback.error;
+      projectMeta = (projectMetaFallback.data as Record<string, unknown> | null) ?? null;
+    }
+    if (!projectMeta) {
+      return NextResponse.json({ message: "Project not found." }, { status: 404 });
+    }
+    if (isConstituentOutreachProjectRecord(projectMeta)) {
+      return NextResponse.json(
+        {
+          message:
+            "This is a protected system project and cannot be modified. Tasks may still be created against it by system workflows."
+        },
+        { status: 403 }
+      );
+    }
 
     if (payload?.action) {
       const parsedAction = actionSchema.safeParse(payload);

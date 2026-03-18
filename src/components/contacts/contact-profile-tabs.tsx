@@ -178,6 +178,14 @@ export function ContactProfileTabs({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [drilldownDonationId, setDrilldownDonationId] = useState<string | null>(null);
+  const [creatingContactTask, setCreatingContactTask] = useState(false);
+  const [newContactTaskForm, setNewContactTaskForm] = useState({
+    title: "",
+    description: "",
+    dueDate: "",
+    priority: "medium" as "low" | "medium" | "high" | "urgent",
+    assignedToUserId: ""
+  });
 
   const taskTabClasses = useMemo(() => {
     if (taskUrgency === "red") return "bg-red-100 text-red-800 border-red-200";
@@ -385,6 +393,48 @@ export function ContactProfileTabs({
     setFollowUpBody("");
     setLoading(false);
     router.refresh();
+  }
+
+  async function submitContactTask(event: React.FormEvent) {
+    event.preventDefault();
+    if (!newContactTaskForm.title.trim()) {
+      setError("Task title is required.");
+      return;
+    }
+    setCreatingContactTask(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: newContactTaskForm.title.trim(),
+          description: newContactTaskForm.description.trim() || undefined,
+          suspenseDate: newContactTaskForm.dueDate || undefined,
+          priority: newContactTaskForm.priority,
+          assignedToUserId: newContactTaskForm.assignedToUserId || undefined,
+          contactId
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message ?? "Unable to create task.");
+      }
+      setMessage("Task created.");
+      setNewContactTaskForm({
+        title: "",
+        description: "",
+        dueDate: "",
+        priority: "medium",
+        assignedToUserId: ""
+      });
+      router.refresh();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Unable to create task.");
+    } finally {
+      setCreatingContactTask(false);
+    }
   }
 
   async function submitContactInfo(event: React.FormEvent) {
@@ -860,6 +910,86 @@ export function ContactProfileTabs({
 
       {activeTab === "tasks" ? (
         <div className="space-y-2">
+          <form onSubmit={submitContactTask} className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">Add Task</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-medium text-slate-700">Task Title</label>
+                <Input
+                  value={newContactTaskForm.title}
+                  onChange={(event) =>
+                    setNewContactTaskForm((prev) => ({ ...prev, title: event.target.value }))
+                  }
+                  placeholder="Enter task title"
+                  required
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea
+                  className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={newContactTaskForm.description}
+                  onChange={(event) =>
+                    setNewContactTaskForm((prev) => ({ ...prev, description: event.target.value }))
+                  }
+                  placeholder="Task details"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
+                <Input
+                  type="date"
+                  value={newContactTaskForm.dueDate}
+                  onChange={(event) =>
+                    setNewContactTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={newContactTaskForm.priority}
+                  onChange={(event) =>
+                    setNewContactTaskForm((prev) => ({
+                      ...prev,
+                      priority: event.target.value as "low" | "medium" | "high" | "urgent"
+                    }))
+                  }
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Assign Staff Member
+                </label>
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={newContactTaskForm.assignedToUserId}
+                  onChange={(event) =>
+                    setNewContactTaskForm((prev) => ({
+                      ...prev,
+                      assignedToUserId: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">Assign to me</option>
+                  {staffUsers.map((user) => (
+                    <option key={user.user_id} value={user.user_id}>
+                      {user.display_name || user.user_id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <Button className="mt-3" type="submit" disabled={creatingContactTask}>
+              {creatingContactTask ? "Creating..." : "Create Task"}
+            </Button>
+          </form>
           {tasks.length === 0 ? (
             <p className="text-sm text-slate-500">No tasks linked to this contact.</p>
           ) : (
@@ -869,38 +999,19 @@ export function ContactProfileTabs({
                 : (task.projects as Record<string, unknown> | null);
               const parsedFollowUp = parseFollowUpTaskDescription(task.description);
               const taskSummary = parsedFollowUp.followUpTask || String(task.description ?? "-");
+              const taskId = String(task.id ?? "");
               return (
                 <button
                   type="button"
-                  key={task.id as string}
+                  key={taskId}
                   className="w-full rounded-md border border-slate-200 p-3 text-left"
-                  onClick={() =>
-                    openItem({
-                      id: String(task.id ?? ""),
-                      itemType: "Task",
-                      title: String(task.title ?? "Task"),
-                      summary: taskSummary,
-                      createdBy: resolveStaffLabel(task.created_by),
-                      createdAt: (task.created_at as string) ?? null,
-                      metadata: [
-                        ...(parsedFollowUp.originalNote
-                          ? [{ label: "Original Note", value: parsedFollowUp.originalNote }]
-                          : []),
-                        ...(parsedFollowUp.followUpType
-                          ? [{ label: "Follow-Up Type", value: parsedFollowUp.followUpType }]
-                          : []),
-                        { label: "Status", value: String(task.status ?? "-") },
-                        { label: "Priority", value: String(task.priority ?? "-") },
-                        { label: "Due", value: formatDate(task.due_date as string) }
-                      ]
-                    })
-                  }
+                  onClick={() => router.push(`/staff/tasks/${taskId}`)}
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900">{task.title as string}</p>
                     <span className="text-xs text-slate-500">{formatDate(task.due_date as string)}</span>
                   </div>
-                  <p className="text-sm text-slate-700">{(task.description as string) ?? "-"}</p>
+                  <p className="text-sm text-slate-700">{taskSummary || "-"}</p>
                   <p className="text-xs text-slate-500">
                     {(task.status as string) ?? "-"} • {(task.priority as string) ?? "-"}{" "}
                     {project?.name ? `• Project: ${project.name as string}` : ""}

@@ -4,6 +4,9 @@ import { StaffSidebar } from "@/components/layout/staff-sidebar";
 import { StaffHeader } from "@/components/layout/staff-header";
 import { hasAnyStaffPermission, hasRoleKeys, requireStaffPermission } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
+import { listTasks } from "@/lib/data/tasks";
+import { ensureConstituentOutreachProject } from "@/lib/data/projects";
+import { MyTasksSideRail, type MyTasksSideRailItem } from "@/components/tasks/my-tasks-side-rail";
 
 export default async function StaffLayout({ children }: { children: ReactNode }) {
   const context = await requireStaffPermission("can_view_dashboard");
@@ -32,6 +35,28 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     .select("name,slug,logo_url")
     .eq("id", context.organizationId)
     .maybeSingle();
+  const myTasks = await listTasks({ assignedTo: context.userId });
+  let constituentOutreachProjectId: string | null = null;
+  try {
+    constituentOutreachProjectId = await ensureConstituentOutreachProject({
+      organizationId: context.organizationId,
+      userId: context.userId
+    });
+  } catch {
+    constituentOutreachProjectId = null;
+  }
+  const myAssignedTasks = (myTasks as Array<Record<string, unknown>>)
+    .map((task) => ({
+      id: String(task.id ?? ""),
+      title: (task.title as string | null | undefined) ?? null,
+      due_date: (task.due_date as string | null | undefined) ?? null,
+      status: (task.status as string | null | undefined) ?? null,
+      completed_at: (task.completed_at as string | null | undefined) ?? null,
+      parent_task_id: (task.parent_task_id as string | null | undefined) ?? null,
+      project_id: (task.project_id as string | null | undefined) ?? null,
+      project_name: ((task.projects as { name?: string } | null | undefined)?.name ?? null) as string | null
+    }))
+    .filter((task) => task.id.length > 0) as MyTasksSideRailItem[];
 
   return (
     <div className="flex min-h-screen print:block">
@@ -44,7 +69,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
           organizationLogoUrl={String((organization as { logo_url?: string } | null)?.logo_url ?? "")}
         />
       </div>
-      <div className="flex-1 px-6 pb-6 pt-0 print:p-0">
+      <div className="flex-1 pb-6 pl-6 pr-24 pt-0 print:p-0 md:pr-28">
         <div className="print:hidden">
           <StaffHeader
             organizationName={String(organization?.name ?? "")}
@@ -53,6 +78,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
         </div>
         {children}
       </div>
+      <MyTasksSideRail tasks={myAssignedTasks} defaultProjectId={constituentOutreachProjectId} />
     </div>
   );
 }
