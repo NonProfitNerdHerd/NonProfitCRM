@@ -573,10 +573,7 @@ export function ReportBuilder({
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <p className="text-xs text-slate-500">
-                      Page {page} of {pageCount}
-                    </p>
+                  <div className="mt-3 flex items-center justify-center gap-3">
                     <div className="flex gap-2">
                       <Button
                         type="button"
@@ -595,6 +592,9 @@ export function ReportBuilder({
                         Next
                       </Button>
                     </div>
+                    <p className="text-xs text-slate-500">
+                      Page {page} of {pageCount}
+                    </p>
                   </div>
                 </>
               )}

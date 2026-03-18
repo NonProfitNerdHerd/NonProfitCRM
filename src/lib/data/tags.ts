@@ -136,7 +136,7 @@ async function resolveDescendantMap(
       if (error) throw error;
       const ids = sanitizeTagIdList(data);
       byRoot.set(tagId, new Set(ids.length > 0 ? ids : [tagId]));
-    } catch (error) {
+    } catch {
       // Graceful fallback when descendant RPC is unavailable in an environment.
       // We still allow exact-tag filtering instead of failing the whole query.
       byRoot.set(tagId, new Set([tagId]));
