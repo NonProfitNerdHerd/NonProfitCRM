@@ -169,18 +169,35 @@ async function filterContactIdsByTagFilter(
 
   const contactIdList = contactRows.map((row) => row.id);
   if (contactIdList.length === 0) return [];
+  const contactIdSet = new Set(contactIdList);
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("contact_tags")
-    .select("contact_id,tag_id")
-    .eq("organization_id", organizationId)
-    .in("contact_id", contactIdList)
-    .in("tag_id", flattenedTagIds);
-  if (error) throw error;
+  // Avoid large "contact_id IN (...)" lists, which can trigger Bad Request on bigger datasets.
+  // Fetch by tag IDs in paged slices and intersect with the already-resolved contact set in-memory.
+  const assignmentRows: Array<{ contact_id: string; tag_id: string }> = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("contact_tags")
+      .select("contact_id,tag_id")
+      .eq("organization_id", organizationId)
+      .in("tag_id", flattenedTagIds)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as Array<{ contact_id: string; tag_id: string }>;
+    if (page.length === 0) break;
+    for (const row of page) {
+      if (contactIdSet.has(toText(row.contact_id))) {
+        assignmentRows.push(row);
+      }
+    }
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
 
   const tagsByContact = new Map<string, Set<string>>();
-  for (const row of data ?? []) {
+  for (const row of assignmentRows) {
     const contactId = toText(row.contact_id);
     const tagId = toText(row.tag_id);
     if (!contactId || !tagId) continue;
