@@ -277,7 +277,7 @@ export function TaskEditor({
   return (
     <div className="space-y-4 pr-24 md:pr-28">
       <div
-        className="fixed inset-y-0 right-0 z-40 flex w-24 min-w-[88px] cursor-pointer flex-col border-l border-slate-200 bg-white/95 px-2 py-4 shadow-sm"
+        className="fixed bottom-0 right-0 top-32 z-40 flex w-24 min-w-[88px] cursor-pointer flex-col border-l border-slate-200 bg-white/95 px-2 py-4 shadow-sm md:top-24"
         role="button"
         tabIndex={0}
         onClick={openSubtasksList}
