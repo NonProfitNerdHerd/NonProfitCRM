@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { formatDate } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 
 export type MyTasksSideRailItem = {
   id: string;
@@ -94,9 +93,12 @@ export function MyTasksSideRail({ tasks }: { tasks: MyTasksSideRailItem[] }) {
             </div>
 
             <div className="mb-3 flex justify-end">
-              <Button asChild type="button" variant="secondary">
-                <Link href="/staff/tasks">Open My Tasks Dashboard</Link>
-              </Button>
+              <Link
+                href="/staff/tasks"
+                className="inline-flex items-center rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Open My Tasks Dashboard
+              </Link>
             </div>
 
             {orderedTasks.length === 0 ? (
