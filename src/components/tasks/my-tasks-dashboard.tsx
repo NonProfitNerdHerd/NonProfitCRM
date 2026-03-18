@@ -205,13 +205,7 @@ export function MyTasksDashboard({
   return (
     <div className="space-y-4">
       <section className="rounded-md border border-slate-200 bg-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-slate-900">My Tasks</h3>
-            <p className="text-sm text-slate-600">
-              Track your tasks by urgency, timeline, and schedule view.
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs font-medium text-slate-700">
               Project
@@ -235,6 +229,17 @@ export function MyTasksDashboard({
                 options={STATUS_FILTER_OPTIONS}
               />
             ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-slate-600">
+            Track your tasks by urgency, timeline, and schedule view.
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+              {projectFilteredTasks.length} task{projectFilteredTasks.length === 1 ? "" : "s"}
+            </span>
           </div>
         </div>
 
