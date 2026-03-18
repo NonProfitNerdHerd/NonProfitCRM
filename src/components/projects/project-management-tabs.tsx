@@ -367,7 +367,8 @@ export function ProjectManagementTabs({
   });
   const [decisionForm, setDecisionForm] = useState({
     decisionSummary: "",
-    decisionDetails: ""
+    decisionDetails: "",
+    decidedAt: ""
   });
   const [expenseForm, setExpenseForm] = useState({
     amount: "",
@@ -378,11 +379,16 @@ export function ProjectManagementTabs({
   const [showTasksQuickAdd, setShowTasksQuickAdd] = useState(false);
   const [showRiskModal, setShowRiskModal] = useState(false);
   const [editingRiskId, setEditingRiskId] = useState<string | null>(null);
+  const [showDecisionModal, setShowDecisionModal] = useState(false);
+  const [editingDecisionId, setEditingDecisionId] = useState<string | null>(null);
   const [updateForm, setUpdateForm] = useState({
     updateTitle: "",
     updateBody: "",
-    healthStatus: "on_track"
+    healthStatus: "on_track",
+    publishedAt: ""
   });
+  const [showProjectUpdateModal, setShowProjectUpdateModal] = useState(false);
+  const [editingProjectUpdateId, setEditingProjectUpdateId] = useState<string | null>(null);
   const [reviewForm, setReviewForm] = useState({
     finalOutcomeSummary: String(review?.final_outcome_summary ?? ""),
     metSuccessCriteria:
@@ -507,6 +513,69 @@ export function ProjectManagementTabs({
       targetResolutionDate: ""
     });
     router.refresh();
+  }
+
+  async function saveDecisionEntry() {
+    const ok = await saveLifecycleAction({
+      action: "upsert_decision",
+      id: editingDecisionId ?? undefined,
+      ...decisionForm,
+      decidedAt: decisionForm.decidedAt || null
+    });
+    if (!ok) return;
+    setEditingDecisionId(null);
+    setShowDecisionModal(false);
+    setDecisionForm({ decisionSummary: "", decisionDetails: "", decidedAt: "" });
+    router.refresh();
+  }
+
+  function openNewDecision() {
+    setEditingDecisionId(null);
+    setDecisionForm({ decisionSummary: "", decisionDetails: "", decidedAt: "" });
+    setShowDecisionModal(true);
+  }
+
+  function openEditDecision(decision: Record<string, unknown>) {
+    setEditingDecisionId(String(decision.id ?? ""));
+    setDecisionForm({
+      decisionSummary: String(decision.decision_summary ?? ""),
+      decisionDetails: String(decision.decision_details ?? ""),
+      decidedAt: String(decision.decided_at ?? "").slice(0, 10)
+    });
+    setShowDecisionModal(true);
+  }
+
+  async function saveProjectUpdateEntry() {
+    const ok = await saveLifecycleAction({
+      action: "upsert_update",
+      id: editingProjectUpdateId ?? undefined,
+      updateTitle: updateForm.updateTitle,
+      updateBody: updateForm.updateBody,
+      healthStatus: updateForm.healthStatus,
+      publishedAt: updateForm.publishedAt || null
+    });
+    if (!ok) return;
+    setEditingProjectUpdateId(null);
+    setShowProjectUpdateModal(false);
+    setUpdateForm({ updateTitle: "", updateBody: "", healthStatus: "on_track", publishedAt: "" });
+    router.refresh();
+  }
+
+  function openNewProjectUpdate() {
+    setEditingProjectUpdateId(null);
+    setUpdateForm({ updateTitle: "", updateBody: "", healthStatus: "on_track", publishedAt: "" });
+    setShowProjectUpdateModal(true);
+  }
+
+  function openEditProjectUpdate(update: Record<string, unknown>) {
+    setEditingProjectUpdateId(String(update.id ?? ""));
+    setUpdateForm({
+      updateTitle: String(update.update_title ?? ""),
+      updateBody: String(update.update_body ?? ""),
+      healthStatus: String(update.health_status ?? "on_track"),
+      publishedAt: String(update.published_at ?? "").slice(0, 10)
+    });
+    setShowProjectUpdateModal(true);
   }
 
   function openNewRisk() {
@@ -2033,37 +2102,38 @@ export function ProjectManagementTabs({
                 Document key decisions so institutional memory does not disappear.
               </p>
             </div>
-          </div>
-          <div className="space-y-2">
-            {(decisionLog ?? []).map((decision) => (
-              <div key={String(decision.id)} className="rounded-md border border-slate-100 p-2 text-xs">
-                <p className="font-semibold text-slate-900">{String(decision.decision_summary ?? "-")}</p>
-                <p className="text-slate-600">{formatDate(String(decision.decided_at ?? ""))}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 grid gap-2">
-            <Input
-              value={decisionForm.decisionSummary}
-              onChange={(event) =>
-                setDecisionForm((prev) => ({ ...prev, decisionSummary: event.target.value }))
-              }
-              placeholder="Decision summary"
-            />
-            <LabeledTextarea
-              label="Decision details"
-              value={decisionForm.decisionDetails}
-              onChange={(value) => setDecisionForm((prev) => ({ ...prev, decisionDetails: value }))}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!decisionForm.decisionSummary.trim()}
-              onClick={() => saveAndRefresh({ action: "add_decision", ...decisionForm })}
-            >
-              Add Decision
+            <Button type="button" variant="secondary" onClick={openNewDecision}>
+              New Decision
             </Button>
           </div>
+          {(decisionLog ?? []).length === 0 ? (
+            <p className="text-sm text-slate-500">No decisions logged yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Decision Summary</th>
+                    <th className="py-2">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(decisionLog ?? []).map((decision) => (
+                    <tr
+                      key={String(decision.id)}
+                      className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                      onClick={() => openEditDecision(decision)}
+                    >
+                      <td className="py-2 font-medium text-brand-700">
+                        {String(decision.decision_summary ?? "-")}
+                      </td>
+                      <td className="py-2">{formatDate(String(decision.decided_at ?? ""))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       ) : null}
 
@@ -2076,37 +2146,40 @@ export function ProjectManagementTabs({
                 Publish concise updates to reduce confusion and keep stakeholders aligned.
               </p>
             </div>
-          </div>
-          <div className="space-y-2">
-            {(updates ?? []).map((update) => (
-              <div key={String(update.id)} className="rounded-md border border-slate-100 p-2 text-xs">
-                <p className="font-semibold text-slate-900">{String(update.update_title ?? "-")}</p>
-                <p className="text-slate-600">{formatDate(String(update.published_at ?? ""))}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 grid gap-2">
-            <Input
-              value={updateForm.updateTitle}
-              onChange={(event) =>
-                setUpdateForm((prev) => ({ ...prev, updateTitle: event.target.value }))
-              }
-              placeholder="Update title"
-            />
-            <LabeledTextarea
-              label="Update details"
-              value={updateForm.updateBody}
-              onChange={(value) => setUpdateForm((prev) => ({ ...prev, updateBody: value }))}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!updateForm.updateTitle.trim() || !updateForm.updateBody.trim()}
-              onClick={() => saveAndRefresh({ action: "add_update", ...updateForm })}
-            >
-              Add Update
+            <Button type="button" variant="secondary" onClick={openNewProjectUpdate}>
+              Add Project Update
             </Button>
           </div>
+          {(updates ?? []).length === 0 ? (
+            <p className="text-sm text-slate-500">No project updates yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Update Title</th>
+                    <th className="py-2">Health</th>
+                    <th className="py-2">Published</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(updates ?? []).map((update) => (
+                    <tr
+                      key={String(update.id)}
+                      className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                      onClick={() => openEditProjectUpdate(update)}
+                    >
+                      <td className="py-2 font-medium text-brand-700">
+                        {String(update.update_title ?? "-")}
+                      </td>
+                      <td className="py-2">{String(update.health_status ?? "on_track")}</td>
+                      <td className="py-2">{formatDate(String(update.published_at ?? ""))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       ) : null}
 
@@ -2244,56 +2317,71 @@ export function ProjectManagementTabs({
               </button>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
-              <Input
-                value={riskForm.riskTitle}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, riskTitle: event.target.value }))
-                }
-                placeholder="Risk title"
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={riskForm.status}
-                onChange={(event) => setRiskForm((prev) => ({ ...prev, status: event.target.value }))}
-              >
-                <option value="open">Open</option>
-                <option value="monitoring">Monitoring</option>
-                <option value="mitigated">Mitigated</option>
-                <option value="closed">Closed</option>
-              </select>
-              <Input
-                value={riskForm.likelihood}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, likelihood: event.target.value }))
-                }
-                placeholder="Likelihood (1-5)"
-              />
-              <Input
-                value={riskForm.impact}
-                onChange={(event) => setRiskForm((prev) => ({ ...prev, impact: event.target.value }))}
-                placeholder="Impact (1-5)"
-              />
-              <Input
-                type="date"
-                value={riskForm.targetResolutionDate}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, targetResolutionDate: event.target.value }))
-                }
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={riskForm.ownerUserId}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
-                }
-              >
-                <option value="">Risk owner (optional)</option>
-                {users.map((user) => (
-                  <option key={user.user_id} value={user.user_id}>
-                    {user.display_name ?? user.user_id}
-                  </option>
-                ))}
-              </select>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Risk Title</span>
+                <Input
+                  value={riskForm.riskTitle}
+                  onChange={(event) =>
+                    setRiskForm((prev) => ({ ...prev, riskTitle: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Status</span>
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={riskForm.status}
+                  onChange={(event) => setRiskForm((prev) => ({ ...prev, status: event.target.value }))}
+                >
+                  <option value="open">Open</option>
+                  <option value="monitoring">Monitoring</option>
+                  <option value="mitigated">Mitigated</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Likelihood (1-5)</span>
+                <Input
+                  value={riskForm.likelihood}
+                  onChange={(event) =>
+                    setRiskForm((prev) => ({ ...prev, likelihood: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Impact (1-5)</span>
+                <Input
+                  value={riskForm.impact}
+                  onChange={(event) => setRiskForm((prev) => ({ ...prev, impact: event.target.value }))}
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Target Resolution Date</span>
+                <Input
+                  type="date"
+                  value={riskForm.targetResolutionDate}
+                  onChange={(event) =>
+                    setRiskForm((prev) => ({ ...prev, targetResolutionDate: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Risk Owner (optional)</span>
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={riskForm.ownerUserId}
+                  onChange={(event) =>
+                    setRiskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                  }
+                >
+                  <option value="">Select owner</option>
+                  {users.map((user) => (
+                    <option key={user.user_id} value={user.user_id}>
+                      {user.display_name ?? user.user_id}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="md:col-span-2">
                 <LabeledTextarea
                   label="Risk description"
@@ -2320,6 +2408,136 @@ export function ProjectManagementTabs({
                   onClick={saveRiskEntry}
                 >
                   {editingRiskId ? "Save Risk" : "Create Risk"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showDecisionModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h5 className="text-base font-semibold text-slate-900">
+                {editingDecisionId ? "Edit Decision" : "New Decision"}
+              </h5>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => {
+                  setShowDecisionModal(false);
+                  setEditingDecisionId(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid gap-2">
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Decision Summary</span>
+                <Input
+                  value={decisionForm.decisionSummary}
+                  onChange={(event) =>
+                    setDecisionForm((prev) => ({ ...prev, decisionSummary: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Decision Date</span>
+                <Input
+                  type="date"
+                  value={decisionForm.decidedAt}
+                  onChange={(event) =>
+                    setDecisionForm((prev) => ({ ...prev, decidedAt: event.target.value }))
+                  }
+                />
+              </label>
+              <LabeledTextarea
+                label="Decision Details"
+                value={decisionForm.decisionDetails}
+                onChange={(value) => setDecisionForm((prev) => ({ ...prev, decisionDetails: value }))}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!decisionForm.decisionSummary.trim()}
+                onClick={saveDecisionEntry}
+              >
+                {editingDecisionId ? "Save Decision" : "Create Decision"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showProjectUpdateModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h5 className="text-base font-semibold text-slate-900">
+                {editingProjectUpdateId ? "Edit Project Update" : "New Project Update"}
+              </h5>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => {
+                  setShowProjectUpdateModal(false);
+                  setEditingProjectUpdateId(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Update Title</span>
+                <Input
+                  value={updateForm.updateTitle}
+                  onChange={(event) =>
+                    setUpdateForm((prev) => ({ ...prev, updateTitle: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700">
+                <span>Health Status</span>
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={updateForm.healthStatus}
+                  onChange={(event) =>
+                    setUpdateForm((prev) => ({ ...prev, healthStatus: event.target.value }))
+                  }
+                >
+                  <option value="on_track">On Track</option>
+                  <option value="at_risk">At Risk</option>
+                  <option value="off_track">Off Track</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-slate-700 md:col-span-2">
+                <span>Published Date</span>
+                <Input
+                  type="date"
+                  value={updateForm.publishedAt}
+                  onChange={(event) =>
+                    setUpdateForm((prev) => ({ ...prev, publishedAt: event.target.value }))
+                  }
+                />
+              </label>
+              <div className="md:col-span-2">
+                <LabeledTextarea
+                  label="Update Details"
+                  value={updateForm.updateBody}
+                  onChange={(value) => setUpdateForm((prev) => ({ ...prev, updateBody: value }))}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!updateForm.updateTitle.trim() || !updateForm.updateBody.trim()}
+                  onClick={saveProjectUpdateEntry}
+                >
+                  {editingProjectUpdateId ? "Save Project Update" : "Create Project Update"}
                 </Button>
               </div>
             </div>

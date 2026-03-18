@@ -160,10 +160,25 @@ const actionSchema = z.discriminatedUnion("action", [
     decidedAt: z.string().optional()
   }),
   z.object({
+    action: z.literal("upsert_decision"),
+    id: z.string().uuid().optional(),
+    decisionSummary: z.string().min(1),
+    decisionDetails: z.string().optional(),
+    decidedAt: z.string().optional()
+  }),
+  z.object({
     action: z.literal("add_update"),
     updateTitle: z.string().min(1),
     updateBody: z.string().min(1),
     healthStatus: z.string().optional()
+  }),
+  z.object({
+    action: z.literal("upsert_update"),
+    id: z.string().uuid().optional(),
+    updateTitle: z.string().min(1),
+    updateBody: z.string().min(1),
+    healthStatus: z.string().optional(),
+    publishedAt: z.string().optional()
   }),
   z.object({
     action: z.literal("update_review"),
@@ -599,6 +614,32 @@ export async function PATCH(request: Request, { params }: RouteProps) {
         return NextResponse.json({ ok: true });
       }
 
+      if (action.action === "upsert_decision") {
+        const payloadDecision = {
+          tenant_id: context.organizationId,
+          organization_id: context.organizationId,
+          project_id: id,
+          decision_summary: action.decisionSummary,
+          decision_details: action.decisionDetails ?? null,
+          decided_at: action.decidedAt ?? new Date().toISOString(),
+          decided_by_user_id: context.userId
+        };
+        const query = action.id
+          ? supabase
+              .from("project_decision_log")
+              .update(payloadDecision)
+              .eq("organization_id", context.organizationId)
+              .eq("project_id", id)
+              .eq("id", action.id)
+          : supabase.from("project_decision_log").insert({
+              ...payloadDecision,
+              created_by: context.userId
+            });
+        const { error } = await query;
+        if (error) throw error;
+        return NextResponse.json({ ok: true });
+      }
+
       if (action.action === "add_update") {
         const { error } = await supabase.from("project_updates").insert({
           tenant_id: context.organizationId,
@@ -609,6 +650,32 @@ export async function PATCH(request: Request, { params }: RouteProps) {
           health_status: action.healthStatus ?? "on_track",
           created_by: context.userId
         });
+        if (error) throw error;
+        return NextResponse.json({ ok: true });
+      }
+
+      if (action.action === "upsert_update") {
+        const payloadUpdate = {
+          tenant_id: context.organizationId,
+          organization_id: context.organizationId,
+          project_id: id,
+          update_title: action.updateTitle,
+          update_body: action.updateBody,
+          health_status: action.healthStatus ?? "on_track",
+          published_at: action.publishedAt ?? new Date().toISOString()
+        };
+        const query = action.id
+          ? supabase
+              .from("project_updates")
+              .update(payloadUpdate)
+              .eq("organization_id", context.organizationId)
+              .eq("project_id", id)
+              .eq("id", action.id)
+          : supabase.from("project_updates").insert({
+              ...payloadUpdate,
+              created_by: context.userId
+            });
+        const { error } = await query;
         if (error) throw error;
         return NextResponse.json({ ok: true });
       }
