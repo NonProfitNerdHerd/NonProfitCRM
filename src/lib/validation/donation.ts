@@ -100,6 +100,7 @@ export const noteSchema = z
     contactId: z.string().uuid(),
     body: z.string().min(1, "Note content is required"),
     followUpRequired: z.boolean().default(false),
+    followUpTaskType: z.enum(["Call", "Email", "Mail", "Other"]).optional(),
     followUpAssignedToUserId: z.string().uuid().optional(),
     followUpSuspenseDate: z.string().optional(),
     followUpTaskDescription: z.string().optional()
@@ -128,6 +129,14 @@ export const noteSchema = z
         code: z.ZodIssueCode.custom,
         path: ["followUpTaskDescription"],
         message: "Task description is required when follow-up is enabled."
+      });
+    }
+
+    if (!value.followUpTaskType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["followUpTaskType"],
+        message: "Task type is required when follow-up is enabled."
       });
     }
   });

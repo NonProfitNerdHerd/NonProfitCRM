@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import { DonationsManagement } from "@/components/donations/donations-management";
 import { ContactTagManager } from "@/components/contacts/contact-tag-manager";
 import { ContactVolunteerProfileTab } from "@/components/contacts/contact-volunteer-profile-tab";
@@ -72,6 +72,35 @@ function formatActivityEntityLabel(value: unknown) {
     .join(" ");
 }
 
+function parseFollowUpTaskDescription(value: unknown) {
+  const text = String(value ?? "");
+  if (!text.includes("Follow-Up Type:")) {
+    return {
+      followUpType: "",
+      followUpTask: text,
+      originalNote: ""
+    };
+  }
+  const lines = text.split("\n");
+  const followUpType = lines
+    .find((line) => line.startsWith("Follow-Up Type:"))
+    ?.replace("Follow-Up Type:", "")
+    .trim();
+  const followUpTask = lines
+    .find((line) => line.startsWith("Follow-Up Task:"))
+    ?.replace("Follow-Up Task:", "")
+    .trim();
+  const originalNote = lines
+    .find((line) => line.startsWith("Original Note:"))
+    ?.replace("Original Note:", "")
+    .trim();
+  return {
+    followUpType: followUpType ?? "",
+    followUpTask: followUpTask ?? "",
+    originalNote: originalNote ?? ""
+  };
+}
+
 export function ContactProfileTabs({
   contactId,
   contactDetails,
@@ -106,6 +135,9 @@ export function ContactProfileTabs({
   const [followUpAssignedToUserId, setFollowUpAssignedToUserId] = useState("");
   const [followUpSuspenseDate, setFollowUpSuspenseDate] = useState("");
   const [followUpTaskDescription, setFollowUpTaskDescription] = useState("");
+  const [followUpTaskType, setFollowUpTaskType] = useState<"Call" | "Email" | "Mail" | "Other">(
+    "Call"
+  );
   const [selectedItem, setSelectedItem] = useState<WorkbenchItem | null>(null);
   const [showContactInfoModal, setShowContactInfoModal] = useState(false);
   const [contactInfo, setContactInfo] = useState({
@@ -152,6 +184,28 @@ export function ContactProfileTabs({
     if (taskUrgency === "yellow") return "bg-amber-100 text-amber-800 border-amber-200";
     return "bg-slate-100 text-slate-700 border-slate-200";
   }, [taskUrgency]);
+  const staffUserLabelMap = useMemo(
+    () =>
+      new Map(
+        staffUsers.map((user) => [user.user_id, String(user.display_name ?? "").trim() || user.user_id])
+      ),
+    [staffUsers]
+  );
+  const sortedNotes = useMemo(
+    () =>
+      [...notes].sort(
+        (left, right) =>
+          new Date(String(right.created_at ?? "")).getTime() -
+          new Date(String(left.created_at ?? "")).getTime()
+      ),
+    [notes]
+  );
+
+  function resolveStaffLabel(userId: unknown) {
+    const id = String(userId ?? "").trim();
+    if (!id) return "System";
+    return staffUserLabelMap.get(id) ?? id;
+  }
 
   useEffect(() => {
     setContactInfoDraft((prev) => {
@@ -219,7 +273,7 @@ export function ContactProfileTabs({
           itemType: "Note",
           title: String(note.note_type ?? "Note"),
           summary: String(note.body ?? ""),
-          createdBy: String(note.created_by ?? "Unknown"),
+          createdBy: resolveStaffLabel(note.created_by),
           createdAt: (note.created_at as string) ?? null,
           metadata: []
         });
@@ -247,7 +301,7 @@ export function ContactProfileTabs({
       itemType: formatActivityEntityLabel(entry.entity_type),
       title: String(entry.action_type ?? "Activity"),
       summary: String(entry.action_summary ?? ""),
-      createdBy: String(entry.performed_by_user_id ?? "Unknown"),
+      createdBy: resolveStaffLabel(entry.performed_by_user_id),
       createdAt: (entry.created_at as string) ?? null,
       metadata: [{ label: "Entity", value: formatActivityEntityLabel(entry.entity_type) }]
     });
@@ -266,6 +320,7 @@ export function ContactProfileTabs({
         contactId,
         body: noteBody,
         followUpRequired,
+        followUpTaskType,
         followUpAssignedToUserId: followUpAssignedToUserId || undefined,
         followUpSuspenseDate: followUpSuspenseDate || undefined,
         followUpTaskDescription: followUpTaskDescription || undefined
@@ -285,6 +340,7 @@ export function ContactProfileTabs({
     setFollowUpAssignedToUserId("");
     setFollowUpSuspenseDate("");
     setFollowUpTaskDescription("");
+    setFollowUpTaskType("Call");
     setLoading(false);
     router.refresh();
   }
@@ -433,7 +489,7 @@ export function ContactProfileTabs({
         </TabButton>
         {!isOrganizationContact ? (
           <TabButton active={activeTab === "volunteer"} onClick={() => setActiveTab("volunteer")}>
-            Volunteer
+            Volunteer Profile
           </TabButton>
         ) : null}
         <TabButton active={activeTab === "notes"} onClick={() => setActiveTab("notes")}>
@@ -474,10 +530,13 @@ export function ContactProfileTabs({
               >
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>{entry.action_type as string}</span>
-                  <span>{formatDate(entry.created_at as string)}</span>
+                  <span>{formatDateTime(entry.created_at as string)}</span>
                 </div>
                 <p className="mt-1 text-sm text-slate-800">{entry.action_summary as string}</p>
                 <p className="mt-1 text-xs text-slate-500">{entry.entity_type as string}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Created / Edited by: {resolveStaffLabel(entry.performed_by_user_id)}
+                </p>
               </button>
             ))
           )}
@@ -638,38 +697,8 @@ export function ContactProfileTabs({
 
       {activeTab === "notes" ? (
         <div className="space-y-4">
-          <div className="space-y-2">
-            {notes.length === 0 ? (
-              <p className="text-sm text-slate-500">No notes available.</p>
-            ) : (
-              notes.map((note) => (
-                <button
-                  key={note.id as string}
-                  type="button"
-                  className="w-full rounded-md border border-slate-200 p-3 text-left"
-                  onClick={() =>
-                    openItem({
-                      id: String(note.id ?? ""),
-                      itemType: "Note",
-                      title: String(note.note_type ?? "Note"),
-                      summary: String(note.body ?? ""),
-                      createdBy: String(note.created_by ?? "Unknown"),
-                      createdAt: (note.created_at as string) ?? null,
-                      metadata: []
-                    })
-                  }
-                >
-                  <p className="text-xs text-slate-500">
-                    {formatDate(note.created_at as string)} • {(note.created_by as string) ?? "Unknown"}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-800">{note.body as string}</p>
-                </button>
-              ))
-            )}
-          </div>
-
           <form onSubmit={submitNote} className="rounded-md border border-slate-200 p-4">
-            <p className="mb-2 text-sm font-semibold">Add Note</p>
+            <p className="mb-2 text-sm font-semibold">Add a Note</p>
             <textarea
               className="min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               value={noteBody}
@@ -686,29 +715,65 @@ export function ContactProfileTabs({
             </label>
 
             {followUpRequired ? (
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <select
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={followUpAssignedToUserId}
-                  onChange={(event) => setFollowUpAssignedToUserId(event.target.value)}
-                >
-                  <option value="">Assign staff member</option>
-                  {staffUsers.map((user) => (
-                    <option key={user.user_id} value={user.user_id}>
-                      {user.display_name || user.user_id}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  type="date"
-                  value={followUpSuspenseDate}
-                  onChange={(event) => setFollowUpSuspenseDate(event.target.value)}
-                />
-                <Input
-                  placeholder="Task description"
-                  value={followUpTaskDescription}
-                  onChange={(event) => setFollowUpTaskDescription(event.target.value)}
-                />
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Task Description
+                  </label>
+                  <Input
+                    placeholder="Describe the follow-up task"
+                    value={followUpTaskDescription}
+                    onChange={(event) => setFollowUpTaskDescription(event.target.value)}
+                    required={followUpRequired}
+                  />
+                </div>
+                <div className="grid gap-3 md:grid-cols-5">
+                  <div className="md:col-span-1">
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Task Type</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={followUpTaskType}
+                      onChange={(event) =>
+                        setFollowUpTaskType(
+                          event.target.value as "Call" | "Email" | "Mail" | "Other"
+                        )
+                      }
+                    >
+                      <option value="Call">Call</option>
+                      <option value="Email">Email</option>
+                      <option value="Mail">Mail</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      Assign Staff Member
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={followUpAssignedToUserId}
+                      onChange={(event) => setFollowUpAssignedToUserId(event.target.value)}
+                    >
+                      <option value="">Assign staff member</option>
+                      {staffUsers.map((user) => (
+                        <option key={user.user_id} value={user.user_id}>
+                          {user.display_name || user.user_id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      {followUpAssignedToUserId ? "Recommended Due Date" : "Due Date"}
+                    </label>
+                    <Input
+                      type="date"
+                      value={followUpSuspenseDate}
+                      onChange={(event) => setFollowUpSuspenseDate(event.target.value)}
+                      required={followUpRequired}
+                    />
+                  </div>
+                </div>
               </div>
             ) : null}
 
@@ -716,6 +781,36 @@ export function ContactProfileTabs({
               Add Note
             </Button>
           </form>
+
+          <div className="space-y-2">
+            {sortedNotes.length === 0 ? (
+              <p className="text-sm text-slate-500">No notes available.</p>
+            ) : (
+              sortedNotes.map((note) => (
+                <button
+                  key={note.id as string}
+                  type="button"
+                  className="w-full rounded-md border border-slate-200 p-3 text-left"
+                  onClick={() =>
+                    openItem({
+                      id: String(note.id ?? ""),
+                      itemType: "Note",
+                      title: String(note.note_type ?? "Note"),
+                      summary: String(note.body ?? ""),
+                      createdBy: resolveStaffLabel(note.created_by),
+                      createdAt: (note.created_at as string) ?? null,
+                      metadata: []
+                    })
+                  }
+                >
+                  <p className="text-xs text-slate-500">
+                    {formatDateTime(note.created_at as string)} • {resolveStaffLabel(note.created_by)}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-800">{note.body as string}</p>
+                </button>
+              ))
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -772,6 +867,8 @@ export function ContactProfileTabs({
               const project = Array.isArray(task.projects)
                 ? task.projects[0]
                 : (task.projects as Record<string, unknown> | null);
+              const parsedFollowUp = parseFollowUpTaskDescription(task.description);
+              const taskSummary = parsedFollowUp.followUpTask || String(task.description ?? "-");
               return (
                 <button
                   type="button"
@@ -782,10 +879,16 @@ export function ContactProfileTabs({
                       id: String(task.id ?? ""),
                       itemType: "Task",
                       title: String(task.title ?? "Task"),
-                      summary: String(task.description ?? "-"),
-                      createdBy: String(task.created_by ?? "Unknown"),
+                      summary: taskSummary,
+                      createdBy: resolveStaffLabel(task.created_by),
                       createdAt: (task.created_at as string) ?? null,
                       metadata: [
+                        ...(parsedFollowUp.originalNote
+                          ? [{ label: "Original Note", value: parsedFollowUp.originalNote }]
+                          : []),
+                        ...(parsedFollowUp.followUpType
+                          ? [{ label: "Follow-Up Type", value: parsedFollowUp.followUpType }]
+                          : []),
                         { label: "Status", value: String(task.status ?? "-") },
                         { label: "Priority", value: String(task.priority ?? "-") },
                         { label: "Due", value: formatDate(task.due_date as string) }
@@ -1233,12 +1336,12 @@ export function ContactProfileTabs({
                 Close
               </button>
             </div>
-            <p className="mt-3 text-sm text-slate-700">{selectedItem.summary}</p>
+            <p className="mt-3 whitespace-pre-line text-sm text-slate-700">{selectedItem.summary}</p>
             <div className="mt-3 grid gap-2 text-xs text-slate-500 md:grid-cols-2">
               <p>Created by: {selectedItem.createdBy}</p>
-              <p>Created at: {formatDate(selectedItem.createdAt)}</p>
+              <p>Created at: {formatDateTime(selectedItem.createdAt)}</p>
               {selectedItem.metadata.map((entry) => (
-                <p key={entry.label}>
+                <p key={entry.label} className="whitespace-pre-line break-words">
                   {entry.label}: {entry.value}
                 </p>
               ))}

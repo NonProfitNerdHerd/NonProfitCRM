@@ -548,6 +548,7 @@ export async function addNoteForContact(input: {
   contactId: string;
   body: string;
   followUpRequired?: boolean;
+  followUpTaskType?: "Call" | "Email" | "Mail" | "Other";
   followUpAssignedToUserId?: string;
   followUpSuspenseDate?: string;
   followUpTaskDescription?: string;
@@ -578,9 +579,16 @@ export async function addNoteForContact(input: {
   });
 
   if (input.followUpRequired) {
+    const followUpTaskType = input.followUpTaskType ?? "Other";
+    const followUpTaskDescription = (input.followUpTaskDescription ?? "").trim();
+    const noteBody = (input.body ?? "").trim();
     const taskId = await createTask({
-      title: "Follow up required",
-      description: input.followUpTaskDescription || input.body,
+      title: `Follow Up - ${followUpTaskType}`,
+      description: [
+        `Follow-Up Type: ${followUpTaskType}`,
+        `Follow-Up Task: ${followUpTaskDescription || "No task description provided."}`,
+        `Original Note: ${noteBody || "-"}`
+      ].join("\n"),
       suspenseDate: input.followUpSuspenseDate,
       assignedToUserId: input.followUpAssignedToUserId,
       contactId: input.contactId

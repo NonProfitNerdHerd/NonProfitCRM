@@ -18,3 +18,11 @@ export function formatDate(value: string | Date | null | undefined): string {
     typeof value === "string" ? new Date(value) : value
   );
 }
+
+export function formatDateTime(value: string | Date | null | undefined): string {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(typeof value === "string" ? new Date(value) : value);
+}
