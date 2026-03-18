@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardHeader } from "@/components/ui/card";
 import { getTask } from "@/lib/data/tasks";
@@ -20,6 +21,18 @@ export default async function TaskDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-4">
+      <div>
+        <Link
+          href={
+            task.project_id
+              ? `/staff/projects/management/${String(task.project_id)}`
+              : "/staff/projects/management"
+          }
+          className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Back to Project
+        </Link>
+      </div>
       <Card>
         <CardHeader title={task.title} subtitle={task.description ?? "No description"} />
         <TaskEditor

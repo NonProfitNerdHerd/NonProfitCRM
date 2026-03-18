@@ -43,6 +43,8 @@ type LifecycleStatus =
   | "cancelled"
   | "archived";
 
+type ProjectWorkspaceTab = "dashboard" | "planning" | "tasks";
+
 const PHASE_DETAILS: Array<{
   key: LifecyclePhase;
   label: string;
@@ -201,6 +203,7 @@ export function ProjectManagementTabs({
   warnings?: string[];
 }) {
   const router = useRouter();
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<ProjectWorkspaceTab>("dashboard");
   const [activeTab, setActiveTab] = useState<LifecyclePhase>("idea");
   const [projectState, setProjectState] = useState(project);
   const [staffRows, setStaffRows] = useState(staff);
@@ -511,177 +514,193 @@ export function ProjectManagementTabs({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
-        <h4 className="text-sm font-semibold text-slate-900">
-          Why this lifecycle framework exists
-        </h4>
-        <p className="mt-1 text-sm text-slate-700">
-          This workflow helps your team protect mission time, budget, and people by making sure
-          key thinking happens before execution.
-        </p>
-        <p className="mt-2 text-xs text-slate-600">
-          Skipping planning often leads to scope creep, surprise spending, and staff burnout.
-        </p>
-      </section>
-
-      <div className="grid gap-3 md:grid-cols-4">
-        <SummaryBox
-          label="Lifecycle Status"
-          value={String(dashboard?.lifecycleStatus ?? project.lifecycle_status ?? "idea")}
-          tone="slate"
-          compact
-        />
-        <SummaryBox
-          label="% Complete"
-          value={`${dashboard?.percentComplete ?? 0}%`}
-          tone="green"
-          compact
-        />
-        <SummaryBox
-          label="Budget Status"
-          value={String(dashboard?.budgetStatus ?? "No budget entered")}
-          tone="amber"
-          compact
-        />
-        <SummaryBox
-          label="Open Risks"
-          value={String(dashboard?.openRisks ?? 0)}
-          tone="red"
-          compact
-        />
-      </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        <SummaryBox
-          label="Upcoming Milestones"
-          value={String(dashboard?.upcomingMilestones ?? 0)}
-          tone="amber"
-          compact
-        />
-        <SummaryBox
-          label="Overdue Tasks"
-          value={String(dashboard?.overdueTasks ?? 0)}
-          tone="red"
-          compact
-        />
-        <SummaryBox
-          label="Blocking Dependencies"
-          value={String(dashboard?.blockingDependencies ?? 0)}
-          tone="red"
-          compact
-        />
-      </div>
-      <p className="text-xs text-slate-600">
-        This dashboard helps leadership see reality without asking staff for daily update emails.
-      </p>
-
-      <section className="rounded-md border border-slate-200 p-4">
-        <h4 className="text-sm font-semibold text-slate-900">Lifecycle Status Engine</h4>
-        <p className="mt-1 text-xs text-slate-600">
-          Move status intentionally. Guardrails help prevent unclear scope, missed ownership, and
-          budget surprises.
-        </p>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <select
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-            value={statusSelection}
-            onChange={(event) => setStatusSelection(event.target.value as LifecycleStatus)}
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <Button
-            type="button"
-            disabled={saving}
-            onClick={() =>
-              saveAndRefresh({
-                action: "transition_status",
-                lifecycleStatus: statusSelection,
-                bypassGuardrails,
-                bypassNote
-              })
-            }
-          >
-            {saving ? "Saving..." : "Apply Status Transition"}
-          </Button>
-        </div>
-        <Button
-          className="mt-2"
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            resetProjectForm();
-            setShowEditProject(true);
-          }}
+      <div className="flex flex-wrap gap-2">
+        <TabButton
+          active={activeWorkspaceTab === "dashboard"}
+          onClick={() => setActiveWorkspaceTab("dashboard")}
         >
-          Edit Project Basics
-        </Button>
-        <p className="mt-2 text-xs text-amber-700">{TRANSITION_EXPLANATIONS[statusSelection]}</p>
-        <label className="mt-3 flex items-start gap-2 text-xs text-slate-700">
-          <input
-            type="checkbox"
-            checked={bypassGuardrails}
-            onChange={(event) => setBypassGuardrails(event.target.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            I understand I am proceeding without recommended planning steps and this increases the
-            risk of delay, cost overruns, and staff burnout.
-          </span>
-        </label>
-        {bypassGuardrails ? (
-          <Input
-            value={bypassNote}
-            onChange={(event) => setBypassNote(event.target.value)}
-            placeholder="Optional bypass note (why this exception is needed)"
-          />
-        ) : null}
-        {statusGuardrailIssues.length > 0 ? (
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-700">
-            {statusGuardrailIssues.map((issue) => (
-              <li key={issue}>{issue}</li>
-            ))}
-          </ul>
-        ) : null}
-      </section>
+          Dashboard
+        </TabButton>
+        <TabButton active={activeWorkspaceTab === "planning"} onClick={() => setActiveWorkspaceTab("planning")}>
+          Planning
+        </TabButton>
+        <TabButton active={activeWorkspaceTab === "tasks"} onClick={() => setActiveWorkspaceTab("tasks")}>
+          Tasks
+        </TabButton>
+      </div>
 
-      {(warnings ?? []).length > 0 ? (
-        <section className="rounded-md border border-red-200 bg-red-50 p-4">
-          <h5 className="text-sm font-semibold text-red-900">Smart warnings</h5>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-800">
-            {(warnings ?? []).map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        </section>
+      {activeWorkspaceTab === "dashboard" ? (
+        <>
+          <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <h4 className="text-sm font-semibold text-slate-900">
+              Why this lifecycle framework exists
+            </h4>
+            <p className="mt-1 text-sm text-slate-700">
+              This workflow helps your team protect mission time, budget, and people by making sure
+              key thinking happens before execution.
+            </p>
+            <p className="mt-2 text-xs text-slate-600">
+              Skipping planning often leads to scope creep, surprise spending, and staff burnout.
+            </p>
+          </section>
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <SummaryBox
+              label="Lifecycle Status"
+              value={String(dashboard?.lifecycleStatus ?? project.lifecycle_status ?? "idea")}
+              tone="slate"
+              compact
+            />
+            <SummaryBox
+              label="% Complete"
+              value={`${dashboard?.percentComplete ?? 0}%`}
+              tone="green"
+              compact
+            />
+            <SummaryBox
+              label="Budget Status"
+              value={String(dashboard?.budgetStatus ?? "No budget entered")}
+              tone="amber"
+              compact
+            />
+            <SummaryBox label="Open Risks" value={String(dashboard?.openRisks ?? 0)} tone="red" compact />
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <SummaryBox
+              label="Upcoming Milestones"
+              value={String(dashboard?.upcomingMilestones ?? 0)}
+              tone="amber"
+              compact
+            />
+            <SummaryBox
+              label="Overdue Tasks"
+              value={String(dashboard?.overdueTasks ?? 0)}
+              tone="red"
+              compact
+            />
+            <SummaryBox
+              label="Blocking Dependencies"
+              value={String(dashboard?.blockingDependencies ?? 0)}
+              tone="red"
+              compact
+            />
+          </div>
+          <p className="text-xs text-slate-600">
+            This dashboard helps leadership see reality without asking staff for daily update emails.
+          </p>
+
+          <section className="rounded-md border border-slate-200 p-4">
+            <h4 className="text-sm font-semibold text-slate-900">Lifecycle Status Engine</h4>
+            <p className="mt-1 text-xs text-slate-600">
+              Move status intentionally. Guardrails help prevent unclear scope, missed ownership, and
+              budget surprises.
+            </p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={statusSelection}
+                onChange={(event) => setStatusSelection(event.target.value as LifecycleStatus)}
+              >
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                disabled={saving}
+                onClick={() =>
+                  saveAndRefresh({
+                    action: "transition_status",
+                    lifecycleStatus: statusSelection,
+                    bypassGuardrails,
+                    bypassNote
+                  })
+                }
+              >
+                {saving ? "Saving..." : "Apply Status Transition"}
+              </Button>
+            </div>
+            <Button
+              className="mt-2"
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                resetProjectForm();
+                setShowEditProject(true);
+              }}
+            >
+              Edit Project Basics
+            </Button>
+            <p className="mt-2 text-xs text-amber-700">{TRANSITION_EXPLANATIONS[statusSelection]}</p>
+            <label className="mt-3 flex items-start gap-2 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={bypassGuardrails}
+                onChange={(event) => setBypassGuardrails(event.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                I understand I am proceeding without recommended planning steps and this increases the
+                risk of delay, cost overruns, and staff burnout.
+              </span>
+            </label>
+            {bypassGuardrails ? (
+              <Input
+                value={bypassNote}
+                onChange={(event) => setBypassNote(event.target.value)}
+                placeholder="Optional bypass note (why this exception is needed)"
+              />
+            ) : null}
+            {statusGuardrailIssues.length > 0 ? (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-700">
+                {statusGuardrailIssues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+
+          {(warnings ?? []).length > 0 ? (
+            <section className="rounded-md border border-red-200 bg-red-50 p-4">
+              <h5 className="text-sm font-semibold text-red-900">Smart warnings</h5>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-800">
+                {(warnings ?? []).map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section className="rounded-md border border-slate-200 bg-white p-4 text-xs text-slate-700">
+            <p>
+              <strong>Guardrail readiness:</strong>{" "}
+              Intake {guardrails?.intakeComplete ? "complete" : "incomplete"} • Scope{" "}
+              {guardrails?.scopeComplete ? "complete" : "incomplete"} • Closure review{" "}
+              {guardrails?.reviewComplete ? "complete" : "incomplete"}
+            </p>
+          </section>
+        </>
       ) : null}
 
-      <section className="rounded-md border border-slate-200 bg-white p-4 text-xs text-slate-700">
-        <p>
-          <strong>Guardrail readiness:</strong>{" "}
-          Intake {guardrails?.intakeComplete ? "complete" : "incomplete"} • Scope{" "}
-          {guardrails?.scopeComplete ? "complete" : "incomplete"} • Closure review{" "}
-          {guardrails?.reviewComplete ? "complete" : "incomplete"}
-        </p>
-      </section>
+      {activeWorkspaceTab === "planning" ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {PHASE_DETAILS.map((phase) => (
+              <TabButton
+                key={phase.key}
+                active={activeTab === phase.key}
+                onClick={() => setActiveTab(phase.key)}
+              >
+                {phase.label}
+              </TabButton>
+            ))}
+          </div>
 
-      <div className="flex flex-wrap gap-2">
-        {PHASE_DETAILS.map((phase) => (
-          <TabButton
-            key={phase.key}
-            active={activeTab === phase.key}
-            onClick={() => setActiveTab(phase.key)}
-          >
-            {phase.label}
-          </TabButton>
-        ))}
-      </div>
+          <GuidancePanel phase={PHASE_DETAILS.find((phase) => phase.key === activeTab)!} />
 
-      <GuidancePanel phase={PHASE_DETAILS.find((phase) => phase.key === activeTab)!} />
-
-      {activeTab === "idea" ? (
+          {activeTab === "idea" ? (
         <section className="rounded-md border border-slate-200 p-4">
           <h4 className="text-sm font-semibold text-slate-900">Idea / Intake</h4>
           <p className="mt-1 text-xs text-slate-600">
@@ -767,7 +786,7 @@ export function ProjectManagementTabs({
             Save Intake
           </Button>
         </section>
-      ) : null}
+          ) : null}
 
       {activeTab === "evaluation" ? (
         <section className="rounded-md border border-slate-200 p-4">
@@ -1668,56 +1687,133 @@ export function ProjectManagementTabs({
         </div>
       ) : null}
 
-      <section className="rounded-md border border-slate-200 p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h4 className="text-sm font-semibold text-slate-900">Stakeholder Matrix</h4>
-          <Button type="button" onClick={() => setShowNewStakeholder(true)}>
-            New
-          </Button>
-        </div>
-        {rows.length === 0 ? (
-          <p className="text-sm text-slate-500">No stakeholder records yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-slate-600">
-                  <th className="py-2">Stakeholder Name</th>
-                  <th className="py-2">Role / Title</th>
-                  <th className="py-2">Organization</th>
-                  <th className="py-2">Type</th>
-                  <th className="py-2">Influence</th>
-                  <th className="py-2">Interest</th>
-                  <th className="py-2">Support</th>
-                  <th className="py-2">Owner</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={String(row.id)} className="border-b border-slate-100">
-                    <td className="py-2">{String(row.stakeholder_name ?? row.stakeholderName ?? "-")}</td>
-                    <td className="py-2">
-                      {String(row.stakeholder_role_title ?? row.stakeholderRoleTitle ?? "-")}
-                    </td>
-                    <td className="py-2">
-                      {String(row.stakeholder_organization ?? row.organization ?? "-")}
-                    </td>
-                    <td className="py-2">{String(row.stakeholder_type ?? row.stakeholderType ?? "-")}</td>
-                    <td className="py-2">{String(row.influence_level ?? row.influenceLevel ?? "-")}</td>
-                    <td className="py-2">{String(row.interest_level ?? row.interestLevel ?? "-")}</td>
-                    <td className="py-2">{String(row.support_level ?? row.supportLevel ?? "-")}</td>
-                    <td className="py-2">
-                      {userNameById.get(
-                        String(row.owner_user_id ?? row.ownerUserId ?? "")
-                      ) ?? String(row.owner_user_id ?? row.ownerUserId ?? "-")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <section className="rounded-md border border-slate-200 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h4 className="text-sm font-semibold text-slate-900">Stakeholder Matrix</h4>
+              <Button type="button" onClick={() => setShowNewStakeholder(true)}>
+                New
+              </Button>
+            </div>
+            {rows.length === 0 ? (
+              <p className="text-sm text-slate-500">No stakeholder records yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-600">
+                      <th className="py-2">Stakeholder Name</th>
+                      <th className="py-2">Role / Title</th>
+                      <th className="py-2">Organization</th>
+                      <th className="py-2">Type</th>
+                      <th className="py-2">Influence</th>
+                      <th className="py-2">Interest</th>
+                      <th className="py-2">Support</th>
+                      <th className="py-2">Owner</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={String(row.id)} className="border-b border-slate-100">
+                        <td className="py-2">{String(row.stakeholder_name ?? row.stakeholderName ?? "-")}</td>
+                        <td className="py-2">
+                          {String(row.stakeholder_role_title ?? row.stakeholderRoleTitle ?? "-")}
+                        </td>
+                        <td className="py-2">
+                          {String(row.stakeholder_organization ?? row.organization ?? "-")}
+                        </td>
+                        <td className="py-2">
+                          {String(row.stakeholder_type ?? row.stakeholderType ?? "-")}
+                        </td>
+                        <td className="py-2">{String(row.influence_level ?? row.influenceLevel ?? "-")}</td>
+                        <td className="py-2">{String(row.interest_level ?? row.interestLevel ?? "-")}</td>
+                        <td className="py-2">{String(row.support_level ?? row.supportLevel ?? "-")}</td>
+                        <td className="py-2">
+                          {userNameById.get(
+                            String(row.owner_user_id ?? row.ownerUserId ?? "")
+                          ) ?? String(row.owner_user_id ?? row.ownerUserId ?? "-")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
+
+      {activeWorkspaceTab === "tasks" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">Project Tasks</h4>
+              <p className="mt-1 text-xs text-slate-600">
+                Click any task to open its full editor. Use filters to focus the list.
+              </p>
+            </div>
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(
+                  event.target.value as
+                    | "all"
+                    | "open"
+                    | "in_progress"
+                    | "completed"
+                    | "overdue"
+                    | "canceled"
+                )
+              }
+            >
+              <option value="all">All Statuses</option>
+              <option value="open">Open</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="overdue">Overdue</option>
+              <option value="canceled">Canceled</option>
+            </select>
           </div>
-        )}
-      </section>
+
+          {filteredTasks.length === 0 ? (
+            <p className="text-sm text-slate-500">No tasks for selected filter.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Task Title</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2">Owner</th>
+                    <th className="py-2">Due Date</th>
+                    <th className="py-2">Priority</th>
+                    <th className="py-2">% Complete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTasks.map((task) => (
+                    <tr key={String(task.id)} className="border-b border-slate-100">
+                      <td className="py-2">
+                        <Link href={`/staff/tasks/${String(task.id)}`} className="font-medium text-brand-700">
+                          {String(task.title ?? "-")}
+                        </Link>
+                      </td>
+                      <td className="py-2">{effectiveStatus(task)}</td>
+                      <td className="py-2">
+                        {userNameById.get(String(task.owner_user_id ?? task.assigned_to ?? "")) ??
+                          String(task.owner_user_id ?? task.assigned_to ?? "-")}
+                      </td>
+                      <td className="py-2">{formatDate(task.due_date as string)}</td>
+                      <td className="py-2">{String(task.priority ?? "-")}</td>
+                      <td className="py-2">{String(task.percent_complete ?? 0)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {showNewStakeholder ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
