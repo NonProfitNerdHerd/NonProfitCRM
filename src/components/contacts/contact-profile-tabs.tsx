@@ -61,6 +61,17 @@ function buildOrganizationFormalLetterName(input: {
   return `${org}\nc/o ${primaryName}`;
 }
 
+function formatActivityEntityLabel(value: unknown) {
+  const normalized = String(value ?? "")
+    .replaceAll("_", " ")
+    .trim();
+  if (!normalized) return "Activity";
+  return normalized
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function ContactProfileTabs({
   contactId,
   contactDetails,
@@ -347,7 +358,7 @@ export function ContactProfileTabs({
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <TabButton active={activeTab === "activity"} onClick={() => setActiveTab("activity")}>
-          Activity Information
+          Latest Activity
         </TabButton>
         <TabButton
           active={activeTab === "contactInfo"}
@@ -389,6 +400,9 @@ export function ContactProfileTabs({
 
       {activeTab === "activity" ? (
         <div className="space-y-2">
+          <p className="text-xs text-slate-600">
+            Latest change log across Donations, Volunteer, Notes, Memberships, Merges, and Tags.
+          </p>
           {activity.length === 0 ? (
             <p className="text-sm text-slate-500">No activity yet.</p>
           ) : (
@@ -400,12 +414,12 @@ export function ContactProfileTabs({
                 onClick={() =>
                   openItem({
                     id: String(entry.id ?? ""),
-                    itemType: "Activity",
+                    itemType: formatActivityEntityLabel(entry.entity_type),
                     title: String(entry.action_type ?? "Activity"),
                     summary: String(entry.action_summary ?? ""),
                     createdBy: String(entry.performed_by_user_id ?? "Unknown"),
                     createdAt: (entry.created_at as string) ?? null,
-                    metadata: [{ label: "Entity", value: String(entry.entity_type ?? "-") }]
+                    metadata: [{ label: "Entity", value: formatActivityEntityLabel(entry.entity_type) }]
                   })
                 }
               >

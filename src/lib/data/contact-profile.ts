@@ -66,6 +66,44 @@ function isContactCustomFieldsSchemaError(error: unknown) {
   return message.includes("contact_custom_field_values") || message.includes("contact_custom_fields");
 }
 
+function isVolunteerSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("volunteer_profiles") || message.includes("volunteer_hours");
+}
+
+function isTaggingSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("contact_tags") ||
+    message.includes("tags") ||
+    message.includes("tag_assignment_job_results")
+  );
+}
+
+function isMergeSchemaMissingError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("contact_merge_history");
+}
+
+function toText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 function normalizeLegacyContactClassification(record: Record<string, unknown>): Record<string, unknown> {
   const donorStatus = String(record.donor_status ?? "").toLowerCase();
   const organizationName = String(record.organization_name ?? "").trim();
@@ -193,7 +231,12 @@ export async function getContactProfileData(contactId: string) {
     { data: tasks, error: tasksError },
     { data: memberships, error: membershipsError },
     { data: campaigns, error: campaignsError },
-    activity
+    activityLog,
+    { data: tagAssignments, error: tagAssignmentsError },
+    { data: tagAssignmentResults, error: tagAssignmentResultsError },
+    { data: volunteerProfiles, error: volunteerProfilesError },
+    { data: volunteerHours, error: volunteerHoursError },
+    { data: mergeHistory, error: mergeHistoryError }
   ] = await Promise.all([
     fetchContactRecord(supabase, context.organizationId, contactId),
     supabase
@@ -216,14 +259,14 @@ export async function getContactProfileData(contactId: string) {
     fetchContactDonations(supabase, context.organizationId, contactId),
     supabase
       .from("notes")
-      .select("id, body, note_type, created_at, created_by")
+      .select("id, body, note_type, created_at, updated_at, created_by")
       .eq("organization_id", context.organizationId)
       .eq("contact_id", contactId)
       .order("created_at", { ascending: false }),
     supabase
       .from("tasks")
       .select(
-        "id, title, description, due_date, status, priority, assigned_to, completed_at, created_by, created_at, project_id, projects(name)"
+        "id, title, description, due_date, status, priority, assigned_to, completed_at, created_by, created_at, updated_at, project_id, projects(name)"
       )
       .eq("organization_id", context.organizationId)
       .eq("contact_id", contactId)
@@ -231,7 +274,7 @@ export async function getContactProfileData(contactId: string) {
     supabase
       .from("memberships")
       .select(
-        "id, status, level, start_date, end_date, renewal_date, created_by, created_at, membership_types(name)"
+        "id, status, level, start_date, end_date, renewal_date, created_by, created_at, updated_at, membership_types(name)"
       )
       .eq("organization_id", context.organizationId)
       .eq("contact_id", contactId)
@@ -242,7 +285,41 @@ export async function getContactProfileData(contactId: string) {
       .eq("organization_id", context.organizationId)
       .eq("status", "Active")
       .order("name", { ascending: true }),
-    listContactActivity(contactId)
+    listContactActivity(contactId),
+    supabase
+      .from("contact_tags")
+      .select("id, tag_id, assigned_at, assigned_by, assignment_source, notes, tags(name,path)")
+      .eq("organization_id", context.organizationId)
+      .eq("contact_id", contactId)
+      .order("assigned_at", { ascending: false }),
+    supabase
+      .from("tag_assignment_job_results")
+      .select("id, action_taken, status, message, created_at, tag_id, tags(name,path)")
+      .eq("organization_id", context.organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(200),
+    supabase
+      .from("volunteer_profiles")
+      .select("id, volunteer_status, volunteer_type, created_at, updated_at, created_by, updated_by")
+      .eq("organization_id", context.organizationId)
+      .eq("contact_id", contactId),
+    supabase
+      .from("volunteer_hours")
+      .select(
+        "id, service_date, actual_hours, attendance_status, source, created_at, approved_at, volunteer_events(event_name)"
+      )
+      .eq("organization_id", context.organizationId)
+      .eq("contact_id", contactId)
+      .order("service_date", { ascending: false })
+      .limit(200),
+    supabase
+      .from("contact_merge_history")
+      .select("id, master_contact_id, duplicate_contact_id, merged_by, merged_at, merge_source")
+      .eq("organization_id", context.organizationId)
+      .or(`master_contact_id.eq.${contactId},duplicate_contact_id.eq.${contactId}`)
+      .order("merged_at", { ascending: false })
+      .limit(100)
   ]);
 
   if (contactError) throw contactError;
@@ -254,6 +331,14 @@ export async function getContactProfileData(contactId: string) {
   if (tasksError) throw tasksError;
   if (membershipsError) throw membershipsError;
   if (campaignsError) throw campaignsError;
+  if (tagAssignmentsError && !isTaggingSchemaMissingError(tagAssignmentsError)) throw tagAssignmentsError;
+  if (tagAssignmentResultsError && !isTaggingSchemaMissingError(tagAssignmentResultsError))
+    throw tagAssignmentResultsError;
+  if (volunteerProfilesError && !isVolunteerSchemaMissingError(volunteerProfilesError))
+    throw volunteerProfilesError;
+  if (volunteerHoursError && !isVolunteerSchemaMissingError(volunteerHoursError))
+    throw volunteerHoursError;
+  if (mergeHistoryError && !isMergeSchemaMissingError(mergeHistoryError)) throw mergeHistoryError;
 
   let customFields: Array<Record<string, unknown>> = [];
   const customFieldsResult = await supabase
@@ -286,6 +371,139 @@ export async function getContactProfileData(contactId: string) {
       .sort((a, b) => a.displayOrder - b.displayOrder);
   }
 
+  const latestActivity = [
+    ...(activityLog ?? []),
+    ...(donations ?? []).map((donation) => ({
+      id: `donation-${toText(donation.id)}`,
+      entity_type: "donation",
+      entity_id: donation.id,
+      action_type: "donation_recorded",
+      action_summary: `Donation recorded: $${Number(donation.amount ?? 0).toFixed(2)}${
+        donation.donation_date ? ` on ${toText(donation.donation_date)}` : ""
+      }`,
+      created_at: toText(donation.updated_at) || toText(donation.created_at) || toText(donation.donation_date),
+      performed_by_user_id: donation.created_by ?? null
+    })),
+    ...(notes ?? []).map((note) => ({
+      id: `note-${toText(note.id)}`,
+      entity_type: "note",
+      entity_id: note.id,
+      action_type: "note_logged",
+      action_summary: `Note logged: ${toText(note.body).slice(0, 140)}`,
+      created_at: toText(note.updated_at) || toText(note.created_at),
+      performed_by_user_id: note.created_by ?? null
+    })),
+    ...(memberships ?? []).map((membership) => {
+      const membershipType = Array.isArray(membership.membership_types)
+        ? membership.membership_types[0]
+        : membership.membership_types;
+      return {
+        id: `membership-${toText(membership.id)}`,
+        entity_type: "membership",
+        entity_id: membership.id,
+        action_type: "membership_updated",
+        action_summary: `Membership ${toText((membershipType as Record<string, unknown> | null)?.name) || "record"}: ${toText(
+          membership.status
+        ) || "-"}`,
+        created_at:
+          toText(membership.updated_at) || toText(membership.created_at) || toText(membership.start_date),
+        performed_by_user_id: membership.created_by ?? null
+      };
+    }),
+    ...(tagAssignments ?? []).map((assignment) => {
+      const tag = Array.isArray(assignment.tags) ? assignment.tags[0] : assignment.tags;
+      return {
+        id: `contact-tag-${toText(assignment.id)}`,
+        entity_type: "tag",
+        entity_id: assignment.tag_id,
+        action_type: "tag_assignment",
+        action_summary: `Tag applied: ${toText((tag as Record<string, unknown> | null)?.path) || toText((tag as Record<string, unknown> | null)?.name) || "Tag"}`,
+        created_at: toText(assignment.assigned_at),
+        performed_by_user_id: assignment.assigned_by ?? null
+      };
+    }),
+    ...(tagAssignmentResults ?? []).map((result) => {
+      const tag = Array.isArray(result.tags) ? result.tags[0] : result.tags;
+      const actionTaken = toText(result.action_taken) || "updated";
+      return {
+        id: `tag-result-${toText(result.id)}`,
+        entity_type: "tag",
+        entity_id: result.tag_id,
+        action_type: `tag_${actionTaken}`,
+        action_summary: `Tag ${actionTaken}: ${toText((tag as Record<string, unknown> | null)?.path) || toText((tag as Record<string, unknown> | null)?.name) || "Tag"}`,
+        created_at: toText(result.created_at),
+        performed_by_user_id: null
+      };
+    }),
+    ...(volunteerProfiles ?? []).flatMap((profile) => {
+      const base = {
+        entity_type: "volunteer",
+        entity_id: profile.id,
+        performed_by_user_id: profile.updated_by ?? profile.created_by ?? null
+      };
+      const createdAt = toText(profile.created_at);
+      const updatedAt = toText(profile.updated_at);
+      const entries: Array<Record<string, unknown>> = [];
+      if (createdAt) {
+        entries.push({
+          id: `volunteer-profile-created-${toText(profile.id)}`,
+          ...base,
+          action_type: "volunteer_profile_created",
+          action_summary: `Volunteer profile created (${toText(profile.volunteer_status) || "status unknown"})`,
+          created_at: createdAt
+        });
+      }
+      if (updatedAt && updatedAt !== createdAt) {
+        entries.push({
+          id: `volunteer-profile-updated-${toText(profile.id)}`,
+          ...base,
+          action_type: "volunteer_profile_updated",
+          action_summary: `Volunteer profile updated (${toText(profile.volunteer_status) || "status unknown"})`,
+          created_at: updatedAt
+        });
+      }
+      return entries;
+    }),
+    ...(volunteerHours ?? []).map((entry) => {
+      const event = Array.isArray(entry.volunteer_events)
+        ? entry.volunteer_events[0]
+        : entry.volunteer_events;
+      return {
+        id: `volunteer-hours-${toText(entry.id)}`,
+        entity_type: "volunteer",
+        entity_id: entry.id,
+        action_type: "volunteer_hours_logged",
+        action_summary: `Volunteer hours logged: ${Number(entry.actual_hours ?? 0).toFixed(2)} hour(s)${
+          toText((event as Record<string, unknown> | null)?.event_name)
+            ? ` for ${toText((event as Record<string, unknown> | null)?.event_name)}`
+            : ""
+        }`,
+        created_at: toText(entry.created_at) || toText(entry.approved_at) || toText(entry.service_date),
+        performed_by_user_id: null
+      };
+    }),
+    ...(mergeHistory ?? []).map((merge) => {
+      const asMaster = toText(merge.master_contact_id) === contactId;
+      return {
+        id: `merge-${toText(merge.id)}`,
+        entity_type: "merge",
+        entity_id: merge.id,
+        action_type: asMaster ? "contact_merged_into_master" : "contact_merged_as_duplicate",
+        action_summary: asMaster
+          ? `Contact merge completed. Another record was merged into this contact.`
+          : `Contact merge completed. This record was merged into another contact.`,
+        created_at: toText(merge.merged_at),
+        performed_by_user_id: merge.merged_by ?? null
+      };
+    })
+  ]
+    .filter((entry) => toText(entry.created_at))
+    .sort(
+      (a, b) =>
+        new Date(toText(b.created_at)).getTime() - new Date(toText(a.created_at)).getTime()
+    )
+    .slice(0, 400);
+
   return {
     contact,
     emails: emails ?? [],
@@ -297,7 +515,7 @@ export async function getContactProfileData(contactId: string) {
     memberships: memberships ?? [],
     campaigns: campaigns ?? [],
     customFields,
-    activity,
+    activity: latestActivity,
     taskUrgency: taskUrgencyColor(tasks ?? [])
   };
 }

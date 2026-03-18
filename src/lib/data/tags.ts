@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { logAuditEvent } from "@/lib/data/audit";
 import { requireAnyStaffPermission, requireStaffPermission } from "@/lib/auth/guards";
+import { recordActivity } from "@/lib/data/activity-log";
 
 type ContactMode =
   | "all"
@@ -621,6 +622,14 @@ export async function assignTagsToContact(input: {
     }
   });
 
+  await recordActivity({
+    entityType: "tag",
+    entityId: input.contactId,
+    actionType: "tag_assignment",
+    actionSummary: `Assigned ${tagIds.length} tag(s) to contact`,
+    relatedContactId: input.contactId
+  });
+
   return listContactTags(input.contactId);
 }
 
@@ -659,6 +668,14 @@ export async function removeTagsFromContact(input: {
       source: input.actionSource ?? "contact_profile",
       tagIds
     }
+  });
+
+  await recordActivity({
+    entityType: "tag",
+    entityId: input.contactId,
+    actionType: "tag_removal",
+    actionSummary: `Removed ${tagIds.length} tag(s) from contact`,
+    relatedContactId: input.contactId
   });
 
   return listContactTags(input.contactId);
