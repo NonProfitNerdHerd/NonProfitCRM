@@ -35,13 +35,13 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const normalizedName = normalizeText(parsed.data.name);
     const parentTagId = normalizeText(parsed.data.parentTagId) || null;
-    const module = normalizeText(parsed.data.module) || "contacts";
+    const moduleKey = normalizeText(parsed.data.module) || "contacts";
 
     const existingQuery = supabase
       .from("tags")
       .select("id,name,slug,path,level,color,is_active,parent_tag_id,module")
       .eq("organization_id", context.organizationId)
-      .eq("module", module)
+      .eq("module", moduleKey)
       .ilike("name", normalizedName)
       .order("level", { ascending: true })
       .limit(1);
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       const tag = await createTagDefinition({
         name: normalizedName,
         parentTagId: parentTagId || null,
-        module
+        module: moduleKey
       });
       return NextResponse.json({ tag, created: true });
     } catch (error) {
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
         .from("tags")
         .select("id,name,slug,path,level,color,is_active,parent_tag_id,module")
         .eq("organization_id", context.organizationId)
-        .eq("module", module)
+        .eq("module", moduleKey)
         .ilike("name", normalizedName)
         .order("level", { ascending: true })
         .limit(1);

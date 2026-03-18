@@ -10,8 +10,8 @@ export async function GET(request: Request) {
     );
     const limit = Number(url.searchParams.get("limit") ?? 25);
     const rootName = url.searchParams.get("rootName") ?? "";
-    const module = url.searchParams.get("module") ?? "";
-    const tags = await searchTags({ q, activeOnly, limit, rootName, module });
+    const moduleKey = url.searchParams.get("module") ?? "";
+    const tags = await searchTags({ q, activeOnly, limit, rootName, module: moduleKey });
     return NextResponse.json({ tags });
   } catch (error) {
     return NextResponse.json(

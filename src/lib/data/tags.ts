@@ -531,9 +531,9 @@ export async function searchTags(input?: {
   if (toBool(input?.activeOnly, true)) {
     query = query.eq("is_active", true);
   }
-  const module = toText(input?.module);
-  if (module) {
-    query = query.eq("module", module);
+  const moduleKey = toText(input?.module);
+  if (moduleKey) {
+    query = query.eq("module", moduleKey);
   }
   const rootName = toText(input?.rootName);
   if (rootName) {
