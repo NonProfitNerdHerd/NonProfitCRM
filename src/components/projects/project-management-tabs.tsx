@@ -27,7 +27,6 @@ type LifecyclePhase =
   | "idea"
   | "evaluation"
   | "planning"
-  | "execution"
   | "monitoring";
 
 type CloseoutNoteType = "improve" | "sustain";
@@ -86,15 +85,8 @@ const PHASE_DETAILS: Array<{
     good: "Impact, effort, and risk scoring used to make transparent decisions."
   },
   {
-    key: "execution",
-    label: "4. Execution",
-    why: "Execution converts plans into owned tasks with fair workload expectations.",
-    skip: "If skipped, accountability blurs and delivery slows down.",
-    good: "Every task has an owner, effort estimate, due date, and dependency clarity."
-  },
-  {
     key: "monitoring",
-    label: "5. Budget",
+    label: "4. Budget",
     why: "Monitoring keeps leadership informed without micromanaging staff.",
     skip: "If skipped, risks and budget issues appear late when fixes are expensive.",
     good: "Open risks, budget variance, and progress updates are current and visible."
@@ -163,7 +155,6 @@ export function ProjectManagementTabs({
   review,
   closeoutNotes,
   projectExpenses,
-  taskDependencies,
   dashboard,
   guardrails,
   warnings,
@@ -186,7 +177,6 @@ export function ProjectManagementTabs({
   review?: Record<string, unknown> | null;
   closeoutNotes?: Array<Record<string, unknown>>;
   projectExpenses?: Array<Record<string, unknown>>;
-  taskDependencies?: Array<Record<string, unknown>>;
   dashboard?: {
     lifecycleStatus?: string;
     percentComplete?: number;
@@ -339,13 +329,6 @@ export function ProjectManagementTabs({
     milestoneId: "",
     blockingNote: ""
   });
-  const [dependencyForm, setDependencyForm] = useState({
-    taskId: "",
-    prerequisiteTaskId: "",
-    dependencyType: "blocks",
-    note: ""
-  });
-
   const [riskForm, setRiskForm] = useState({
     riskTitle: "",
     riskDescription: "",
@@ -790,15 +773,6 @@ export function ProjectManagementTabs({
         <TabButton active={activeWorkspaceTab === "planning"} onClick={() => setActiveWorkspaceTab("planning")}>
           Planning
         </TabButton>
-        <TabButton active={activeWorkspaceTab === "closure"} onClick={() => setActiveWorkspaceTab("closure")}>
-          Closure
-        </TabButton>
-        <TabButton
-          active={activeWorkspaceTab === "post_project_review"}
-          onClick={() => setActiveWorkspaceTab("post_project_review")}
-        >
-          Post Project Review
-        </TabButton>
         <TabButton active={activeWorkspaceTab === "tasks"} onClick={() => setActiveWorkspaceTab("tasks")}>
           Tasks
         </TabButton>
@@ -831,6 +805,15 @@ export function ProjectManagementTabs({
           onClick={() => setActiveWorkspaceTab("expenses")}
         >
           Project Expenses
+        </TabButton>
+        <TabButton active={activeWorkspaceTab === "closure"} onClick={() => setActiveWorkspaceTab("closure")}>
+          Closure
+        </TabButton>
+        <TabButton
+          active={activeWorkspaceTab === "post_project_review"}
+          onClick={() => setActiveWorkspaceTab("post_project_review")}
+        >
+          Post Project Review
         </TabButton>
       </div>
 
@@ -1392,224 +1375,6 @@ export function ProjectManagementTabs({
         </section>
       ) : null}
 
-      {activeTab === "execution" ? (
-        <section className="rounded-md border border-slate-200 p-4">
-          <h4 className="mb-3 text-sm font-semibold text-slate-900">Tasks and Dependencies</h4>
-          <p className="mb-3 text-xs text-slate-600">
-            Every task needs an owner. Dependencies prevent schedule collisions and confusion.
-          </p>
-          <div className="mb-4 grid gap-3 md:grid-cols-4">
-            <SummaryBox label="Overdue" value={(groupedTasks.overdue ?? []).length} tone="red" />
-            <SummaryBox label="Upcoming" value={(groupedTasks.upcoming ?? []).length} tone="amber" />
-            <SummaryBox label="Completed" value={(groupedTasks.completed ?? []).length} tone="green" />
-            <SummaryBox label="Canceled" value={(groupedTasks.cancelled ?? []).length} tone="slate" />
-          </div>
-
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h5 className="text-sm font-semibold text-slate-900">Task List</h5>
-            <select
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(
-                  event.target.value as
-                    | "all"
-                    | "open"
-                    | "in_progress"
-                    | "completed"
-                    | "overdue"
-                    | "canceled"
-                )
-              }
-            >
-              <option value="all">All Statuses</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="completed">Completed</option>
-              <option value="overdue">Overdue</option>
-              <option value="canceled">Canceled</option>
-            </select>
-          </div>
-
-          {filteredTasks.length === 0 ? (
-            <p className="text-sm text-slate-500">No tasks for selected filter.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-600">
-                    <th className="py-2">Task Title</th>
-                    <th className="py-2">Status</th>
-                    <th className="py-2">Assigned User</th>
-                    <th className="py-2">Due Date</th>
-                    <th className="py-2">Priority</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTasks.map((task) => (
-                    <tr key={String(task.id)} className="border-b border-slate-100">
-                      <td className="py-2">
-                        <Link href={`/staff/tasks/${String(task.id)}`} className="font-medium text-brand-700">
-                          {String(task.title ?? "-")}
-                        </Link>
-                      </td>
-                      <td className="py-2">{effectiveStatus(task)}</td>
-                      <td className="py-2">
-                        {userNameById.get(String(task.assigned_to ?? "")) ?? String(task.assigned_to ?? "-")}
-                      </td>
-                      <td className="py-2">{formatDate(task.due_date as string)}</td>
-                      <td className="py-2">{String(task.priority ?? "-")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-md border border-slate-200 p-3">
-              <h5 className="text-sm font-semibold text-slate-900">Add Task</h5>
-              <div className="mt-2 grid gap-2">
-                <Input
-                  value={taskForm.title}
-                  onChange={(event) =>
-                    setTaskForm((prev) => ({ ...prev, title: event.target.value }))
-                  }
-                  placeholder="Task title"
-                />
-                <LabeledTextarea
-                  label="Task description"
-                  value={taskForm.description}
-                  onChange={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
-                />
-                <select
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={taskForm.ownerUserId}
-                  onChange={(event) =>
-                    setTaskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
-                  }
-                >
-                  <option value="">Task owner (required)</option>
-                  {users.map((user) => (
-                    <option key={user.user_id} value={user.user_id}>
-                      {user.display_name ?? user.user_id}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  type="date"
-                  value={taskForm.startDate}
-                  onChange={(event) =>
-                    setTaskForm((prev) => ({ ...prev, startDate: event.target.value }))
-                  }
-                />
-                <Input
-                  type="date"
-                  value={taskForm.dueDate}
-                  onChange={(event) =>
-                    setTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
-                  }
-                />
-                <Input
-                  value={taskForm.estimatedHours}
-                  onChange={(event) =>
-                    setTaskForm((prev) => ({ ...prev, estimatedHours: event.target.value }))
-                  }
-                  placeholder="Estimated hours"
-                />
-                <Input
-                  value={taskForm.actualHours}
-                  onChange={(event) =>
-                    setTaskForm((prev) => ({ ...prev, actualHours: event.target.value }))
-                  }
-                  placeholder="Actual hours"
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!taskForm.ownerUserId}
-                  onClick={() =>
-                    saveAndRefresh({
-                      action: "upsert_task",
-                      ...taskForm,
-                      ownerUserId: taskForm.ownerUserId,
-                      estimatedHours: numberOrNull(taskForm.estimatedHours),
-                      actualHours: numberOrNull(taskForm.actualHours),
-                      percentComplete: numberOrNull(taskForm.percentComplete),
-                      milestoneId: taskForm.milestoneId || null
-                    })
-                  }
-                >
-                  Add Task
-                </Button>
-              </div>
-            </section>
-
-            <section className="rounded-md border border-slate-200 p-3">
-              <h5 className="text-sm font-semibold text-slate-900">Blocking Dependencies</h5>
-              <div className="mt-2 space-y-2">
-                {(taskDependencies ?? []).map((dependency) => (
-                  <div key={String(dependency.id)} className="rounded-md border border-slate-100 p-2 text-xs">
-                    <p>
-                      Task {String(dependency.task_id)} depends on {String(dependency.prerequisite_task_id)}
-                    </p>
-                    <p className="text-slate-600">{String(dependency.note ?? "No note")}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2 grid gap-2">
-                <select
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={dependencyForm.taskId}
-                  onChange={(event) =>
-                    setDependencyForm((prev) => ({ ...prev, taskId: event.target.value }))
-                  }
-                >
-                  <option value="">Task being blocked</option>
-                  {tasks.map((task) => (
-                    <option key={String(task.id)} value={String(task.id)}>
-                      {String(task.title ?? task.id)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={dependencyForm.prerequisiteTaskId}
-                  onChange={(event) =>
-                    setDependencyForm((prev) => ({
-                      ...prev,
-                      prerequisiteTaskId: event.target.value
-                    }))
-                  }
-                >
-                  <option value="">Prerequisite task</option>
-                  {tasks.map((task) => (
-                    <option key={String(task.id)} value={String(task.id)}>
-                      {String(task.title ?? task.id)}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  value={dependencyForm.note}
-                  onChange={(event) =>
-                    setDependencyForm((prev) => ({ ...prev, note: event.target.value }))
-                  }
-                  placeholder="Dependency note"
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!dependencyForm.taskId || !dependencyForm.prerequisiteTaskId}
-                  onClick={() => saveAndRefresh({ action: "add_task_dependency", ...dependencyForm })}
-                >
-                  Add Dependency
-                </Button>
-              </div>
-            </section>
-          </div>
-        </section>
-      ) : null}
-
       {activeTab === "monitoring" ? (
         <section className="rounded-md border border-slate-200 p-4">
           <h4 className="text-sm font-semibold text-slate-900">Budget</h4>
@@ -2142,6 +1907,13 @@ export function ProjectManagementTabs({
                 {showTasksQuickAdd ? "Close Add Task" : "Add Task"}
               </Button>
             </div>
+          </div>
+
+          <div className="mb-4 grid gap-3 md:grid-cols-4">
+            <SummaryBox label="Overdue" value={(groupedTasks.overdue ?? []).length} tone="red" compact />
+            <SummaryBox label="Upcoming" value={(groupedTasks.upcoming ?? []).length} tone="amber" compact />
+            <SummaryBox label="Completed" value={(groupedTasks.completed ?? []).length} tone="green" compact />
+            <SummaryBox label="Canceled" value={(groupedTasks.cancelled ?? []).length} tone="slate" compact />
           </div>
 
           {showTasksQuickAdd ? (

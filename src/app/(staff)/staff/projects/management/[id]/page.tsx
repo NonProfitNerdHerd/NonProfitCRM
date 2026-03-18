@@ -32,7 +32,6 @@ export default async function ProjectManagementPage({ params, searchParams }: Pa
       review,
       closeoutNotes,
       projectExpenses,
-      taskDependencies,
       dashboard,
       guardrails,
       warnings
@@ -67,7 +66,6 @@ export default async function ProjectManagementPage({ params, searchParams }: Pa
         review={(review ?? null) as Record<string, unknown> | null}
         closeoutNotes={(closeoutNotes ?? []) as Array<Record<string, unknown>>}
         projectExpenses={(projectExpenses ?? []) as Array<Record<string, unknown>>}
-        taskDependencies={(taskDependencies ?? []) as Array<Record<string, unknown>>}
         dashboard={dashboard ?? {}}
         guardrails={guardrails ?? {}}
         warnings={(warnings ?? []) as string[]}
