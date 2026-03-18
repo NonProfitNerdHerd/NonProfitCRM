@@ -22,6 +22,13 @@ function parseTagIds(raw: string | null) {
   );
 }
 
+function resolveErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  const candidate = error as { message?: string; details?: string; hint?: string };
+  const message = String(candidate?.message ?? candidate?.details ?? candidate?.hint ?? "").trim();
+  return message || fallback;
+}
+
 export async function GET(request: Request) {
   try {
     const context = await requireStaffPermission("can_view_contacts");
@@ -144,7 +151,7 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        message: error instanceof Error ? error.message : "Unable to load contacts"
+        message: resolveErrorMessage(error, "Unable to load contacts")
       },
       { status: 500 }
     );
@@ -191,7 +198,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        message: error instanceof Error ? error.message : "Unable to create contact"
+        message: resolveErrorMessage(error, "Unable to create contact")
       },
       { status: 500 }
     );

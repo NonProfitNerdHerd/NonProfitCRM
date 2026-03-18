@@ -128,13 +128,30 @@ async function resolveDescendantMap(
   }
 
   for (const tagId of normalized) {
-    const { data, error } = await supabase.rpc("collect_descendant_tag_ids", {
-      org_id: organizationId,
-      input_tag_ids: [tagId]
-    });
-    if (error) throw error;
-    const ids = sanitizeTagIdList(data);
-    byRoot.set(tagId, new Set(ids.length > 0 ? ids : [tagId]));
+    try {
+      const { data, error } = await supabase.rpc("collect_descendant_tag_ids", {
+        org_id: organizationId,
+        input_tag_ids: [tagId]
+      });
+      if (error) throw error;
+      const ids = sanitizeTagIdList(data);
+      byRoot.set(tagId, new Set(ids.length > 0 ? ids : [tagId]));
+    } catch (error) {
+      // Graceful fallback when descendant RPC is unavailable in an environment.
+      // We still allow exact-tag filtering instead of failing the whole query.
+      const message = toText(
+        (error as { message?: string; details?: string; hint?: string })?.message ||
+          (error as { details?: string })?.details ||
+          (error as { hint?: string })?.hint
+      ).toLowerCase();
+      const canFallback =
+        message.includes("collect_descendant_tag_ids") ||
+        message.includes("does not exist") ||
+        message.includes("permission") ||
+        message.includes("not allowed");
+      if (!canFallback) throw error;
+      byRoot.set(tagId, new Set([tagId]));
+    }
   }
   return byRoot;
 }
