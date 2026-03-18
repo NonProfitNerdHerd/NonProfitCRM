@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TagMultiSelectAutocomplete, type TagMultiSelectOption } from "@/components/tags/tag-multi-select-autocomplete";
+import { searchTagAutocompleteOptions } from "@/lib/tags/tag-autocomplete-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 type CampaignOption = { id: string; name: string };
@@ -104,6 +107,18 @@ function getAllocationsFromRow(donation: DonationRow) {
     : [{ campaignId: "", amount: "" }];
 }
 
+function campaignDisplayFromDonation(donation: DonationRow) {
+  const allocations = Array.isArray(donation.donation_allocations) ? donation.donation_allocations : [];
+  const allocationNames = allocations
+    .map((allocation) => {
+      const campaign = Array.isArray(allocation.campaigns) ? allocation.campaigns[0] : allocation.campaigns;
+      return (campaign?.name as string) ?? null;
+    })
+    .filter(Boolean) as string[];
+  const fallbackCampaign = Array.isArray(donation.campaigns) ? donation.campaigns[0] : donation.campaigns;
+  return allocationNames.length > 0 ? allocationNames.join(", ") : String(fallbackCampaign?.name ?? "-");
+}
+
 export function DonationsManagement({
   initialDonations,
   campaigns,
@@ -125,7 +140,8 @@ export function DonationsManagement({
     paymentType: "",
     dateFrom: "",
     dateTo: "",
-    donor: ""
+    donor: "",
+    tags: [] as TagMultiSelectOption[]
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -159,6 +175,31 @@ export function DonationsManagement({
   );
   const remainingAmount = totalAmountNumber - allocationTotal;
 
+  function exportVisibleRowsToExcel() {
+    const dataset = visibleRows.map((donation) => {
+      const donor = getDonorFromRow(donation);
+      const donorName =
+        fixedContact?.displayName ||
+        `${String(donor?.first_name ?? "")} ${String(donor?.last_name ?? "")}`.trim() ||
+        "-";
+      return {
+        "Donation Date": formatDate(String(donation.donation_date ?? "")),
+        Donor: donorName || "-",
+        Campaigns: campaignDisplayFromDonation(donation),
+        Amount: Number(donation.amount ?? 0),
+        Payment: String(donation.payment_type ?? "-"),
+        Reference: String(donation.check_number ?? donation.transaction_id ?? "-"),
+        "Created By": String(donation.created_by ?? "-"),
+        "Entered At": formatDate(String(donation.created_at ?? ""))
+      };
+    });
+    const worksheet = XLSX.utils.json_to_sheet(dataset);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Donations");
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `donations-results-${dateStamp}.xlsx`);
+  }
+
   async function refreshRows(activeFilters = filters) {
     setLoading(true);
     const params = new URLSearchParams();
@@ -167,6 +208,15 @@ export function DonationsManagement({
     if (activeFilters.dateFrom) params.set("dateFrom", activeFilters.dateFrom);
     if (activeFilters.dateTo) params.set("dateTo", activeFilters.dateTo);
     if (activeFilters.donor.trim()) params.set("donor", activeFilters.donor.trim());
+    if (activeFilters.tags.length > 0) {
+      params.set(
+        "tagIds",
+        activeFilters.tags
+          .map((entry) => String(entry.id ?? "").trim())
+          .filter(Boolean)
+          .join(",")
+      );
+    }
     if (fixedContact?.id) params.set("contactId", fixedContact.id);
     const response = await fetch(`/api/donations?${params.toString()}`);
     const payload = await response.json().catch(() => null);
@@ -418,7 +468,7 @@ export function DonationsManagement({
 
       {!fixedContact ? (
         <section className="rounded-md border border-slate-200 p-4">
-          <div className="grid gap-3 md:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-6">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-600">Campaign</label>
             <select
@@ -459,6 +509,23 @@ export function DonationsManagement({
             <label className="mb-1 block text-xs font-medium text-slate-600">Donor</label>
             <Input value={filters.donor} placeholder="Search donor..." onChange={(event) => setFilters((prev) => ({ ...prev, donor: event.target.value }))} />
           </div>
+          <div>
+            <TagMultiSelectAutocomplete
+              label="Tag Filter"
+              selected={filters.tags}
+              onChange={(next) => setFilters((prev) => ({ ...prev, tags: next }))}
+              loadOptions={(value) =>
+                searchTagAutocompleteOptions({
+                  query: value,
+                  activeOnly: true,
+                  limit: 20,
+                  module: "contacts"
+                })
+              }
+              placeholder="Filter by donor tags"
+              emptyHint="No matching tags."
+            />
+          </div>
           </div>
           <div className="mt-3">
             <Button type="button" variant="secondary" onClick={() => refreshRows()}>
@@ -474,6 +541,9 @@ export function DonationsManagement({
             Showing last {Math.min(visibleRows.length, displayLimit)} of {rows.length} donation entries
           </p>
           <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" onClick={exportVisibleRowsToExcel}>
+              Export Excel
+            </Button>
             <label className="text-xs font-medium text-slate-600">Show</label>
             <select
               className="rounded-md border border-slate-300 px-2 py-1 text-sm"
@@ -506,20 +576,8 @@ export function DonationsManagement({
             <tbody>
               {visibleRows.map((donation) => {
                 const donor = getDonorFromRow(donation);
+                const campaignDisplay = campaignDisplayFromDonation(donation);
                 const allocations = Array.isArray(donation.donation_allocations) ? donation.donation_allocations : [];
-                const allocationNames = allocations
-                  .map((allocation) => {
-                    const campaign = Array.isArray(allocation.campaigns) ? allocation.campaigns[0] : allocation.campaigns;
-                    return (campaign?.name as string) ?? null;
-                  })
-                  .filter(Boolean) as string[];
-                const fallbackCampaign = Array.isArray(donation.campaigns)
-                  ? donation.campaigns[0]
-                  : donation.campaigns;
-                const campaignDisplay =
-                  allocationNames.length > 0
-                    ? allocationNames.join(", ")
-                    : String(fallbackCampaign?.name ?? "-");
                 const primaryCampaignId = allocations[0]?.campaign_id as string | undefined;
                 return (
                   <tr className="border-b border-slate-100" key={String(donation.id)}>

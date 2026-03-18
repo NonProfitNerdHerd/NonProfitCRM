@@ -196,8 +196,8 @@ export function ContactsList({
               <th className="py-2">Organization</th>
               <th className="py-2">Email</th>
               <th className="py-2">Phone</th>
-              <th className="py-2">Entity Type</th>
-              <th className="py-2">Tracking Status</th>
+              <th className="py-2">City</th>
+              <th className="py-2">State</th>
               <th className="py-2">Tags</th>
             </tr>
           </thead>
@@ -215,8 +215,8 @@ export function ContactsList({
                   <td className="py-2">{toText(contact.organization_name) || "-"}</td>
                   <td className="py-2">{toText(contact.email) || "-"}</td>
                   <td className="py-2">{toText(contact.phone) || "-"}</td>
-                  <td className="py-2">{toText(contact.entity_type) || "-"}</td>
-                  <td className="py-2">{toText(contact.tracking_status).replaceAll("_", "-") || "-"}</td>
+                  <td className="py-2">{toText(contact.city) || "-"}</td>
+                  <td className="py-2">{toText(contact.state) || "-"}</td>
                   <td className="py-2">
                     {assigned.length === 0 ? (
                       <span className="text-xs text-slate-400">—</span>

@@ -36,6 +36,10 @@ function isDonationOrgSchemaError(error: unknown) {
   return message.includes("crm_organization_id") || message.includes("crm_organizations");
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export async function listDonationsForStaff(filters?: {
   campaignId?: string;
   paymentType?: string;
@@ -44,6 +48,7 @@ export async function listDonationsForStaff(filters?: {
   donorId?: string;
   contactId?: string;
   donorQuery?: string;
+  tagIds?: string[];
 }): Promise<DonationRecord[]> {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
@@ -89,6 +94,37 @@ export async function listDonationsForStaff(filters?: {
     if (donorError) throw donorError;
     filteredDonorIds = (donorRows ?? []).map((row) => row.id as string);
     if (filteredDonorIds.length === 0) return [];
+  }
+  const tagIds = Array.from(
+    new Set((filters?.tagIds ?? []).map((entry) => String(entry ?? "").trim()).filter(isUuid))
+  );
+  if (tagIds.length > 0) {
+    const taggedContactIds = new Set<string>();
+    let from = 0;
+    const batchSize = 1000;
+    while (true) {
+      const { data: taggedRows, error: taggedError } = await supabase
+        .from("contact_tags")
+        .select("contact_id")
+        .eq("organization_id", context.organizationId)
+        .in("tag_id", tagIds)
+        .range(from, from + batchSize - 1);
+      if (taggedError) throw taggedError;
+      const page = taggedRows ?? [];
+      for (const row of page) {
+        const contactId = String(row.contact_id ?? "").trim();
+        if (contactId) taggedContactIds.add(contactId);
+      }
+      if (page.length < batchSize) break;
+      from += batchSize;
+    }
+    if (taggedContactIds.size === 0) return [];
+    if (filteredDonorIds) {
+      filteredDonorIds = filteredDonorIds.filter((id) => taggedContactIds.has(id));
+      if (filteredDonorIds.length === 0) return [];
+    } else {
+      filteredDonorIds = Array.from(taggedContactIds);
+    }
   }
 
   async function runQuery(selectClause: string) {

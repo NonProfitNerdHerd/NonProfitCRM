@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 import { donationSchema } from "@/lib/validation/donation";
 import { createDonationForStaff, listDonationsForStaff } from "@/lib/data/donations";
 
+function parseTagIds(raw: string | null) {
+  if (!raw) return [] as string[];
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -11,7 +23,8 @@ export async function GET(request: Request) {
       dateFrom: url.searchParams.get("dateFrom") ?? undefined,
       dateTo: url.searchParams.get("dateTo") ?? undefined,
       contactId: url.searchParams.get("contactId") ?? undefined,
-      donorQuery: url.searchParams.get("donor") ?? undefined
+      donorQuery: url.searchParams.get("donor") ?? undefined,
+      tagIds: parseTagIds(url.searchParams.get("tagIds"))
     });
     return NextResponse.json({ donations });
   } catch (error) {

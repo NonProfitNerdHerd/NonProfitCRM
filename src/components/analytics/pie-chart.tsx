@@ -44,12 +44,12 @@ export function PieChart({
   valueFormatter?: (value: number) => string;
 }) {
   const total = slices.reduce((sum, slice) => sum + slice.amount, 0);
-  const width = 520;
-  const height = size === "expanded" ? 400 : 180;
-  const radius = size === "expanded" ? 120 : 60;
-  const cx = size === "expanded" ? 180 : width / 2;
+  const width = size === "expanded" ? 520 : 220;
+  const height = size === "expanded" ? 320 : 180;
+  const radius = size === "expanded" ? 104 : 60;
+  const cx = size === "expanded" ? 130 : 88;
   const cy = height / 2;
-  const containerHeight = size === "expanded" ? "h-[620px]" : "h-[300px]";
+  const containerHeight = size === "expanded" ? "h-[520px]" : "h-[220px]";
   const legendText = size === "expanded" ? "text-sm" : "text-xs";
 
   if (total <= 0 || slices.length === 0) {
@@ -102,10 +102,12 @@ export function PieChart({
         ) : null}
       </div>
 
-      <div className={`flex min-h-0 flex-1 ${size === "expanded" ? "gap-4" : "flex-col gap-3"}`}>
+      <div className="flex min-h-0 flex-1 items-start gap-4">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className={size === "expanded" ? "w-1/2 min-w-[220px]" : "mx-auto h-[150px] w-full"}
+          className={
+            size === "expanded" ? "h-[280px] w-[300px] shrink-0" : "h-[150px] w-[190px] shrink-0"
+          }
         >
           {paths.map((slice) => (
             <path key={slice.label} d={slice.path} fill={slice.color} stroke="#fff" strokeWidth="1.5" />

@@ -10,6 +10,7 @@ type PageProps = {
     dateFrom?: string;
     dateTo?: string;
     donor?: string;
+    tagIds?: string;
   }>;
 };
 
@@ -21,7 +22,13 @@ export default async function DonationsPage({ searchParams }: PageProps) {
       paymentType: params.paymentType,
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
-      donorQuery: params.donor
+      donorQuery: params.donor,
+      tagIds: params.tagIds
+        ? params.tagIds
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+        : []
     }),
     listCampaigns({ status: "All" })
   ]);

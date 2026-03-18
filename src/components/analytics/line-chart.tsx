@@ -37,15 +37,15 @@ export function LineChart({
 }) {
   const width = 860;
   const height =
-    size === "expanded" ? 460 : size === "mini" ? 150 : size === "compact" ? 320 : 300;
+    size === "expanded" ? 460 : size === "mini" ? 150 : size === "compact" ? 214 : 300;
   const left = 58;
   const right = 18;
   const top = size === "expanded" ? 24 : 22;
-  const bottom = size === "compact" ? 138 : 56;
+  const bottom = size === "compact" ? 66 : 56;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const axisFontSize = size === "expanded" ? 13 : size === "mini" ? 11 : 12;
-  const xTickFontSize = size === "compact" ? 44 : axisFontSize;
+  const xTickFontSize = size === "compact" ? 18 : axisFontSize;
   const titleClass =
     size === "expanded" ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900";
   const containerHeight =
@@ -54,7 +54,7 @@ export function LineChart({
       : size === "mini"
         ? "h-[170px]"
         : size === "compact"
-          ? "h-[380px]"
+          ? "h-[254px]"
           : "h-[400px]";
   const svgHeightClass =
     size === "expanded"
@@ -62,7 +62,7 @@ export function LineChart({
       : size === "mini"
         ? "h-[95px]"
         : size === "compact"
-          ? "h-[295px]"
+          ? "h-[188px]"
           : "h-[300px]";
 
   const pointCount = Math.max(...series.map((s) => s.points.length), 0);
