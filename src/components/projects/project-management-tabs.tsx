@@ -416,6 +416,16 @@ export function ProjectManagementTabs({
     };
   }, [projectExpenses]);
 
+  const campaignNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of campaignOptions ?? []) {
+      const id = String(row.id ?? "");
+      if (!id) continue;
+      map.set(id, String(row.name ?? id));
+    }
+    return map;
+  }, [campaignOptions]);
+
   async function saveLifecycleAction(payload: Record<string, unknown>) {
     setSaving(true);
     setSharedError(null);
@@ -1975,21 +1985,18 @@ export function ProjectManagementTabs({
                       </tr>
                     </thead>
                     <tbody>
-                      {(projectExpenses ?? []).map((row) => {
-                        const campaignRow =
-                          row.campaigns && typeof row.campaigns === "object"
-                            ? (row.campaigns as Record<string, unknown>)
-                            : null;
-                        return (
-                          <tr key={String(row.id)} className="border-b border-slate-100">
-                            <td className="py-2">{formatDate(String(row.entry_date ?? ""))}</td>
-                            <td className="py-2 capitalize">{String(row.expense_type ?? "-")}</td>
-                            <td className="py-2">${Number(row.amount ?? 0).toFixed(2)}</td>
-                            <td className="py-2">{String(campaignRow?.name ?? "-")}</td>
-                            <td className="py-2">{String(row.description ?? "-")}</td>
-                          </tr>
-                        );
-                      })}
+                      {(projectExpenses ?? []).map((row) => (
+                        <tr key={String(row.id)} className="border-b border-slate-100">
+                          <td className="py-2">{formatDate(String(row.entry_date ?? ""))}</td>
+                          <td className="py-2 capitalize">{String(row.expense_type ?? "-")}</td>
+                          <td className="py-2">${Number(row.amount ?? 0).toFixed(2)}</td>
+                          <td className="py-2">
+                            {campaignNameById.get(String(row.campaign_id ?? "")) ??
+                              (String(row.expense_type ?? "") === "credit" ? "Unlinked" : "-")}
+                          </td>
+                          <td className="py-2">{String(row.description ?? "-")}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

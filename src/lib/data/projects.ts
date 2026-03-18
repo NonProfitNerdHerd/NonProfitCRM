@@ -16,6 +16,30 @@ const LIFECYCLE_TO_STATUS: Record<string, "active" | "on_hold" | "completed" | "
   archived: "completed"
 };
 
+function isProjectExpensesSchemaMissingError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const message = String((error as { message?: unknown }).message ?? "").toLowerCase();
+  const code = String((error as { code?: unknown }).code ?? "").toLowerCase();
+  return (
+    code === "42p01" ||
+    code === "pgrst205" ||
+    message.includes("project_expenses") && message.includes("schema cache")
+  );
+}
+
+function isPermissionOrSchemaError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const message = String((error as { message?: unknown }).message ?? "").toLowerCase();
+  const code = String((error as { code?: unknown }).code ?? "").toLowerCase();
+  return (
+    code === "42501" ||
+    code === "42p01" ||
+    code === "pgrst205" ||
+    message.includes("permission denied") ||
+    message.includes("schema cache")
+  );
+}
+
 function isBlank(value: string | null | undefined) {
   return !value || !value.trim();
 }
@@ -215,7 +239,7 @@ export async function getProject(projectId: string) {
         .maybeSingle(),
       supabase
         .from("project_expenses")
-        .select("id, expense_type, amount, entry_date, description, campaign_id, campaigns(id,name)")
+        .select("id, expense_type, amount, entry_date, description, campaign_id")
         .eq("organization_id", context.organizationId)
         .eq("project_id", projectId)
         .order("entry_date", { ascending: false })
@@ -252,8 +276,12 @@ export async function getProject(projectId: string) {
   if (decisionsError) throw decisionsError;
   if (updatesError) throw updatesError;
   if (reviewError) throw reviewError;
-  if (projectExpensesError) throw projectExpensesError;
-  if (campaignsError) throw campaignsError;
+  if (projectExpensesError && !isProjectExpensesSchemaMissingError(projectExpensesError)) {
+    throw projectExpensesError;
+  }
+  if (campaignsError && !isPermissionOrSchemaError(campaignsError)) {
+    throw campaignsError;
+  }
 
   const now = new Date();
   const inThirtyDays = new Date(now);
@@ -370,8 +398,11 @@ export async function getProject(projectId: string) {
     decisionLog: decisions ?? [],
     updates: updates ?? [],
     review: review ?? null,
-    projectExpenses: projectExpenses ?? [],
-    campaignOptions: campaigns ?? [],
+    projectExpenses:
+      projectExpensesError && isProjectExpensesSchemaMissingError(projectExpensesError)
+        ? []
+        : (projectExpenses ?? []),
+    campaignOptions: campaignsError && isPermissionOrSchemaError(campaignsError) ? [] : (campaigns ?? []),
     taskDependencies: taskDependencies ?? [],
     dashboard: {
       lifecycleStatus: String(project?.lifecycle_status ?? project?.status ?? "idea"),

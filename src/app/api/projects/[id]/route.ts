@@ -511,22 +511,6 @@ export async function PATCH(request: Request, { params }: RouteProps) {
           );
         }
 
-        if (action.campaignId) {
-          const { data: campaign, error: campaignError } = await supabase
-            .from("campaigns")
-            .select("id")
-            .eq("organization_id", context.organizationId)
-            .eq("id", action.campaignId)
-            .maybeSingle();
-          if (campaignError) throw campaignError;
-          if (!campaign) {
-            return NextResponse.json(
-              { message: "Selected campaign was not found for this tenant." },
-              { status: 400 }
-            );
-          }
-        }
-
         const entryDate = action.entryDate || new Date().toISOString().slice(0, 10);
         const expensePayload = {
           tenant_id: context.organizationId,
@@ -553,7 +537,20 @@ export async function PATCH(request: Request, { params }: RouteProps) {
             });
 
         const { error } = await query;
-        if (error) throw error;
+        if (error) {
+          const errorCode = String((error as { code?: unknown }).code ?? "").toLowerCase();
+          const errorMessage = String((error as { message?: unknown }).message ?? "").toLowerCase();
+          if (errorCode === "42p01" || (errorCode === "pgrst205" && errorMessage.includes("project_expenses"))) {
+            return NextResponse.json(
+              {
+                message:
+                  "Project expenses schema is not available in this environment yet. Run Supabase migration 202603201330 and retry."
+              },
+              { status: 400 }
+            );
+          }
+          throw error;
+        }
 
         await logAuditEvent({
           organizationId: context.organizationId,
