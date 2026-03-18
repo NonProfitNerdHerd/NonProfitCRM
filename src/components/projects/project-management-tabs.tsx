@@ -45,8 +45,10 @@ type LifecycleStatus =
 
 type ProjectWorkspaceTab =
   | "dashboard"
+  | "project_approval"
   | "planning"
   | "tasks"
+  | "stakeholder_matrix"
   | "risk_register"
   | "decision_log"
   | "project_updates"
@@ -89,7 +91,7 @@ const PHASE_DETAILS: Array<{
   },
   {
     key: "monitoring",
-    label: "5. Monitoring & Control",
+    label: "5. Budget",
     why: "Monitoring keeps leadership informed without micromanaging staff.",
     skip: "If skipped, risks and budget issues appear late when fixes are expensive.",
     good: "Open risks, budget variance, and progress updates are current and visible."
@@ -218,8 +220,10 @@ export function ProjectManagementTabs({
     const candidate = String(initialWorkspaceTab ?? "").toLowerCase();
     const allowed: ProjectWorkspaceTab[] = [
       "dashboard",
+      "project_approval",
       "planning",
       "tasks",
+      "stakeholder_matrix",
       "risk_register",
       "decision_log",
       "project_updates",
@@ -746,11 +750,23 @@ export function ProjectManagementTabs({
         >
           Dashboard
         </TabButton>
+        <TabButton
+          active={activeWorkspaceTab === "project_approval"}
+          onClick={() => setActiveWorkspaceTab("project_approval")}
+        >
+          Project Approval
+        </TabButton>
         <TabButton active={activeWorkspaceTab === "planning"} onClick={() => setActiveWorkspaceTab("planning")}>
           Planning
         </TabButton>
         <TabButton active={activeWorkspaceTab === "tasks"} onClick={() => setActiveWorkspaceTab("tasks")}>
           Tasks
+        </TabButton>
+        <TabButton
+          active={activeWorkspaceTab === "stakeholder_matrix"}
+          onClick={() => setActiveWorkspaceTab("stakeholder_matrix")}
+        >
+          Stakeholder Matrix
         </TabButton>
         <TabButton
           active={activeWorkspaceTab === "risk_register"}
@@ -840,7 +856,7 @@ export function ProjectManagementTabs({
         </>
       ) : null}
 
-      {activeWorkspaceTab === "planning" ? (
+      {activeWorkspaceTab === "project_approval" ? (
         <>
           <section className="rounded-md border border-slate-200 p-4">
             <h4 className="text-sm font-semibold text-slate-900">Lifecycle Status Engine</h4>
@@ -934,7 +950,11 @@ export function ProjectManagementTabs({
               {guardrails?.reviewComplete ? "complete" : "incomplete"}
             </p>
           </section>
+        </>
+      ) : null}
 
+      {activeWorkspaceTab === "planning" ? (
+        <>
           <div className="flex flex-wrap gap-2">
             {PHASE_DETAILS.map((phase) => (
               <TabButton
@@ -1552,7 +1572,7 @@ export function ProjectManagementTabs({
 
       {activeTab === "monitoring" ? (
         <section className="rounded-md border border-slate-200 p-4">
-          <h4 className="text-sm font-semibold text-slate-900">Budget Monitoring</h4>
+          <h4 className="text-sm font-semibold text-slate-900">Budget</h4>
           <p className="mt-1 text-xs text-slate-600">
             Monitoring variance protects donor trust and team alignment.
           </p>
@@ -1563,27 +1583,39 @@ export function ProjectManagementTabs({
                 Variance tracking helps you explain spend clearly to boards and funders.
               </p>
               <div className="mt-2 grid gap-2">
-                <Input
-                  value={budgetForm.approvedBudget}
-                  onChange={(event) =>
-                    setBudgetForm((prev) => ({ ...prev, approvedBudget: event.target.value }))
-                  }
-                  placeholder="Approved budget"
-                />
-                <Input
-                  value={budgetForm.forecastedSpend}
-                  onChange={(event) =>
-                    setBudgetForm((prev) => ({ ...prev, forecastedSpend: event.target.value }))
-                  }
-                  placeholder="Forecasted spend"
-                />
-                <Input
-                  value={budgetForm.actualSpend}
-                  onChange={(event) =>
-                    setBudgetForm((prev) => ({ ...prev, actualSpend: event.target.value }))
-                  }
-                  placeholder="Actual spend"
-                />
+                <label className="text-xs font-medium text-slate-700">
+                  Approved Budget
+                  <Input
+                    className="mt-1"
+                    value={budgetForm.approvedBudget}
+                    onChange={(event) =>
+                      setBudgetForm((prev) => ({ ...prev, approvedBudget: event.target.value }))
+                    }
+                    placeholder="Approved budget"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-700">
+                  Forecasted Spend
+                  <Input
+                    className="mt-1"
+                    value={budgetForm.forecastedSpend}
+                    onChange={(event) =>
+                      setBudgetForm((prev) => ({ ...prev, forecastedSpend: event.target.value }))
+                    }
+                    placeholder="Forecasted spend"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-700">
+                  Actual Spend
+                  <Input
+                    className="mt-1"
+                    value={budgetForm.actualSpend}
+                    onChange={(event) =>
+                      setBudgetForm((prev) => ({ ...prev, actualSpend: event.target.value }))
+                    }
+                    placeholder="Actual spend"
+                  />
+                </label>
                 <LabeledTextarea
                   label="Budget notes"
                   value={budgetForm.notes}
@@ -1821,60 +1853,60 @@ export function ProjectManagementTabs({
           </div>
         </div>
       ) : null}
-
-          <section className="rounded-md border border-slate-200 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h4 className="text-sm font-semibold text-slate-900">Stakeholder Matrix</h4>
-              <Button type="button" onClick={() => setShowNewStakeholder(true)}>
-                New
-              </Button>
-            </div>
-            {rows.length === 0 ? (
-              <p className="text-sm text-slate-500">No stakeholder records yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-600">
-                      <th className="py-2">Stakeholder Name</th>
-                      <th className="py-2">Role / Title</th>
-                      <th className="py-2">Organization</th>
-                      <th className="py-2">Type</th>
-                      <th className="py-2">Influence</th>
-                      <th className="py-2">Interest</th>
-                      <th className="py-2">Support</th>
-                      <th className="py-2">Owner</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <tr key={String(row.id)} className="border-b border-slate-100">
-                        <td className="py-2">{String(row.stakeholder_name ?? row.stakeholderName ?? "-")}</td>
-                        <td className="py-2">
-                          {String(row.stakeholder_role_title ?? row.stakeholderRoleTitle ?? "-")}
-                        </td>
-                        <td className="py-2">
-                          {String(row.stakeholder_organization ?? row.organization ?? "-")}
-                        </td>
-                        <td className="py-2">
-                          {String(row.stakeholder_type ?? row.stakeholderType ?? "-")}
-                        </td>
-                        <td className="py-2">{String(row.influence_level ?? row.influenceLevel ?? "-")}</td>
-                        <td className="py-2">{String(row.interest_level ?? row.interestLevel ?? "-")}</td>
-                        <td className="py-2">{String(row.support_level ?? row.supportLevel ?? "-")}</td>
-                        <td className="py-2">
-                          {userNameById.get(
-                            String(row.owner_user_id ?? row.ownerUserId ?? "")
-                          ) ?? String(row.owner_user_id ?? row.ownerUserId ?? "-")}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
         </>
+      ) : null}
+
+      {activeWorkspaceTab === "stakeholder_matrix" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-900">Stakeholder Matrix</h4>
+            <Button type="button" onClick={() => setShowNewStakeholder(true)}>
+              New
+            </Button>
+          </div>
+          {rows.length === 0 ? (
+            <p className="text-sm text-slate-500">No stakeholder records yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Stakeholder Name</th>
+                    <th className="py-2">Role / Title</th>
+                    <th className="py-2">Organization</th>
+                    <th className="py-2">Type</th>
+                    <th className="py-2">Influence</th>
+                    <th className="py-2">Interest</th>
+                    <th className="py-2">Support</th>
+                    <th className="py-2">Owner</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={String(row.id)} className="border-b border-slate-100">
+                      <td className="py-2">{String(row.stakeholder_name ?? row.stakeholderName ?? "-")}</td>
+                      <td className="py-2">
+                        {String(row.stakeholder_role_title ?? row.stakeholderRoleTitle ?? "-")}
+                      </td>
+                      <td className="py-2">
+                        {String(row.stakeholder_organization ?? row.organization ?? "-")}
+                      </td>
+                      <td className="py-2">{String(row.stakeholder_type ?? row.stakeholderType ?? "-")}</td>
+                      <td className="py-2">{String(row.influence_level ?? row.influenceLevel ?? "-")}</td>
+                      <td className="py-2">{String(row.interest_level ?? row.interestLevel ?? "-")}</td>
+                      <td className="py-2">{String(row.support_level ?? row.supportLevel ?? "-")}</td>
+                      <td className="py-2">
+                        {userNameById.get(
+                          String(row.owner_user_id ?? row.ownerUserId ?? "")
+                        ) ?? String(row.owner_user_id ?? row.ownerUserId ?? "-")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       ) : null}
 
       {activeWorkspaceTab === "tasks" ? (
