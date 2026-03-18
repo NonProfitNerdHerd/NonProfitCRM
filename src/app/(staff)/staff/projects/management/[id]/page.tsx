@@ -30,6 +30,7 @@ export default async function ProjectManagementPage({ params, searchParams }: Pa
       decisionLog,
       updates,
       review,
+      closeoutNotes,
       projectExpenses,
       taskDependencies,
       dashboard,
@@ -64,6 +65,7 @@ export default async function ProjectManagementPage({ params, searchParams }: Pa
         decisionLog={(decisionLog ?? []) as Array<Record<string, unknown>>}
         updates={(updates ?? []) as Array<Record<string, unknown>>}
         review={(review ?? null) as Record<string, unknown> | null}
+        closeoutNotes={(closeoutNotes ?? []) as Array<Record<string, unknown>>}
         projectExpenses={(projectExpenses ?? []) as Array<Record<string, unknown>>}
         taskDependencies={(taskDependencies ?? []) as Array<Record<string, unknown>>}
         dashboard={dashboard ?? {}}

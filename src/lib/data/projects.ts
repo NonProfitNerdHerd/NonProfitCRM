@@ -27,6 +27,17 @@ function isProjectExpensesSchemaMissingError(error: unknown) {
   );
 }
 
+function isProjectCloseoutSchemaMissingError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const message = String((error as { message?: unknown }).message ?? "").toLowerCase();
+  const code = String((error as { code?: unknown }).code ?? "").toLowerCase();
+  return (
+    code === "42p01" ||
+    code === "pgrst205" ||
+    (message.includes("project_closeout_notes") && message.includes("schema cache"))
+  );
+}
+
 function isBlank(value: string | null | undefined) {
   return !value || !value.trim();
 }
@@ -128,6 +139,7 @@ export async function getProject(projectId: string) {
     { data: decisions, error: decisionsError },
     { data: updates, error: updatesError },
     { data: review, error: reviewError },
+    { data: closeoutNotes, error: closeoutNotesError },
     { data: projectExpenses, error: projectExpensesError }
   ] =
     await Promise.all([
@@ -224,6 +236,12 @@ export async function getProject(projectId: string) {
         .eq("project_id", projectId)
         .maybeSingle(),
       supabase
+        .from("project_closeout_notes")
+        .select("id, note_type, note_body, created_by, created_at, updated_at")
+        .eq("organization_id", context.organizationId)
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false }),
+      supabase
         .from("project_expenses")
         .select("id, expense_type, amount, entry_date, description, campaign_id")
         .eq("organization_id", context.organizationId)
@@ -257,6 +275,9 @@ export async function getProject(projectId: string) {
   if (decisionsError) throw decisionsError;
   if (updatesError) throw updatesError;
   if (reviewError) throw reviewError;
+  if (closeoutNotesError && !isProjectCloseoutSchemaMissingError(closeoutNotesError)) {
+    throw closeoutNotesError;
+  }
   if (projectExpensesError && !isProjectExpensesSchemaMissingError(projectExpensesError)) {
     throw projectExpensesError;
   }
@@ -376,6 +397,10 @@ export async function getProject(projectId: string) {
     decisionLog: decisions ?? [],
     updates: updates ?? [],
     review: review ?? null,
+    closeoutNotes:
+      closeoutNotesError && isProjectCloseoutSchemaMissingError(closeoutNotesError)
+        ? []
+        : (closeoutNotes ?? []),
     projectExpenses:
       projectExpensesError && isProjectExpensesSchemaMissingError(projectExpensesError)
         ? []

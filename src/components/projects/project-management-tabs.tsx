@@ -28,9 +28,10 @@ type LifecyclePhase =
   | "evaluation"
   | "planning"
   | "execution"
-  | "monitoring"
-  | "closure"
-  | "post_review";
+  | "monitoring";
+
+type CloseoutNoteType = "improve" | "sustain";
+type ClosureSubTab = "improves" | "sustains" | "analysis";
 
 type LifecycleStatus =
   | "idea"
@@ -47,6 +48,8 @@ type ProjectWorkspaceTab =
   | "dashboard"
   | "project_approval"
   | "planning"
+  | "closure"
+  | "post_project_review"
   | "tasks"
   | "stakeholder_matrix"
   | "risk_register"
@@ -95,20 +98,6 @@ const PHASE_DETAILS: Array<{
     why: "Monitoring keeps leadership informed without micromanaging staff.",
     skip: "If skipped, risks and budget issues appear late when fixes are expensive.",
     good: "Open risks, budget variance, and progress updates are current and visible."
-  },
-  {
-    key: "closure",
-    label: "6. Closure",
-    why: "Closure confirms whether the mission outcome was actually achieved.",
-    skip: "If skipped, teams move on with unresolved variance and unclear outcomes.",
-    good: "Final outcomes, success check, and budget variance explanation are documented."
-  },
-  {
-    key: "post_review",
-    label: "7. Post-Project Review",
-    why: "Review turns hard-earned experience into repeatable wisdom.",
-    skip: "If skipped, avoidable mistakes repeat in future projects.",
-    good: "Lessons learned are captured and future decisions benefit from them."
   }
 ];
 
@@ -172,6 +161,7 @@ export function ProjectManagementTabs({
   decisionLog,
   updates,
   review,
+  closeoutNotes,
   projectExpenses,
   taskDependencies,
   dashboard,
@@ -194,6 +184,7 @@ export function ProjectManagementTabs({
   decisionLog?: Array<Record<string, unknown>>;
   updates?: Array<Record<string, unknown>>;
   review?: Record<string, unknown> | null;
+  closeoutNotes?: Array<Record<string, unknown>>;
   projectExpenses?: Array<Record<string, unknown>>;
   taskDependencies?: Array<Record<string, unknown>>;
   dashboard?: {
@@ -222,6 +213,8 @@ export function ProjectManagementTabs({
       "dashboard",
       "project_approval",
       "planning",
+      "closure",
+      "post_project_review",
       "tasks",
       "stakeholder_matrix",
       "risk_register",
@@ -393,6 +386,10 @@ export function ProjectManagementTabs({
   });
   const [showProjectUpdateModal, setShowProjectUpdateModal] = useState(false);
   const [editingProjectUpdateId, setEditingProjectUpdateId] = useState<string | null>(null);
+  const [activeClosureTab, setActiveClosureTab] = useState<ClosureSubTab>("improves");
+  const [showCloseoutNoteModal, setShowCloseoutNoteModal] = useState(false);
+  const [closeoutNoteType, setCloseoutNoteType] = useState<CloseoutNoteType>("improve");
+  const [closeoutNoteBody, setCloseoutNoteBody] = useState("");
   const [reviewForm, setReviewForm] = useState({
     finalOutcomeSummary: String(review?.final_outcome_summary ?? ""),
     metSuccessCriteria:
@@ -450,6 +447,21 @@ export function ProjectManagementTabs({
       spentPercent: approvedBudget > 0 ? (totals.debits / approvedBudget) * 100 : 0
     };
   }, [projectExpenses, budget?.approved_budget]);
+
+  const improveRows = useMemo(
+    () =>
+      (closeoutNotes ?? []).filter(
+        (row) => String(row.note_type ?? "").toLowerCase() === "improve"
+      ),
+    [closeoutNotes]
+  );
+  const sustainRows = useMemo(
+    () =>
+      (closeoutNotes ?? []).filter(
+        (row) => String(row.note_type ?? "").toLowerCase() === "sustain"
+      ),
+    [closeoutNotes]
+  );
 
   async function saveLifecycleAction(payload: Record<string, unknown>) {
     setSaving(true);
@@ -580,6 +592,25 @@ export function ProjectManagementTabs({
       publishedAt: String(update.published_at ?? "").slice(0, 10)
     });
     setShowProjectUpdateModal(true);
+  }
+
+  function openNewCloseoutNote(type: CloseoutNoteType) {
+    setCloseoutNoteType(type);
+    setCloseoutNoteBody("");
+    setShowCloseoutNoteModal(true);
+  }
+
+  async function saveCloseoutNote() {
+    if (!closeoutNoteBody.trim()) return;
+    const ok = await saveLifecycleAction({
+      action: "upsert_closeout_note",
+      noteType: closeoutNoteType,
+      noteBody: closeoutNoteBody
+    });
+    if (!ok) return;
+    setCloseoutNoteBody("");
+    setShowCloseoutNoteModal(false);
+    router.refresh();
   }
 
   function openNewRisk() {
@@ -758,6 +789,15 @@ export function ProjectManagementTabs({
         </TabButton>
         <TabButton active={activeWorkspaceTab === "planning"} onClick={() => setActiveWorkspaceTab("planning")}>
           Planning
+        </TabButton>
+        <TabButton active={activeWorkspaceTab === "closure"} onClick={() => setActiveWorkspaceTab("closure")}>
+          Closure
+        </TabButton>
+        <TabButton
+          active={activeWorkspaceTab === "post_project_review"}
+          onClick={() => setActiveWorkspaceTab("post_project_review")}
+        >
+          Post Project Review
         </TabButton>
         <TabButton active={activeWorkspaceTab === "tasks"} onClick={() => setActiveWorkspaceTab("tasks")}>
           Tasks
@@ -1642,60 +1682,6 @@ export function ProjectManagementTabs({
         </section>
       ) : null}
 
-      {activeTab === "closure" || activeTab === "post_review" ? (
-        <section className="rounded-md border border-slate-200 p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">
-              {activeTab === "closure" ? "Closure" : "Post-Project Review"}
-            </h4>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => saveAndRefresh({ action: "update_review", ...reviewForm })}
-            >
-              Save Review
-            </Button>
-          </div>
-          <p className="text-xs text-slate-600">
-            Closure turns experience into wisdom. Without review, mistakes repeat.
-          </p>
-          <div className="mt-3 grid gap-3">
-            <LabeledTextarea
-              label="Final Outcome Summary"
-              value={reviewForm.finalOutcomeSummary}
-              onChange={(value) => setReviewForm((prev) => ({ ...prev, finalOutcomeSummary: value }))}
-            />
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={reviewForm.metSuccessCriteria}
-                onChange={(event) =>
-                  setReviewForm((prev) => ({ ...prev, metSuccessCriteria: event.target.checked }))
-                }
-              />
-              Did we meet success criteria?
-            </label>
-            <LabeledTextarea
-              label="Budget Variance Explanation"
-              value={reviewForm.budgetVarianceExplanation}
-              onChange={(value) =>
-                setReviewForm((prev) => ({ ...prev, budgetVarianceExplanation: value }))
-              }
-            />
-            <LabeledTextarea
-              label="Lessons Learned"
-              value={reviewForm.lessonsLearned}
-              onChange={(value) => setReviewForm((prev) => ({ ...prev, lessonsLearned: value }))}
-            />
-            <LabeledTextarea
-              label="Would we do this again?"
-              value={reviewForm.wouldDoAgain}
-              onChange={(value) => setReviewForm((prev) => ({ ...prev, wouldDoAgain: value }))}
-            />
-          </div>
-        </section>
-      ) : null}
-
       {showEditProject ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-4xl rounded-xl bg-white p-5 shadow-2xl">
@@ -1854,6 +1840,217 @@ export function ProjectManagementTabs({
         </div>
       ) : null}
         </>
+      ) : null}
+
+      {activeWorkspaceTab === "closure" ? (
+        <section className="space-y-4 rounded-md border border-slate-200 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">Closure</h4>
+              <p className="mt-1 text-xs text-slate-600">
+                Capture what to improve, what to sustain, and your closeout analysis for future
+                mission work.
+              </p>
+            </div>
+            {activeClosureTab === "improves" ? (
+              <Button type="button" variant="secondary" onClick={() => openNewCloseoutNote("improve")}>
+                Add Improve
+              </Button>
+            ) : null}
+            {activeClosureTab === "sustains" ? (
+              <Button type="button" variant="secondary" onClick={() => openNewCloseoutNote("sustain")}>
+                Add Sustain
+              </Button>
+            ) : null}
+            {activeClosureTab === "analysis" ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => saveAndRefresh({ action: "update_review", ...reviewForm })}
+              >
+                Save Analysis
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <TabButton active={activeClosureTab === "improves"} onClick={() => setActiveClosureTab("improves")}>
+              Improves
+            </TabButton>
+            <TabButton active={activeClosureTab === "sustains"} onClick={() => setActiveClosureTab("sustains")}>
+              Sustains
+            </TabButton>
+            <TabButton active={activeClosureTab === "analysis"} onClick={() => setActiveClosureTab("analysis")}>
+              Analysis
+            </TabButton>
+          </div>
+
+          {activeClosureTab === "improves" ? (
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Improves</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                Notes about what we should do better in future project cycles.
+              </p>
+              {improveRows.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No improve notes yet.</p>
+              ) : (
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-600">
+                        <th className="py-2">Created</th>
+                        <th className="py-2">Note</th>
+                        <th className="py-2">Added By</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {improveRows.map((row) => (
+                        <tr key={String(row.id)} className="border-b border-slate-100 align-top">
+                          <td className="py-2">{formatDate(String(row.created_at ?? ""))}</td>
+                          <td className="py-2 whitespace-pre-wrap">{String(row.note_body ?? "")}</td>
+                          <td className="py-2">
+                            {userNameById.get(String(row.created_by ?? "")) ??
+                              String(row.created_by ?? "-")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {activeClosureTab === "sustains" ? (
+            <section className="rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Sustains</h5>
+              <p className="mt-1 text-xs text-slate-600">
+                Notes about practices that worked and should continue.
+              </p>
+              {sustainRows.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No sustain notes yet.</p>
+              ) : (
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-600">
+                        <th className="py-2">Created</th>
+                        <th className="py-2">Note</th>
+                        <th className="py-2">Added By</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sustainRows.map((row) => (
+                        <tr key={String(row.id)} className="border-b border-slate-100 align-top">
+                          <td className="py-2">{formatDate(String(row.created_at ?? ""))}</td>
+                          <td className="py-2 whitespace-pre-wrap">{String(row.note_body ?? "")}</td>
+                          <td className="py-2">
+                            {userNameById.get(String(row.created_by ?? "")) ??
+                              String(row.created_by ?? "-")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {activeClosureTab === "analysis" ? (
+            <section className="rounded-md border border-slate-200 p-4">
+              <p className="text-xs text-slate-600">
+                Closure turns experience into wisdom. Without review, mistakes repeat.
+              </p>
+              <div className="mt-3 grid gap-3">
+                <LabeledTextarea
+                  label="Final Outcome Summary"
+                  value={reviewForm.finalOutcomeSummary}
+                  onChange={(value) => setReviewForm((prev) => ({ ...prev, finalOutcomeSummary: value }))}
+                />
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={reviewForm.metSuccessCriteria}
+                    onChange={(event) =>
+                      setReviewForm((prev) => ({ ...prev, metSuccessCriteria: event.target.checked }))
+                    }
+                  />
+                  Did we meet success criteria?
+                </label>
+                <LabeledTextarea
+                  label="Budget Variance Explanation"
+                  value={reviewForm.budgetVarianceExplanation}
+                  onChange={(value) =>
+                    setReviewForm((prev) => ({ ...prev, budgetVarianceExplanation: value }))
+                  }
+                />
+                <LabeledTextarea
+                  label="Lessons Learned"
+                  value={reviewForm.lessonsLearned}
+                  onChange={(value) => setReviewForm((prev) => ({ ...prev, lessonsLearned: value }))}
+                />
+                <LabeledTextarea
+                  label="Would we do this again?"
+                  value={reviewForm.wouldDoAgain}
+                  onChange={(value) => setReviewForm((prev) => ({ ...prev, wouldDoAgain: value }))}
+                />
+              </div>
+            </section>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeWorkspaceTab === "post_project_review" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-slate-900">Post-Project Review</h4>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => saveAndRefresh({ action: "update_review", ...reviewForm })}
+            >
+              Save Review
+            </Button>
+          </div>
+          <p className="text-xs text-slate-600">
+            Document outcomes and lessons so future projects start stronger and avoid repeated mistakes.
+          </p>
+          <div className="mt-3 grid gap-3">
+            <LabeledTextarea
+              label="Final Outcome Summary"
+              value={reviewForm.finalOutcomeSummary}
+              onChange={(value) => setReviewForm((prev) => ({ ...prev, finalOutcomeSummary: value }))}
+            />
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={reviewForm.metSuccessCriteria}
+                onChange={(event) =>
+                  setReviewForm((prev) => ({ ...prev, metSuccessCriteria: event.target.checked }))
+                }
+              />
+              Did we meet success criteria?
+            </label>
+            <LabeledTextarea
+              label="Budget Variance Explanation"
+              value={reviewForm.budgetVarianceExplanation}
+              onChange={(value) =>
+                setReviewForm((prev) => ({ ...prev, budgetVarianceExplanation: value }))
+              }
+            />
+            <LabeledTextarea
+              label="Lessons Learned"
+              value={reviewForm.lessonsLearned}
+              onChange={(value) => setReviewForm((prev) => ({ ...prev, lessonsLearned: value }))}
+            />
+            <LabeledTextarea
+              label="Would we do this again?"
+              value={reviewForm.wouldDoAgain}
+              onChange={(value) => setReviewForm((prev) => ({ ...prev, wouldDoAgain: value }))}
+            />
+          </div>
+        </section>
       ) : null}
 
       {activeWorkspaceTab === "stakeholder_matrix" ? (
@@ -2572,6 +2769,44 @@ export function ProjectManagementTabs({
                   {editingProjectUpdateId ? "Save Project Update" : "Create Project Update"}
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showCloseoutNoteModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h5 className="text-base font-semibold text-slate-900">
+                {closeoutNoteType === "improve" ? "Add Improve" : "Add Sustain"}
+              </h5>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setShowCloseoutNoteModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            <LabeledTextarea
+              label={
+                closeoutNoteType === "improve"
+                  ? "What could we do better next time?"
+                  : "What should we keep doing?"
+              }
+              value={closeoutNoteBody}
+              onChange={setCloseoutNoteBody}
+            />
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!closeoutNoteBody.trim()}
+                onClick={saveCloseoutNote}
+              >
+                Save
+              </Button>
             </div>
           </div>
         </div>

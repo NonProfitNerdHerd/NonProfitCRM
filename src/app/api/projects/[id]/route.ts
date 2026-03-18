@@ -189,6 +189,12 @@ const actionSchema = z.discriminatedUnion("action", [
     wouldDoAgain: z.string().optional()
   }),
   z.object({
+    action: z.literal("upsert_closeout_note"),
+    id: z.string().uuid().optional(),
+    noteType: z.enum(["improve", "sustain"]),
+    noteBody: z.string().min(1)
+  }),
+  z.object({
     action: z.literal("upsert_task"),
     id: z.string().uuid().optional(),
     title: z.string().min(1),
@@ -232,6 +238,17 @@ const lifecycleToLegacyStatus: Record<
 
 function isBlank(value: string | null | undefined) {
   return !value || !value.trim();
+}
+
+function isProjectCloseoutSchemaMissingError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const code = String((error as { code?: unknown }).code ?? "").toLowerCase();
+  const message = String((error as { message?: unknown }).message ?? "").toLowerCase();
+  return (
+    code === "42p01" ||
+    code === "pgrst205" ||
+    (message.includes("project_closeout_notes") && message.includes("schema cache"))
+  );
 }
 
 async function evaluateGuardrails(
@@ -699,6 +716,53 @@ export async function PATCH(request: Request, { params }: RouteProps) {
           { onConflict: "project_id" }
         );
         if (error) throw error;
+        return NextResponse.json({ ok: true });
+      }
+
+      if (action.action === "upsert_closeout_note") {
+        const payloadCloseout = {
+          tenant_id: context.organizationId,
+          organization_id: context.organizationId,
+          project_id: id,
+          note_type: action.noteType,
+          note_body: action.noteBody.trim(),
+          updated_by: context.userId
+        };
+        const query = action.id
+          ? supabase
+              .from("project_closeout_notes")
+              .update(payloadCloseout)
+              .eq("organization_id", context.organizationId)
+              .eq("project_id", id)
+              .eq("id", action.id)
+          : supabase.from("project_closeout_notes").insert({
+              ...payloadCloseout,
+              created_by: context.userId
+            });
+        const { error } = await query;
+        if (error) {
+          if (isProjectCloseoutSchemaMissingError(error)) {
+            return NextResponse.json(
+              {
+                message:
+                  "Project closure notes schema is not available in this environment yet. Run Supabase migration 202603201500 and retry."
+              },
+              { status: 400 }
+            );
+          }
+          throw error;
+        }
+        await logAuditEvent({
+          organizationId: context.organizationId,
+          actorUserId: context.userId,
+          actionType: action.id ? "project_closeout_note_updated" : "project_closeout_note_created",
+          targetEntityType: "project_closeout_notes",
+          targetEntityId: action.id ?? id,
+          metadata: {
+            projectId: id,
+            noteType: action.noteType
+          }
+        });
         return NextResponse.json({ ok: true });
       }
 
