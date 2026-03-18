@@ -43,7 +43,7 @@ type LifecycleStatus =
   | "cancelled"
   | "archived";
 
-type ProjectWorkspaceTab = "dashboard" | "planning" | "tasks" | "expenses";
+type ProjectWorkspaceTab = "dashboard" | "planning" | "tasks" | "risk_register" | "expenses";
 
 const PHASE_DETAILS: Array<{
   key: LifecyclePhase;
@@ -164,7 +164,6 @@ export function ProjectManagementTabs({
   updates,
   review,
   projectExpenses,
-  campaignOptions,
   taskDependencies,
   dashboard,
   guardrails,
@@ -186,7 +185,6 @@ export function ProjectManagementTabs({
   updates?: Array<Record<string, unknown>>;
   review?: Record<string, unknown> | null;
   projectExpenses?: Array<Record<string, unknown>>;
-  campaignOptions?: Array<Record<string, unknown>>;
   taskDependencies?: Array<Record<string, unknown>>;
   dashboard?: {
     lifecycleStatus?: string;
@@ -349,12 +347,14 @@ export function ProjectManagementTabs({
     decisionDetails: ""
   });
   const [expenseForm, setExpenseForm] = useState({
-    expenseType: "debit" as "debit" | "credit",
     amount: "",
     entryDate: new Date().toISOString().slice(0, 10),
-    description: "",
-    campaignId: ""
+    description: ""
   });
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [showTasksQuickAdd, setShowTasksQuickAdd] = useState(false);
+  const [showRiskModal, setShowRiskModal] = useState(false);
+  const [editingRiskId, setEditingRiskId] = useState<string | null>(null);
   const [updateForm, setUpdateForm] = useState({
     updateTitle: "",
     updateBody: "",
@@ -399,32 +399,24 @@ export function ProjectManagementTabs({
   }, [tasks, statusFilter]);
 
   const expenseTotals = useMemo(() => {
-    const totals = (projectExpenses ?? []).reduce<{ debits: number; credits: number }>(
+    const totals = (projectExpenses ?? []).reduce<{ debits: number }>(
       (acc, row) => {
         const amount = Number(row.amount ?? 0);
         const type = String(row.expense_type ?? "");
         if (type === "debit") acc.debits += amount;
-        if (type === "credit") acc.credits += amount;
         return acc;
       },
-      { debits: 0, credits: 0 }
+      { debits: 0 }
     );
+    const approvedBudget = Number(budget?.approved_budget ?? 0);
+    const remainingBudget = approvedBudget - totals.debits;
     return {
       debits: totals.debits,
-      credits: totals.credits,
-      net: totals.credits - totals.debits
+      approvedBudget,
+      remainingBudget,
+      spentPercent: approvedBudget > 0 ? (totals.debits / approvedBudget) * 100 : 0
     };
-  }, [projectExpenses]);
-
-  const campaignNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of campaignOptions ?? []) {
-      const id = String(row.id ?? "");
-      if (!id) continue;
-      map.set(id, String(row.name ?? id));
-    }
-    return map;
-  }, [campaignOptions]);
+  }, [projectExpenses, budget?.approved_budget]);
 
   async function saveLifecycleAction(payload: Record<string, unknown>) {
     setSaving(true);
@@ -455,19 +447,102 @@ export function ProjectManagementTabs({
   async function saveExpenseEntry() {
     const ok = await saveLifecycleAction({
       action: "upsert_project_expense",
-      expenseType: expenseForm.expenseType,
+      expenseType: "debit",
       amount: numberOrZero(expenseForm.amount),
       entryDate: expenseForm.entryDate || null,
-      description: expenseForm.description,
-      campaignId: expenseForm.expenseType === "credit" ? expenseForm.campaignId || null : null
+      description: expenseForm.description
     });
     if (!ok) return;
-    setExpenseForm((prev) => ({
-      ...prev,
+    setExpenseForm({
       amount: "",
       description: "",
-      campaignId: ""
-    }));
+      entryDate: new Date().toISOString().slice(0, 10)
+    });
+    setShowExpenseModal(false);
+    router.refresh();
+  }
+
+  async function saveRiskEntry() {
+    const ok = await saveLifecycleAction({
+      action: "upsert_risk",
+      id: editingRiskId ?? undefined,
+      ...riskForm,
+      likelihood: numberOrNull(riskForm.likelihood),
+      impact: numberOrNull(riskForm.impact)
+    });
+    if (!ok) return;
+    setEditingRiskId(null);
+    setShowRiskModal(false);
+    setRiskForm({
+      riskTitle: "",
+      riskDescription: "",
+      likelihood: "3",
+      impact: "3",
+      mitigationPlan: "",
+      ownerUserId: "",
+      status: "open",
+      targetResolutionDate: ""
+    });
+    router.refresh();
+  }
+
+  function openNewRisk() {
+    setEditingRiskId(null);
+    setRiskForm({
+      riskTitle: "",
+      riskDescription: "",
+      likelihood: "3",
+      impact: "3",
+      mitigationPlan: "",
+      ownerUserId: "",
+      status: "open",
+      targetResolutionDate: ""
+    });
+    setShowRiskModal(true);
+  }
+
+  function openEditRisk(risk: Record<string, unknown>) {
+    setEditingRiskId(String(risk.id ?? ""));
+    setRiskForm({
+      riskTitle: String(risk.risk_title ?? ""),
+      riskDescription: String(risk.risk_description ?? ""),
+      likelihood: String(risk.likelihood ?? "3"),
+      impact: String(risk.impact ?? "3"),
+      mitigationPlan: String(risk.mitigation_plan ?? ""),
+      ownerUserId: String(risk.owner_user_id ?? ""),
+      status: String(risk.status ?? "open"),
+      targetResolutionDate: String(risk.target_resolution_date ?? "")
+    });
+    setShowRiskModal(true);
+  }
+
+  async function saveTaskFromTasksTab() {
+    if (!taskForm.title.trim() || !taskForm.ownerUserId) return;
+    const ok = await saveLifecycleAction({
+      action: "upsert_task",
+      ...taskForm,
+      ownerUserId: taskForm.ownerUserId,
+      estimatedHours: numberOrNull(taskForm.estimatedHours),
+      actualHours: numberOrNull(taskForm.actualHours),
+      percentComplete: numberOrNull(taskForm.percentComplete),
+      milestoneId: taskForm.milestoneId || null
+    });
+    if (!ok) return;
+    setTaskForm({
+      title: "",
+      description: "",
+      ownerUserId: "",
+      dueDate: "",
+      estimatedHours: "",
+      actualHours: "",
+      startDate: "",
+      status: "todo",
+      priority: "medium",
+      percentComplete: "0",
+      milestoneId: "",
+      blockingNote: ""
+    });
+    setShowTasksQuickAdd(false);
     router.refresh();
   }
 
@@ -584,6 +659,12 @@ export function ProjectManagementTabs({
         </TabButton>
         <TabButton active={activeWorkspaceTab === "tasks"} onClick={() => setActiveWorkspaceTab("tasks")}>
           Tasks
+        </TabButton>
+        <TabButton
+          active={activeWorkspaceTab === "risk_register"}
+          onClick={() => setActiveWorkspaceTab("risk_register")}
+        >
+          Risk Register
         </TabButton>
         <TabButton
           active={activeWorkspaceTab === "expenses"}
@@ -748,115 +829,6 @@ export function ProjectManagementTabs({
               {guardrails?.scopeComplete ? "complete" : "incomplete"} • Closure review{" "}
               {guardrails?.reviewComplete ? "complete" : "incomplete"}
             </p>
-          </section>
-
-          <section className="rounded-md border border-slate-200 p-4">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <h4 className="text-sm font-semibold text-slate-900">Risk Register</h4>
-              <p className="text-xs text-slate-500">Use this to track and reduce project risk early.</p>
-            </div>
-            <div className="space-y-2">
-              {(risks ?? []).length === 0 ? (
-                <p className="text-xs text-slate-500">No risks logged yet.</p>
-              ) : (
-                (risks ?? []).map((risk) => (
-                  <div key={String(risk.id)} className="rounded-md border border-slate-100 p-2 text-xs">
-                    <p className="font-semibold text-slate-900">{String(risk.risk_title ?? "-")}</p>
-                    <p className="text-slate-600">
-                      Status: {String(risk.status ?? "open")} • Likelihood{" "}
-                      {String(risk.likelihood ?? "-")} • Impact {String(risk.impact ?? "-")}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              <Input
-                value={riskForm.riskTitle}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, riskTitle: event.target.value }))
-                }
-                placeholder="Risk title"
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={riskForm.status}
-                onChange={(event) => setRiskForm((prev) => ({ ...prev, status: event.target.value }))}
-              >
-                <option value="open">Open</option>
-                <option value="monitoring">Monitoring</option>
-                <option value="mitigated">Mitigated</option>
-                <option value="closed">Closed</option>
-              </select>
-              <Input
-                value={riskForm.likelihood}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, likelihood: event.target.value }))
-                }
-                placeholder="Likelihood (1-5)"
-              />
-              <Input
-                value={riskForm.impact}
-                onChange={(event) => setRiskForm((prev) => ({ ...prev, impact: event.target.value }))}
-                placeholder="Impact (1-5)"
-              />
-              <Input
-                type="date"
-                value={riskForm.targetResolutionDate}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, targetResolutionDate: event.target.value }))
-                }
-              />
-              <select
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={riskForm.ownerUserId}
-                onChange={(event) =>
-                  setRiskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
-                }
-              >
-                <option value="">Risk owner (optional)</option>
-                {users.map((user) => (
-                  <option key={user.user_id} value={user.user_id}>
-                    {user.display_name ?? user.user_id}
-                  </option>
-                ))}
-              </select>
-              <div className="md:col-span-2">
-                <LabeledTextarea
-                  label="Risk description"
-                  value={riskForm.riskDescription}
-                  onChange={(value) =>
-                    setRiskForm((prev) => ({ ...prev, riskDescription: value }))
-                  }
-                />
-              </div>
-              <div className="md:col-span-2">
-                <LabeledTextarea
-                  label="Mitigation plan"
-                  value={riskForm.mitigationPlan}
-                  onChange={(value) =>
-                    setRiskForm((prev) => ({ ...prev, mitigationPlan: value }))
-                  }
-                />
-              </div>
-              <div className="md:col-span-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!riskForm.riskTitle.trim()}
-                  onClick={() =>
-                    saveAndRefresh({
-                      action: "upsert_risk",
-                      ...riskForm,
-                      likelihood: numberOrNull(riskForm.likelihood),
-                      impact: numberOrNull(riskForm.impact)
-                    })
-                  }
-                >
-                  Add Risk
-                </Button>
-              </div>
-            </div>
           </section>
 
           <div className="flex flex-wrap gap-2">
@@ -1880,29 +1852,119 @@ export function ProjectManagementTabs({
                 Click any task to open its full editor. Use filters to focus the list.
               </p>
             </div>
-            <select
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(
-                  event.target.value as
-                    | "all"
-                    | "open"
-                    | "in_progress"
-                    | "completed"
-                    | "overdue"
-                    | "canceled"
-                )
-              }
-            >
-              <option value="all">All Statuses</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="completed">Completed</option>
-              <option value="overdue">Overdue</option>
-              <option value="canceled">Canceled</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(
+                    event.target.value as
+                      | "all"
+                      | "open"
+                      | "in_progress"
+                      | "completed"
+                      | "overdue"
+                      | "canceled"
+                  )
+                }
+              >
+                <option value="all">All Statuses</option>
+                <option value="open">Open</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="overdue">Overdue</option>
+                <option value="canceled">Canceled</option>
+              </select>
+              <Button type="button" variant="secondary" onClick={() => setShowTasksQuickAdd((prev) => !prev)}>
+                {showTasksQuickAdd ? "Close Add Task" : "Add Task"}
+              </Button>
+            </div>
           </div>
+
+          {showTasksQuickAdd ? (
+            <section className="mb-4 rounded-md border border-slate-200 p-3">
+              <h5 className="text-sm font-semibold text-slate-900">Create Task</h5>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                <Input
+                  value={taskForm.title}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, title: event.target.value }))
+                  }
+                  placeholder="Task title"
+                />
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={taskForm.ownerUserId}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                  }
+                >
+                  <option value="">Task owner (required)</option>
+                  {users.map((user) => (
+                    <option key={user.user_id} value={user.user_id}>
+                      {user.display_name ?? user.user_id}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  type="date"
+                  value={taskForm.startDate}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, startDate: event.target.value }))
+                  }
+                />
+                <Input
+                  type="date"
+                  value={taskForm.dueDate}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
+                  }
+                />
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={taskForm.priority}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, priority: event.target.value }))
+                  }
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+                <select
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={taskForm.status}
+                  onChange={(event) =>
+                    setTaskForm((prev) => ({ ...prev, status: event.target.value }))
+                  }
+                >
+                  <option value="todo">To Do</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                <div className="md:col-span-2">
+                  <LabeledTextarea
+                    label="Task description"
+                    value={taskForm.description}
+                    onChange={(value) => setTaskForm((prev) => ({ ...prev, description: value }))}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!taskForm.title.trim() || !taskForm.ownerUserId}
+                    onClick={saveTaskFromTasksTab}
+                  >
+                    Create Task
+                  </Button>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {filteredTasks.length === 0 ? (
             <p className="text-sm text-slate-500">No tasks for selected filter.</p>
@@ -1944,135 +2006,269 @@ export function ProjectManagementTabs({
         </section>
       ) : null}
 
+      {activeWorkspaceTab === "risk_register" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">Risk Register</h4>
+              <p className="mt-1 text-xs text-slate-600">
+                Track project risks early. Click a row to view or edit details.
+              </p>
+            </div>
+            <Button type="button" variant="secondary" onClick={openNewRisk}>
+              Add Risk
+            </Button>
+          </div>
+          {(risks ?? []).length === 0 ? (
+            <p className="text-sm text-slate-500">No risks logged yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2">Title</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2">Likelihood</th>
+                    <th className="py-2">Impact</th>
+                    <th className="py-2">Owner</th>
+                    <th className="py-2">Target Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(risks ?? []).map((risk) => (
+                    <tr
+                      key={String(risk.id)}
+                      className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                      onClick={() => openEditRisk(risk)}
+                    >
+                      <td className="py-2 font-medium text-brand-700">{String(risk.risk_title ?? "-")}</td>
+                      <td className="py-2">{String(risk.status ?? "open")}</td>
+                      <td className="py-2">{String(risk.likelihood ?? "-")}</td>
+                      <td className="py-2">{String(risk.impact ?? "-")}</td>
+                      <td className="py-2">
+                        {userNameById.get(String(risk.owner_user_id ?? "")) ??
+                          String(risk.owner_user_id ?? "-")}
+                      </td>
+                      <td className="py-2">{formatDate(String(risk.target_resolution_date ?? ""))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {activeWorkspaceTab === "expenses" ? (
         <section className="rounded-md border border-slate-200 p-4">
           <h4 className="text-sm font-semibold text-slate-900">Project Expenses</h4>
           <p className="mt-1 text-xs text-slate-600">
-            Enter debits and credits for this project. Credits are required to be tied to a campaign.
+            Expenses are tracked as debits against project budget.
           </p>
 
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             <SummaryBox label="Total Debits" value={`$${expenseTotals.debits.toFixed(2)}`} tone="red" compact />
             <SummaryBox
-              label="Total Credits"
-              value={`$${expenseTotals.credits.toFixed(2)}`}
-              tone="green"
+              label="Project Budget"
+              value={`$${expenseTotals.approvedBudget.toFixed(2)}`}
+              tone="slate"
               compact
             />
             <SummaryBox
-              label="Net (Credits - Debits)"
-              value={`$${expenseTotals.net.toFixed(2)}`}
-              tone={expenseTotals.net >= 0 ? "green" : "amber"}
+              label="Budget Remaining"
+              value={`$${expenseTotals.remainingBudget.toFixed(2)}`}
+              tone={expenseTotals.remainingBudget >= 0 ? "green" : "red"}
               compact
             />
           </div>
+          <p className="mt-2 text-xs text-slate-600">
+            Budget utilization: {expenseTotals.spentPercent.toFixed(1)}%
+          </p>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-md border border-slate-200 p-3">
+          <section className="mt-4 rounded-md border border-slate-200 p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
               <h5 className="text-sm font-semibold text-slate-900">Expense Ledger</h5>
-              {(projectExpenses ?? []).length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">No expenses recorded yet.</p>
-              ) : (
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-600">
-                        <th className="py-2">Date</th>
-                        <th className="py-2">Type</th>
-                        <th className="py-2">Amount</th>
-                        <th className="py-2">Campaign</th>
-                        <th className="py-2">Description</th>
+              <Button type="button" variant="secondary" onClick={() => setShowExpenseModal(true)}>
+                Add Expense
+              </Button>
+            </div>
+            {(projectExpenses ?? []).length === 0 ? (
+              <p className="mt-2 text-sm text-slate-500">No expenses recorded yet.</p>
+            ) : (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-600">
+                      <th className="py-2">Date</th>
+                      <th className="py-2">Amount</th>
+                      <th className="py-2">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(projectExpenses ?? []).map((row) => (
+                      <tr key={String(row.id)} className="border-b border-slate-100">
+                        <td className="py-2">{formatDate(String(row.entry_date ?? ""))}</td>
+                        <td className="py-2">${Number(row.amount ?? 0).toFixed(2)}</td>
+                        <td className="py-2">{String(row.description ?? "-")}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {(projectExpenses ?? []).map((row) => (
-                        <tr key={String(row.id)} className="border-b border-slate-100">
-                          <td className="py-2">{formatDate(String(row.entry_date ?? ""))}</td>
-                          <td className="py-2 capitalize">{String(row.expense_type ?? "-")}</td>
-                          <td className="py-2">${Number(row.amount ?? 0).toFixed(2)}</td>
-                          <td className="py-2">
-                            {campaignNameById.get(String(row.campaign_id ?? "")) ??
-                              (String(row.expense_type ?? "") === "credit" ? "Unlinked" : "-")}
-                          </td>
-                          <td className="py-2">{String(row.description ?? "-")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-
-            <section className="rounded-md border border-slate-200 p-3">
-              <h5 className="text-sm font-semibold text-slate-900">Add Expense Entry</h5>
-              <div className="mt-2 grid gap-2">
-                <select
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={expenseForm.expenseType}
-                  onChange={(event) =>
-                    setExpenseForm((prev) => ({
-                      ...prev,
-                      expenseType: event.target.value as "debit" | "credit",
-                      campaignId: event.target.value === "credit" ? prev.campaignId : ""
-                    }))
-                  }
-                >
-                  <option value="debit">Debit</option>
-                  <option value="credit">Credit</option>
-                </select>
-                <Input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={expenseForm.amount}
-                  onChange={(event) =>
-                    setExpenseForm((prev) => ({ ...prev, amount: event.target.value }))
-                  }
-                  placeholder="Amount"
-                />
-                <Input
-                  type="date"
-                  value={expenseForm.entryDate}
-                  onChange={(event) =>
-                    setExpenseForm((prev) => ({ ...prev, entryDate: event.target.value }))
-                  }
-                />
-                <LabeledTextarea
-                  label="Description"
-                  value={expenseForm.description}
-                  onChange={(value) => setExpenseForm((prev) => ({ ...prev, description: value }))}
-                />
-                {expenseForm.expenseType === "credit" ? (
-                  <select
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={expenseForm.campaignId}
-                    onChange={(event) =>
-                      setExpenseForm((prev) => ({ ...prev, campaignId: event.target.value }))
-                    }
-                  >
-                    <option value="">Select campaign for credit</option>
-                    {(campaignOptions ?? []).map((campaign) => (
-                      <option key={String(campaign.id)} value={String(campaign.id)}>
-                        {String(campaign.name ?? campaign.id)}
-                      </option>
                     ))}
-                  </select>
-                ) : null}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </section>
+      ) : null}
+
+      {showExpenseModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h5 className="text-base font-semibold text-slate-900">Add Expense</h5>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => setShowExpenseModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid gap-2">
+              <Input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={expenseForm.amount}
+                onChange={(event) =>
+                  setExpenseForm((prev) => ({ ...prev, amount: event.target.value }))
+                }
+                placeholder="Amount"
+              />
+              <Input
+                type="date"
+                value={expenseForm.entryDate}
+                onChange={(event) =>
+                  setExpenseForm((prev) => ({ ...prev, entryDate: event.target.value }))
+                }
+              />
+              <LabeledTextarea
+                label="Description"
+                value={expenseForm.description}
+                onChange={(value) => setExpenseForm((prev) => ({ ...prev, description: value }))}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={Number(expenseForm.amount) <= 0}
+                onClick={saveExpenseEntry}
+              >
+                Save Expense
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showRiskModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h5 className="text-base font-semibold text-slate-900">
+                {editingRiskId ? "Edit Risk" : "New Risk"}
+              </h5>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                onClick={() => {
+                  setShowRiskModal(false);
+                  setEditingRiskId(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <Input
+                value={riskForm.riskTitle}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, riskTitle: event.target.value }))
+                }
+                placeholder="Risk title"
+              />
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={riskForm.status}
+                onChange={(event) => setRiskForm((prev) => ({ ...prev, status: event.target.value }))}
+              >
+                <option value="open">Open</option>
+                <option value="monitoring">Monitoring</option>
+                <option value="mitigated">Mitigated</option>
+                <option value="closed">Closed</option>
+              </select>
+              <Input
+                value={riskForm.likelihood}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, likelihood: event.target.value }))
+                }
+                placeholder="Likelihood (1-5)"
+              />
+              <Input
+                value={riskForm.impact}
+                onChange={(event) => setRiskForm((prev) => ({ ...prev, impact: event.target.value }))}
+                placeholder="Impact (1-5)"
+              />
+              <Input
+                type="date"
+                value={riskForm.targetResolutionDate}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, targetResolutionDate: event.target.value }))
+                }
+              />
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={riskForm.ownerUserId}
+                onChange={(event) =>
+                  setRiskForm((prev) => ({ ...prev, ownerUserId: event.target.value }))
+                }
+              >
+                <option value="">Risk owner (optional)</option>
+                {users.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>
+                    {user.display_name ?? user.user_id}
+                  </option>
+                ))}
+              </select>
+              <div className="md:col-span-2">
+                <LabeledTextarea
+                  label="Risk description"
+                  value={riskForm.riskDescription}
+                  onChange={(value) =>
+                    setRiskForm((prev) => ({ ...prev, riskDescription: value }))
+                  }
+                />
+              </div>
+              <div className="md:col-span-2">
+                <LabeledTextarea
+                  label="Mitigation plan"
+                  value={riskForm.mitigationPlan}
+                  onChange={(value) =>
+                    setRiskForm((prev) => ({ ...prev, mitigationPlan: value }))
+                  }
+                />
+              </div>
+              <div className="md:col-span-2">
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={
-                    Number(expenseForm.amount) <= 0 ||
-                    (expenseForm.expenseType === "credit" && !expenseForm.campaignId)
-                  }
-                  onClick={saveExpenseEntry}
+                  disabled={!riskForm.riskTitle.trim()}
+                  onClick={saveRiskEntry}
                 >
-                  Add Expense
+                  {editingRiskId ? "Save Risk" : "Create Risk"}
                 </Button>
               </div>
-            </section>
+            </div>
           </div>
-        </section>
+        </div>
       ) : null}
 
       {showNewStakeholder ? (

@@ -27,19 +27,6 @@ function isProjectExpensesSchemaMissingError(error: unknown) {
   );
 }
 
-function isPermissionOrSchemaError(error: unknown) {
-  if (!error || typeof error !== "object") return false;
-  const message = String((error as { message?: unknown }).message ?? "").toLowerCase();
-  const code = String((error as { code?: unknown }).code ?? "").toLowerCase();
-  return (
-    code === "42501" ||
-    code === "42p01" ||
-    code === "pgrst205" ||
-    message.includes("permission denied") ||
-    message.includes("schema cache")
-  );
-}
-
 function isBlank(value: string | null | undefined) {
   return !value || !value.trim();
 }
@@ -141,8 +128,7 @@ export async function getProject(projectId: string) {
     { data: decisions, error: decisionsError },
     { data: updates, error: updatesError },
     { data: review, error: reviewError },
-    { data: projectExpenses, error: projectExpensesError },
-    { data: campaigns, error: campaignsError }
+    { data: projectExpenses, error: projectExpensesError }
   ] =
     await Promise.all([
       supabase
@@ -243,12 +229,7 @@ export async function getProject(projectId: string) {
         .eq("organization_id", context.organizationId)
         .eq("project_id", projectId)
         .order("entry_date", { ascending: false })
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("campaigns")
-        .select("id, name, status")
-        .eq("organization_id", context.organizationId)
-        .order("name", { ascending: true })
+        .order("created_at", { ascending: false })
     ]);
 
   const taskIds = (tasks ?? []).map((task) => String(task.id));
@@ -278,9 +259,6 @@ export async function getProject(projectId: string) {
   if (reviewError) throw reviewError;
   if (projectExpensesError && !isProjectExpensesSchemaMissingError(projectExpensesError)) {
     throw projectExpensesError;
-  }
-  if (campaignsError && !isPermissionOrSchemaError(campaignsError)) {
-    throw campaignsError;
   }
 
   const now = new Date();
@@ -402,7 +380,6 @@ export async function getProject(projectId: string) {
       projectExpensesError && isProjectExpensesSchemaMissingError(projectExpensesError)
         ? []
         : (projectExpenses ?? []),
-    campaignOptions: campaignsError && isPermissionOrSchemaError(campaignsError) ? [] : (campaigns ?? []),
     taskDependencies: taskDependencies ?? [],
     dashboard: {
       lifecycleStatus: String(project?.lifecycle_status ?? project?.status ?? "idea"),

@@ -137,11 +137,10 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("upsert_project_expense"),
     id: z.string().uuid().optional(),
-    expenseType: z.enum(["debit", "credit"]),
+    expenseType: z.literal("debit"),
     amount: z.coerce.number().positive(),
     entryDate: z.string().optional(),
-    description: z.string().optional(),
-    campaignId: z.string().uuid().nullable().optional()
+    description: z.string().optional()
   }),
   z.object({
     action: z.literal("upsert_resource"),
@@ -498,29 +497,16 @@ export async function PATCH(request: Request, { params }: RouteProps) {
       }
 
       if (action.action === "upsert_project_expense") {
-        if (action.expenseType === "credit" && !action.campaignId) {
-          return NextResponse.json(
-            { message: "Credits must be tied to a campaign." },
-            { status: 400 }
-          );
-        }
-        if (action.expenseType === "debit" && action.campaignId) {
-          return NextResponse.json(
-            { message: "Debits cannot be tied to a campaign." },
-            { status: 400 }
-          );
-        }
-
         const entryDate = action.entryDate || new Date().toISOString().slice(0, 10);
         const expensePayload = {
           tenant_id: context.organizationId,
           organization_id: context.organizationId,
           project_id: id,
-          expense_type: action.expenseType,
+          expense_type: "debit",
           amount: action.amount,
           entry_date: entryDate,
           description: action.description ?? null,
-          campaign_id: action.expenseType === "credit" ? action.campaignId ?? null : null,
+          campaign_id: null,
           updated_by: context.userId
         };
 
@@ -560,9 +546,8 @@ export async function PATCH(request: Request, { params }: RouteProps) {
           targetEntityId: action.id ?? id,
           metadata: {
             projectId: id,
-            expenseType: action.expenseType,
-            amount: action.amount,
-            campaignId: action.campaignId ?? null
+            expenseType: "debit",
+            amount: action.amount
           }
         });
 
