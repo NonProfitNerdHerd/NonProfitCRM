@@ -47,7 +47,7 @@ export function MyTasksSideRail({
   useEffect(() => {
     setTaskRows(tasks);
   }, [tasks]);
-  const shouldHideRail = pathname.includes("/staff/tasks/");
+  const isTaskDetailPage = pathname.includes("/staff/tasks/");
   const tenantPrefix = useMemo(() => {
     const staffIndex = pathname.indexOf("/staff");
     return staffIndex > 0 ? pathname.slice(0, staffIndex) : "";
@@ -116,12 +116,12 @@ export function MyTasksSideRail({
     }
   }
 
-  if (shouldHideRail) return null;
-
   return (
     <>
       <div
-        className="fixed bottom-0 right-0 top-32 z-40 flex w-24 min-w-[88px] cursor-pointer flex-col border-l border-slate-200 bg-white/95 px-2 py-4 shadow-sm print:hidden md:top-24"
+        className={`fixed bottom-0 top-32 z-40 flex w-24 min-w-[88px] cursor-pointer flex-col border-l border-slate-200 bg-white/95 px-2 py-4 shadow-sm print:hidden md:top-24 ${
+          isTaskDetailPage ? "right-24 md:right-28" : "right-0"
+        }`}
         role="button"
         tabIndex={0}
         onClick={() => setIsOpen(true)}
