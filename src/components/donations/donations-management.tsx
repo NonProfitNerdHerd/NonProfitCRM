@@ -6,10 +6,13 @@ import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TagMultiSelectAutocomplete, type TagMultiSelectOption } from "@/components/tags/tag-multi-select-autocomplete";
-import { searchTagAutocompleteOptions } from "@/lib/tags/tag-autocomplete-client";
+import {
+  ensureTagAutocompleteOption,
+  searchTagAutocompleteOptions
+} from "@/lib/tags/tag-autocomplete-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
-type CampaignOption = { id: string; name: string };
+type CampaignOption = { id: string; name: string; label?: string };
 type DonationRow = Record<string, unknown>;
 type Mode = "create" | "info";
 
@@ -47,6 +50,12 @@ type NewDonorForm = {
   email: string;
   phone: string;
   donorType: "Personal" | "Organization";
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  tags: TagMultiSelectOption[];
 };
 
 const EMPTY_DONATION_FORM: DonationForm = {
@@ -70,7 +79,13 @@ const EMPTY_NEW_DONOR_FORM: NewDonorForm = {
   displayName: "",
   email: "",
   phone: "",
-  donorType: "Personal"
+  donorType: "Personal",
+  addressLine1: "",
+  addressLine2: "",
+  city: "",
+  state: "",
+  postalCode: "",
+  tags: []
 };
 
 function donorLabel(contact: DonorOption) {
@@ -117,6 +132,10 @@ function campaignDisplayFromDonation(donation: DonationRow) {
     .filter(Boolean) as string[];
   const fallbackCampaign = Array.isArray(donation.campaigns) ? donation.campaigns[0] : donation.campaigns;
   return allocationNames.length > 0 ? allocationNames.join(", ") : String(fallbackCampaign?.name ?? "-");
+}
+
+function campaignOptionLabel(campaign: CampaignOption) {
+  return campaign.label || campaign.name;
 }
 
 export function DonationsManagement({
@@ -198,6 +217,38 @@ export function DonationsManagement({
     XLSX.utils.book_append_sheet(workbook, worksheet, "Donations");
     const dateStamp = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(workbook, `donations-results-${dateStamp}.xlsx`);
+  }
+
+  function exportVisibleRowsToCsv() {
+    const dataset = visibleRows.map((donation) => {
+      const donor = getDonorFromRow(donation);
+      const donorName =
+        fixedContact?.displayName ||
+        `${String(donor?.first_name ?? "")} ${String(donor?.last_name ?? "")}`.trim() ||
+        "-";
+      return {
+        "Donation Date": formatDate(String(donation.donation_date ?? "")),
+        Donor: donorName || "-",
+        Campaigns: campaignDisplayFromDonation(donation),
+        Amount: Number(donation.amount ?? 0),
+        Payment: String(donation.payment_type ?? "-"),
+        Reference: String(donation.check_number ?? donation.transaction_id ?? "-"),
+        "Created By": String(donation.created_by ?? "-"),
+        "Entered At": formatDate(String(donation.created_at ?? ""))
+      };
+    });
+    const worksheet = XLSX.utils.json_to_sheet(dataset);
+    const csv = XLSX.utils.sheet_to_csv(worksheet);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    anchor.href = url;
+    anchor.setAttribute("download", `donations-results-${dateStamp}.csv`);
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   }
 
   async function refreshRows(activeFilters = filters) {
@@ -374,9 +425,19 @@ export function DonationsManagement({
         preferred_name: displayName || undefined,
         email: newDonorForm.email.trim() || undefined,
         phone: newDonorForm.phone.trim() || undefined,
+        address_line_1: newDonorForm.addressLine1.trim() || undefined,
+        address_line_2: newDonorForm.addressLine2.trim() || undefined,
+        city: newDonorForm.city.trim() || undefined,
+        state: newDonorForm.state.trim() || undefined,
+        postal_code: newDonorForm.postalCode.trim() || undefined,
         organization_name: newDonorForm.donorType === "Organization" ? displayName || firstName : "",
+        entity_type: newDonorForm.donorType === "Organization" ? "organization" : "person",
+        tracking_status: "donor",
         donor_status: "active",
-        member_status: "none"
+        member_status: "none",
+        tag_ids: newDonorForm.tags
+          .map((tag) => String(tag.id ?? "").trim())
+          .filter(Boolean)
       })
     });
     const payload = await response.json().catch(() => null);
@@ -479,7 +540,7 @@ export function DonationsManagement({
               <option value="">All Campaigns</option>
               {campaigns.map((campaign) => (
                 <option key={campaign.id} value={campaign.id}>
-                  {campaign.name}
+                  {campaignOptionLabel(campaign)}
                 </option>
               ))}
             </select>
@@ -544,6 +605,9 @@ export function DonationsManagement({
             <Button type="button" variant="secondary" onClick={exportVisibleRowsToExcel}>
               Export Excel
             </Button>
+            <Button type="button" variant="secondary" onClick={exportVisibleRowsToCsv}>
+              Export CSV
+            </Button>
             <label className="text-xs font-medium text-slate-600">Show</label>
             <select
               className="rounded-md border border-slate-300 px-2 py-1 text-sm"
@@ -563,7 +627,7 @@ export function DonationsManagement({
             <thead>
               <tr className="border-b border-slate-200 text-slate-600">
                 <th className="py-2">Donation Information</th>
-                <th className="py-2">Date</th>
+                <th className="py-2">Donation Date</th>
                 <th className="py-2">Donor</th>
                 <th className="py-2">Campaign Allocations</th>
                 <th className="py-2">Amount</th>
@@ -696,6 +760,34 @@ export function DonationsManagement({
                     <div><label className="mb-1 block text-sm font-medium text-slate-700">Last Name</label><Input value={newDonorForm.lastName} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, lastName: event.target.value }))} /></div>
                     <div><label className="mb-1 block text-sm font-medium text-slate-700">Email</label><Input type="email" value={newDonorForm.email} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, email: event.target.value }))} /></div>
                     <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone</label><Input value={newDonorForm.phone} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, phone: event.target.value }))} /></div>
+                    <div><label className="mb-1 block text-sm font-medium text-slate-700">Address Line 1</label><Input value={newDonorForm.addressLine1} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, addressLine1: event.target.value }))} /></div>
+                    <div><label className="mb-1 block text-sm font-medium text-slate-700">Address Line 2</label><Input value={newDonorForm.addressLine2} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, addressLine2: event.target.value }))} /></div>
+                    <div><label className="mb-1 block text-sm font-medium text-slate-700">City</label><Input value={newDonorForm.city} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, city: event.target.value }))} /></div>
+                    <div><label className="mb-1 block text-sm font-medium text-slate-700">State</label><Input value={newDonorForm.state} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, state: event.target.value }))} /></div>
+                    <div><label className="mb-1 block text-sm font-medium text-slate-700">Postal Code</label><Input value={newDonorForm.postalCode} onChange={(event) => setNewDonorForm((prev) => ({ ...prev, postalCode: event.target.value }))} /></div>
+                    <div className="md:col-span-2">
+                      <TagMultiSelectAutocomplete
+                        label="Tags"
+                        selected={newDonorForm.tags}
+                        onChange={(next) => setNewDonorForm((prev) => ({ ...prev, tags: next }))}
+                        loadOptions={(value) =>
+                          searchTagAutocompleteOptions({
+                            query: value,
+                            activeOnly: true,
+                            limit: 20,
+                            module: "contacts"
+                          })
+                        }
+                        onCreateOption={(value) =>
+                          ensureTagAutocompleteOption({
+                            name: value,
+                            module: "contacts"
+                          })
+                        }
+                        placeholder="Add donor tags"
+                        emptyHint="No matching tags."
+                      />
+                    </div>
                   </div>
                 )}
               </section>
@@ -708,10 +800,7 @@ export function DonationsManagement({
                   <div><label className="mb-1 block text-sm font-medium text-slate-700">Payment Type</label><select className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.paymentType} onChange={(event) => setForm((prev) => ({ ...prev, paymentType: event.target.value as "Cash" | "Check" | "Card", checkNumber: "", transactionId: "" }))} disabled={!editable}><option value="Cash">Cash</option><option value="Check">Check</option><option value="Card">Card / Credit</option></select></div>
                   {form.paymentType === "Check" ? <div><label className="mb-1 block text-sm font-medium text-slate-700">Check Number</label><Input value={form.checkNumber} onChange={(event) => setForm((prev) => ({ ...prev, checkNumber: event.target.value }))} required={editable} disabled={!editable} /></div> : null}
                   {form.paymentType === "Card" ? <div><label className="mb-1 block text-sm font-medium text-slate-700">Transaction ID</label><Input value={form.transactionId} onChange={(event) => setForm((prev) => ({ ...prev, transactionId: event.target.value }))} required={editable} disabled={!editable} /></div> : null}
-                  <div><label className="mb-1 block text-sm font-medium text-slate-700">Source System</label><Input value={form.sourceSystem} onChange={(event) => setForm((prev) => ({ ...prev, sourceSystem: event.target.value }))} disabled={!editable} /></div>
-                  <div><label className="mb-1 block text-sm font-medium text-slate-700">External Donation ID</label><Input value={form.externalDonationId} onChange={(event) => setForm((prev) => ({ ...prev, externalDonationId: event.target.value }))} disabled={!editable} /></div>
-                  <div><label className="mb-1 block text-sm font-medium text-slate-700">Related Organization ID (optional)</label><Input value={form.organizationId} onChange={(event) => setForm((prev) => ({ ...prev, organizationId: event.target.value }))} disabled={!editable} /></div>
-                  <div className="flex items-center gap-2"><input id="recurring-donation" type="checkbox" checked={form.recurring} onChange={(event) => setForm((prev) => ({ ...prev, recurring: event.target.checked }))} disabled={!editable} /><label htmlFor="recurring-donation" className="text-sm font-medium text-slate-700">Recurring Donation</label></div>
+                  <div><label className="mb-1 block text-sm font-medium text-slate-700">Source System</label><Input value={form.sourceSystem} readOnly disabled /></div>
                   <div className="md:col-span-2"><label className="mb-1 block text-sm font-medium text-slate-700">Memo / Notes</label><textarea className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.memo} onChange={(event) => setForm((prev) => ({ ...prev, memo: event.target.value }))} disabled={!editable} /></div>
                 </div>
               </section>
@@ -726,7 +815,7 @@ export function DonationsManagement({
                     <div key={`${index}-${allocation.campaignId}`} className="grid gap-2 md:grid-cols-3">
                       <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={allocation.campaignId} onChange={(event) => setForm((prev) => ({ ...prev, allocations: prev.allocations.map((row, rowIndex) => rowIndex === index ? { ...row, campaignId: event.target.value } : row) }))} disabled={!editable}>
                         <option value="">Select Campaign</option>
-                        {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+                        {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaignOptionLabel(campaign)}</option>)}
                       </select>
                       <Input type="number" step="0.01" value={allocation.amount} onChange={(event) => setForm((prev) => ({ ...prev, allocations: prev.allocations.map((row, rowIndex) => rowIndex === index ? { ...row, amount: event.target.value } : row) }))} placeholder="Allocation Amount" disabled={!editable} />
                       <Button type="button" variant="secondary" disabled={!editable} onClick={() => setForm((prev) => ({ ...prev, allocations: prev.allocations.length === 1 ? prev.allocations : prev.allocations.filter((_, rowIndex) => rowIndex !== index) }))}>Remove</Button>

@@ -30,14 +30,22 @@ export default async function FinancialDonationsPage({ searchParams }: PageProps
             .filter(Boolean)
         : []
     }),
-    listCampaigns({ status: "All" })
+    listCampaigns({ status: "Active" })
   ]);
 
   return (
     <Card>
       <DonationsManagement
         initialDonations={donations as Array<Record<string, unknown>>}
-        campaigns={campaigns.map((campaign) => ({ id: String(campaign.id), name: String(campaign.name) }))}
+        campaigns={campaigns.map((campaign) => {
+          const isChild = Boolean(campaign.is_child);
+          const prefix = isChild ? "-- " : "- ";
+          return {
+            id: String(campaign.id),
+            name: String(campaign.name),
+            label: `${prefix}${String(campaign.name)}`
+          };
+        })}
         detailBasePath="/staff/financial/donations"
         campaignBasePath="/staff/financial/campaigns"
       />

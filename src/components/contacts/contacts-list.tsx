@@ -58,6 +58,7 @@ export function ContactsList({
   const [selectedTags, setSelectedTags] = useState<TagMultiSelectOption[]>([]);
   const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
   const [page, setPage] = useState(1);
+  const showOrganizationColumn = !["donors", "contacts", "personal", "organizations"].includes(mode);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(Math.max(totalCount, 0) / pageSize)), [totalCount, pageSize]);
 
@@ -193,7 +194,7 @@ export function ContactsList({
           <thead>
             <tr className="border-b border-slate-200 text-slate-600">
               <th className="py-2">Name</th>
-              <th className="py-2">Organization</th>
+              {showOrganizationColumn ? <th className="py-2">Organization</th> : null}
               <th className="py-2">Email</th>
               <th className="py-2">Phone</th>
               <th className="py-2">City</th>
@@ -212,7 +213,9 @@ export function ContactsList({
                       {toText(contact.first_name)} {toText(contact.last_name)}
                     </Link>
                   </td>
-                  <td className="py-2">{toText(contact.organization_name) || "-"}</td>
+                  {showOrganizationColumn ? (
+                    <td className="py-2">{toText(contact.organization_name) || "-"}</td>
+                  ) : null}
                   <td className="py-2">{toText(contact.email) || "-"}</td>
                   <td className="py-2">{toText(contact.phone) || "-"}</td>
                   <td className="py-2">{toText(contact.city) || "-"}</td>

@@ -102,7 +102,7 @@ export function PieChart({
         ) : null}
       </div>
 
-      <div className="flex min-h-0 flex-1 items-start gap-4">
+      <div className="flex min-h-0 flex-1 items-stretch gap-4">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className={
@@ -131,7 +131,7 @@ export function PieChart({
           })}
         </svg>
 
-        <div className={`min-w-0 flex-1 overflow-auto ${legendText}`}>
+        <div className={`h-full min-w-0 flex-1 overflow-y-auto pr-1 ${legendText}`}>
           <div className="space-y-2">
             {paths.map((slice) => (
               <div key={`${slice.label}-legend`} className="rounded-md border border-slate-100 p-2">
