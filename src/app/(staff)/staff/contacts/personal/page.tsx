@@ -11,12 +11,7 @@ export default async function PersonalContactsPage() {
         title="Contacts"
         subtitle="People with tracking status Lead or Non-Lead"
       />
-      <ContactsList
-        title="Contacts"
-        subtitle="Entity Type: Person • Tracking Status: Lead/Non-Lead"
-        contacts={contacts as Array<Record<string, unknown>>}
-        mode="contacts"
-      />
+      <ContactsList contacts={contacts as Array<Record<string, unknown>>} mode="contacts" />
     </Card>
   );
 }

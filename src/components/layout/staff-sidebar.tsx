@@ -31,8 +31,8 @@ const BASE_MENU: MenuItem[] = [
       pathname.startsWith("/staff/organizations"),
     children: [
       { href: "/staff/donors", label: "Donors" },
-      { href: "/staff/contacts/personal", label: "Contacts" },
       { href: "/staff/donor-organizations", label: "Donor Organizations" },
+      { href: "/staff/contacts/personal", label: "Contacts" },
       { href: "/staff/organizations", label: "Organizations" },
       { href: "/staff/contacts/mail-builder", label: "Mail Builder" }
     ]

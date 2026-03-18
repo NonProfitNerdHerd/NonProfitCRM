@@ -16,13 +16,7 @@ export default async function ContactsPage() {
         subtitle="All person and organization records"
       />
       <ContactsAnalyticsDashboard initial={analytics} />
-      <ContactsList
-        title="All Contacts"
-        subtitle="Unfiltered directory of contacts"
-        contacts={contacts as Array<Record<string, unknown>>}
-        mode="all"
-        showMailBuilderLink
-      />
+      <ContactsList contacts={contacts as Array<Record<string, unknown>>} mode="all" showMailBuilderLink />
     </Card>
   );
 }

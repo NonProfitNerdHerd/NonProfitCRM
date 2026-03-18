@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,34 +33,39 @@ function toText(value: unknown) {
 }
 
 export function ContactsList({
-  title,
-  subtitle,
   contacts,
   mode = "all",
   showMailBuilderLink = false
 }: {
-  title: string;
-  subtitle: string;
   contacts: Array<Record<string, unknown>>;
   mode?: ContactMode;
   showMailBuilderLink?: boolean;
 }) {
   const [rows, setRows] = useState<ContactRow[]>(contacts as ContactRow[]);
+  const [totalCount, setTotalCount] = useState<number>((contacts as ContactRow[]).length);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedTagId, setSelectedTagId] = useState("");
   const [availableTags, setAvailableTags] = useState<Array<{ id: string; path: string }>>([]);
+  const [pageSize, setPageSize] = useState<25 | 50 | 100>(25);
+  const [page, setPage] = useState(1);
+
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(Math.max(totalCount, 0) / pageSize)), [totalCount, pageSize]);
 
   useEffect(() => {
     setRows(contacts as ContactRow[]);
+    setTotalCount((contacts as ContactRow[]).length);
   }, [contacts]);
 
   useEffect(() => {
     void loadTagOptions();
-    void applyFilters();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    void fetchRows(page, pageSize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, page, pageSize]);
 
   async function loadTagOptions() {
     const response = await fetch(
@@ -72,12 +77,13 @@ export function ContactsList({
     setAvailableTags(tags);
   }
 
-  async function applyFilters() {
+  async function fetchRows(nextPage = page, nextPageSize = pageSize) {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
     params.set("mode", mode);
-    params.set("limit", "200");
+    params.set("offset", String((nextPage - 1) * nextPageSize));
+    params.set("limit", String(nextPageSize));
     if (query.trim()) params.set("q", query.trim());
     if (selectedTagId) {
       params.set("tagIds", selectedTagId);
@@ -93,16 +99,21 @@ export function ContactsList({
       return;
     }
     setRows((payload?.contacts ?? []) as ContactRow[]);
+    setTotalCount(Number(payload?.totalCount ?? 0));
     setLoading(false);
+  }
+
+  async function applyFilters() {
+    if (page !== 1) {
+      setPage(1);
+      return;
+    }
+    await fetchRows(1, pageSize);
   }
 
   return (
     <div className="space-y-3">
-      <div className="mb-1 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          <p className="text-sm text-slate-600">{subtitle}</p>
-        </div>
+      <div className="mb-1 flex items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           {showMailBuilderLink ? (
             <Link
@@ -146,6 +157,31 @@ export function ContactsList({
       </div>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-slate-600">
+          Showing {rows.length === 0 ? 0 : (page - 1) * pageSize + 1}–
+          {Math.min(page * pageSize, totalCount)} of {totalCount}
+        </p>
+        <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+          <span>Rows</span>
+          <select
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+            value={String(pageSize)}
+            onChange={(event) => {
+              const nextSize = Number(event.target.value);
+              if (nextSize === 25 || nextSize === 50 || nextSize === 100) {
+                setPageSize(nextSize);
+                setPage(1);
+              }
+            }}
+          >
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+      </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -202,6 +238,28 @@ export function ContactsList({
       {rows.length === 0 ? (
         <p className="mt-3 text-sm text-slate-500">No contacts found for this segment.</p>
       ) : null}
+
+      <div className="mt-2 flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+          disabled={loading || page <= 1}
+        >
+          Previous
+        </Button>
+        <span className="text-sm text-slate-600">
+          Page {page} of {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+          disabled={loading || page >= totalPages}
+        >
+          Next
+        </Button>
+      </div>
     </div>
   );
 }

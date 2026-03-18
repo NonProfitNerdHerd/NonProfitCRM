@@ -11,11 +11,7 @@ export default async function OrganizationalContactsPage() {
         title="Organizational Contacts"
         subtitle="Contact records associated with organizations"
       />
-      <ContactsList
-        title="Organizational Contacts"
-        subtitle="Showing organization contact records only"
-        contacts={contacts as Array<Record<string, unknown>>}
-      />
+      <ContactsList contacts={contacts as Array<Record<string, unknown>>} />
     </Card>
   );
 }
