@@ -139,17 +139,6 @@ async function resolveDescendantMap(
     } catch (error) {
       // Graceful fallback when descendant RPC is unavailable in an environment.
       // We still allow exact-tag filtering instead of failing the whole query.
-      const message = toText(
-        (error as { message?: string; details?: string; hint?: string })?.message ||
-          (error as { details?: string })?.details ||
-          (error as { hint?: string })?.hint
-      ).toLowerCase();
-      const canFallback =
-        message.includes("collect_descendant_tag_ids") ||
-        message.includes("does not exist") ||
-        message.includes("permission") ||
-        message.includes("not allowed");
-      if (!canFallback) throw error;
       byRoot.set(tagId, new Set([tagId]));
     }
   }
@@ -801,7 +790,7 @@ export async function resolveContactIdsForFilter(
 
   let query = supabase
     .from("contacts_safe_view")
-    .select("id,created_by")
+    .select("id")
     .eq("organization_id", context.organizationId)
     .order("last_name", { ascending: true })
     .limit(limit);
@@ -829,8 +818,7 @@ export async function resolveContactIdsForFilter(
   const { data, error } = await query;
   if (error) throw error;
   const contactRows = (data ?? []).map((row) => ({
-    id: toText(row.id),
-    created_by: toText(row.created_by) || null
+    id: toText(row.id)
   }));
 
   let filteredIds = await filterContactIdsByTagFilter(
@@ -841,7 +829,15 @@ export async function resolveContactIdsForFilter(
 
   const roleKey = await getUserRoleKey(context.organizationId);
   if (options?.enforceDataEntryOwnership !== false && roleKey === "data_entry") {
-    const ownershipMap = new Map(contactRows.map((row) => [row.id, row.created_by]));
+    const { data: ownershipRows, error: ownershipError } = await supabase
+      .from("contacts")
+      .select("id,created_by")
+      .eq("organization_id", context.organizationId)
+      .in("id", filteredIds);
+    if (ownershipError) throw ownershipError;
+    const ownershipMap = new Map(
+      (ownershipRows ?? []).map((row) => [toText(row.id), toText(row.created_by)])
+    );
     filteredIds = filteredIds.filter((contactId) => ownershipMap.get(contactId) === context.userId);
   }
 

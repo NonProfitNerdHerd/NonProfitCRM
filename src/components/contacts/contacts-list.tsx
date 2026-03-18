@@ -244,7 +244,7 @@ export function ContactsList({
         <p className="mt-3 text-sm text-slate-500">No contacts found for this segment.</p>
       ) : null}
 
-      <div className="mt-2 flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+      <div className="mt-2 flex items-center justify-center gap-2 border-t border-slate-200 pt-3">
         <Button
           type="button"
           variant="secondary"
