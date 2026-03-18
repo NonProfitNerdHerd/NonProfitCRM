@@ -25,7 +25,7 @@ export default async function TaskDetailPage({ params }: PageProps) {
         <Link
           href={
             task.project_id
-              ? `/staff/projects/management/${String(task.project_id)}`
+              ? `/staff/projects/management/${String(task.project_id)}?tab=tasks`
               : "/staff/projects/management"
           }
           className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

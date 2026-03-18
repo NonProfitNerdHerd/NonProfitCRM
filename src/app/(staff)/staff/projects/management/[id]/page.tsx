@@ -7,11 +7,13 @@ import { ProjectManagementTabs } from "@/components/projects/project-management-
 
 type PageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 };
 
-export default async function ProjectManagementPage({ params }: PageProps) {
+export default async function ProjectManagementPage({ params, searchParams }: PageProps) {
   await requireStaffPermission("can_view_dashboard");
   const { id } = await params;
+  const query = await searchParams;
   const [
     {
       project,
@@ -67,6 +69,7 @@ export default async function ProjectManagementPage({ params }: PageProps) {
         dashboard={dashboard ?? {}}
         guardrails={guardrails ?? {}}
         warnings={(warnings ?? []) as string[]}
+        initialWorkspaceTab={query.tab}
         users={users.map((user) => ({ user_id: user.user_id, display_name: user.display_name }))}
       />
     </Card>

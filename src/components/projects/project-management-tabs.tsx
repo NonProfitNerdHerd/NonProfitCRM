@@ -43,7 +43,14 @@ type LifecycleStatus =
   | "cancelled"
   | "archived";
 
-type ProjectWorkspaceTab = "dashboard" | "planning" | "tasks" | "risk_register" | "expenses";
+type ProjectWorkspaceTab =
+  | "dashboard"
+  | "planning"
+  | "tasks"
+  | "risk_register"
+  | "decision_log"
+  | "project_updates"
+  | "expenses";
 
 const PHASE_DETAILS: Array<{
   key: LifecyclePhase;
@@ -60,18 +67,18 @@ const PHASE_DETAILS: Array<{
     good: "A clear problem statement, measurable success criteria, and rough cost/time expectations."
   },
   {
-    key: "evaluation",
-    label: "2. Evaluation",
-    why: "Evaluation helps leaders prioritize limited nonprofit time, money, and people.",
-    skip: "If skipped, lower-impact work can crowd out urgent mission priorities.",
-    good: "Impact, effort, and risk scoring used to make transparent decisions."
-  },
-  {
     key: "planning",
-    label: "3. Planning",
+    label: "2. Planning",
     why: "Planning sets boundaries so the team knows what is in scope and what is not.",
     skip: "If skipped, scope creep grows quietly and burnout follows.",
     good: "Documented in-scope, out-of-scope, milestones, assumptions, and dependencies."
+  },
+  {
+    key: "evaluation",
+    label: "3. Evaluation",
+    why: "Evaluation helps leaders prioritize limited nonprofit time, money, and people.",
+    skip: "If skipped, lower-impact work can crowd out urgent mission priorities.",
+    good: "Impact, effort, and risk scoring used to make transparent decisions."
   },
   {
     key: "execution",
@@ -167,7 +174,8 @@ export function ProjectManagementTabs({
   taskDependencies,
   dashboard,
   guardrails,
-  warnings
+  warnings,
+  initialWorkspaceTab
 }: {
   project: Record<string, unknown>;
   tasks: Array<Record<string, unknown>>;
@@ -203,9 +211,24 @@ export function ProjectManagementTabs({
     blockedWithoutDependencyCount?: number;
   };
   warnings?: string[];
+  initialWorkspaceTab?: string;
 }) {
   const router = useRouter();
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<ProjectWorkspaceTab>("dashboard");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<ProjectWorkspaceTab>(() => {
+    const candidate = String(initialWorkspaceTab ?? "").toLowerCase();
+    const allowed: ProjectWorkspaceTab[] = [
+      "dashboard",
+      "planning",
+      "tasks",
+      "risk_register",
+      "decision_log",
+      "project_updates",
+      "expenses"
+    ];
+    return allowed.includes(candidate as ProjectWorkspaceTab)
+      ? (candidate as ProjectWorkspaceTab)
+      : "dashboard";
+  });
   const [activeTab, setActiveTab] = useState<LifecyclePhase>("idea");
   const [projectState, setProjectState] = useState(project);
   const [staffRows, setStaffRows] = useState(staff);
@@ -667,6 +690,18 @@ export function ProjectManagementTabs({
           Risk Register
         </TabButton>
         <TabButton
+          active={activeWorkspaceTab === "decision_log"}
+          onClick={() => setActiveWorkspaceTab("decision_log")}
+        >
+          Decision Log
+        </TabButton>
+        <TabButton
+          active={activeWorkspaceTab === "project_updates"}
+          onClick={() => setActiveWorkspaceTab("project_updates")}
+        >
+          Project Updates
+        </TabButton>
+        <TabButton
           active={activeWorkspaceTab === "expenses"}
           onClick={() => setActiveWorkspaceTab("expenses")}
         >
@@ -852,28 +887,36 @@ export function ProjectManagementTabs({
             Clear intake protects leadership credibility by defining success before spending.
           </p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <LabeledTextarea
-              label="Problem Statement"
-              value={intakeForm.problemStatement}
-              onChange={(value) => setIntakeForm((prev) => ({ ...prev, problemStatement: value }))}
-            />
-            <LabeledTextarea
-              label="Business Justification"
-              value={intakeForm.businessJustification}
-              onChange={(value) =>
-                setIntakeForm((prev) => ({ ...prev, businessJustification: value }))
-              }
-            />
-            <LabeledTextarea
-              label="Expected Outcomes"
-              value={intakeForm.expectedOutcomes}
-              onChange={(value) => setIntakeForm((prev) => ({ ...prev, expectedOutcomes: value }))}
-            />
-            <LabeledTextarea
-              label="Success Criteria (Measurable)"
-              value={intakeForm.successCriteria}
-              onChange={(value) => setIntakeForm((prev) => ({ ...prev, successCriteria: value }))}
-            />
+            <div className="md:col-span-2">
+              <LabeledTextarea
+                label="Problem Statement"
+                value={intakeForm.problemStatement}
+                onChange={(value) => setIntakeForm((prev) => ({ ...prev, problemStatement: value }))}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <LabeledTextarea
+                label="Business Justification"
+                value={intakeForm.businessJustification}
+                onChange={(value) =>
+                  setIntakeForm((prev) => ({ ...prev, businessJustification: value }))
+                }
+              />
+            </div>
+            <div className="md:col-span-2">
+              <LabeledTextarea
+                label="Expected Outcomes"
+                value={intakeForm.expectedOutcomes}
+                onChange={(value) => setIntakeForm((prev) => ({ ...prev, expectedOutcomes: value }))}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <LabeledTextarea
+                label="Success Criteria (Measurable)"
+                value={intakeForm.successCriteria}
+                onChange={(value) => setIntakeForm((prev) => ({ ...prev, successCriteria: value }))}
+              />
+            </div>
             <Input
               value={intakeForm.roughCostEstimate}
               onChange={(event) =>
@@ -989,7 +1032,7 @@ export function ProjectManagementTabs({
           <p className="mt-1 text-xs text-slate-600">
             Out-of-scope is required because it protects your team from unplanned expansion.
           </p>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid gap-3">
             <LabeledTextarea
               label="In Scope"
               value={scopeForm.inScope}
@@ -1010,13 +1053,11 @@ export function ProjectManagementTabs({
               value={scopeForm.constraints}
               onChange={(value) => setScopeForm((prev) => ({ ...prev, constraints: value }))}
             />
-            <div className="md:col-span-2">
-              <LabeledTextarea
-                label="Dependencies"
-                value={scopeForm.dependencies}
-                onChange={(value) => setScopeForm((prev) => ({ ...prev, dependencies: value }))}
-              />
-            </div>
+            <LabeledTextarea
+              label="Dependencies"
+              value={scopeForm.dependencies}
+              onChange={(value) => setScopeForm((prev) => ({ ...prev, dependencies: value }))}
+            />
           </div>
           <Button
             className="mt-3"
@@ -1027,7 +1068,7 @@ export function ProjectManagementTabs({
             Save Scope
           </Button>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="mt-4 space-y-4">
             <section className="rounded-md border border-slate-200 p-3">
               <h5 className="text-sm font-semibold text-slate-900">Milestones</h5>
               <p className="mt-1 text-xs text-slate-600">
@@ -1442,9 +1483,9 @@ export function ProjectManagementTabs({
 
       {activeTab === "monitoring" ? (
         <section className="rounded-md border border-slate-200 p-4">
-          <h4 className="text-sm font-semibold text-slate-900">Budget, Decisions, and Updates</h4>
+          <h4 className="text-sm font-semibold text-slate-900">Budget Monitoring</h4>
           <p className="mt-1 text-xs text-slate-600">
-            Monitoring variance and communication protects donor trust and team alignment.
+            Monitoring variance protects donor trust and team alignment.
           </p>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <section className="rounded-md border border-slate-200 p-3">
@@ -1493,82 +1534,6 @@ export function ProjectManagementTabs({
                   }
                 >
                   Save Budget
-                </Button>
-              </div>
-            </section>
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-md border border-slate-200 p-3">
-              <h5 className="text-sm font-semibold text-slate-900">Decision Log</h5>
-              <p className="mt-1 text-xs text-slate-600">
-                When decisions are undocumented, institutional memory disappears.
-              </p>
-              <div className="mt-2 space-y-2">
-                {(decisionLog ?? []).map((decision) => (
-                  <div key={String(decision.id)} className="rounded-md border border-slate-100 p-2 text-xs">
-                    <p className="font-semibold text-slate-900">{String(decision.decision_summary ?? "-")}</p>
-                    <p className="text-slate-600">{formatDate(String(decision.decided_at ?? ""))}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2 grid gap-2">
-                <Input
-                  value={decisionForm.decisionSummary}
-                  onChange={(event) =>
-                    setDecisionForm((prev) => ({ ...prev, decisionSummary: event.target.value }))
-                  }
-                  placeholder="Decision summary"
-                />
-                <LabeledTextarea
-                  label="Decision details"
-                  value={decisionForm.decisionDetails}
-                  onChange={(value) =>
-                    setDecisionForm((prev) => ({ ...prev, decisionDetails: value }))
-                  }
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => saveAndRefresh({ action: "add_decision", ...decisionForm })}
-                >
-                  Add Decision
-                </Button>
-              </div>
-            </section>
-
-            <section className="rounded-md border border-slate-200 p-3">
-              <h5 className="text-sm font-semibold text-slate-900">Project Updates</h5>
-              <p className="mt-1 text-xs text-slate-600">
-                Regular updates reduce hallway confusion and email chaos.
-              </p>
-              <div className="mt-2 space-y-2">
-                {(updates ?? []).map((update) => (
-                  <div key={String(update.id)} className="rounded-md border border-slate-100 p-2 text-xs">
-                    <p className="font-semibold text-slate-900">{String(update.update_title ?? "-")}</p>
-                    <p className="text-slate-600">{formatDate(String(update.published_at ?? ""))}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2 grid gap-2">
-                <Input
-                  value={updateForm.updateTitle}
-                  onChange={(event) =>
-                    setUpdateForm((prev) => ({ ...prev, updateTitle: event.target.value }))
-                  }
-                  placeholder="Update title"
-                />
-                <LabeledTextarea
-                  label="Update details"
-                  value={updateForm.updateBody}
-                  onChange={(value) => setUpdateForm((prev) => ({ ...prev, updateBody: value }))}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => saveAndRefresh({ action: "add_update", ...updateForm })}
-                >
-                  Add Update
                 </Button>
               </div>
             </section>
@@ -2059,6 +2024,92 @@ export function ProjectManagementTabs({
         </section>
       ) : null}
 
+      {activeWorkspaceTab === "decision_log" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">Decision Log</h4>
+              <p className="mt-1 text-xs text-slate-600">
+                Document key decisions so institutional memory does not disappear.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {(decisionLog ?? []).map((decision) => (
+              <div key={String(decision.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                <p className="font-semibold text-slate-900">{String(decision.decision_summary ?? "-")}</p>
+                <p className="text-slate-600">{formatDate(String(decision.decided_at ?? ""))}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid gap-2">
+            <Input
+              value={decisionForm.decisionSummary}
+              onChange={(event) =>
+                setDecisionForm((prev) => ({ ...prev, decisionSummary: event.target.value }))
+              }
+              placeholder="Decision summary"
+            />
+            <LabeledTextarea
+              label="Decision details"
+              value={decisionForm.decisionDetails}
+              onChange={(value) => setDecisionForm((prev) => ({ ...prev, decisionDetails: value }))}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!decisionForm.decisionSummary.trim()}
+              onClick={() => saveAndRefresh({ action: "add_decision", ...decisionForm })}
+            >
+              Add Decision
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {activeWorkspaceTab === "project_updates" ? (
+        <section className="rounded-md border border-slate-200 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">Project Updates</h4>
+              <p className="mt-1 text-xs text-slate-600">
+                Publish concise updates to reduce confusion and keep stakeholders aligned.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {(updates ?? []).map((update) => (
+              <div key={String(update.id)} className="rounded-md border border-slate-100 p-2 text-xs">
+                <p className="font-semibold text-slate-900">{String(update.update_title ?? "-")}</p>
+                <p className="text-slate-600">{formatDate(String(update.published_at ?? ""))}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid gap-2">
+            <Input
+              value={updateForm.updateTitle}
+              onChange={(event) =>
+                setUpdateForm((prev) => ({ ...prev, updateTitle: event.target.value }))
+              }
+              placeholder="Update title"
+            />
+            <LabeledTextarea
+              label="Update details"
+              value={updateForm.updateBody}
+              onChange={(value) => setUpdateForm((prev) => ({ ...prev, updateBody: value }))}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!updateForm.updateTitle.trim() || !updateForm.updateBody.trim()}
+              onClick={() => saveAndRefresh({ action: "add_update", ...updateForm })}
+            >
+              Add Update
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
       {activeWorkspaceTab === "expenses" ? (
         <section className="rounded-md border border-slate-200 p-4">
           <h4 className="text-sm font-semibold text-slate-900">Project Expenses</h4>
@@ -2067,11 +2118,16 @@ export function ProjectManagementTabs({
           </p>
 
           <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <SummaryBox label="Total Debits" value={`$${expenseTotals.debits.toFixed(2)}`} tone="red" compact />
             <SummaryBox
               label="Project Budget"
               value={`$${expenseTotals.approvedBudget.toFixed(2)}`}
               tone="slate"
+              compact
+            />
+            <SummaryBox
+              label="Project Expenses"
+              value={`$${expenseTotals.debits.toFixed(2)}`}
+              tone="red"
               compact
             />
             <SummaryBox
