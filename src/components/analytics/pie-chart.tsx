@@ -49,7 +49,7 @@ export function PieChart({
   const radius = size === "expanded" ? 104 : 60;
   const cx = size === "expanded" ? 130 : 88;
   const cy = height / 2;
-  const containerHeight = size === "expanded" ? "h-[520px]" : "h-[220px]";
+  const containerHeight = size === "expanded" ? "h-[520px]" : "h-[300px]";
   const legendText = size === "expanded" ? "text-sm" : "text-xs";
 
   if (total <= 0 || slices.length === 0) {

@@ -51,6 +51,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
       title: (task.title as string | null | undefined) ?? null,
       due_date: (task.due_date as string | null | undefined) ?? null,
       status: (task.status as string | null | undefined) ?? null,
+      priority: (task.priority as string | null | undefined) ?? null,
       completed_at: (task.completed_at as string | null | undefined) ?? null,
       parent_task_id: (task.parent_task_id as string | null | undefined) ?? null,
       project_id: (task.project_id as string | null | undefined) ?? null,

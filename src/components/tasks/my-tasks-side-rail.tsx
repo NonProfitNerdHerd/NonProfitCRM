@@ -12,6 +12,7 @@ export type MyTasksSideRailItem = {
   title: string | null;
   due_date: string | null;
   status: string | null;
+  priority?: string | null;
   completed_at: string | null;
   parent_task_id: string | null;
   project_id: string | null;
@@ -31,12 +32,16 @@ export function MyTasksSideRail({
   tasks: MyTasksSideRailItem[];
   defaultProjectId?: string | null;
 }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [taskRows, setTaskRows] = useState(tasks);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [snoozeTarget, setSnoozeTarget] = useState<MyTasksSideRailItem | null>(null);
+  const [customSnoozeUntil, setCustomSnoozeUntil] = useState("");
+  const [snoozedUntilByTaskId, setSnoozedUntilByTaskId] = useState<Record<string, string>>({});
   const [createForm, setCreateForm] = useState({
     title: "",
     description: "",
@@ -47,17 +52,63 @@ export function MyTasksSideRail({
   useEffect(() => {
     setTaskRows(tasks);
   }, [tasks]);
-  const isTaskDetailPage = pathname.includes("/staff/tasks/");
   const tenantPrefix = useMemo(() => {
     const staffIndex = pathname.indexOf("/staff");
     return staffIndex > 0 ? pathname.slice(0, staffIndex) : "";
   }, [pathname]);
+  const snoozeStorageKey = useMemo(
+    () => `my-tasks-rail-snoozes:${tenantPrefix || "default"}`,
+    [tenantPrefix]
+  );
   const withTenantPrefix = (href: string) => `${tenantPrefix}${href}`;
 
-  const overdueCount = useMemo(() => taskRows.filter(isOverdueTask).length, [taskRows]);
+  useEffect(() => {
+    const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
+    return () => window.clearInterval(timerId);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(snoozeStorageKey);
+      if (!raw) {
+        setSnoozedUntilByTaskId({});
+        return;
+      }
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      const validEntries = Object.fromEntries(
+        Object.entries(parsed).filter(([, value]) => new Date(value).getTime() > Date.now())
+      );
+      setSnoozedUntilByTaskId(validEntries);
+    } catch {
+      setSnoozedUntilByTaskId({});
+    }
+  }, [snoozeStorageKey]);
+
+  useEffect(() => {
+    const validEntries = Object.fromEntries(
+      Object.entries(snoozedUntilByTaskId).filter(([, value]) => new Date(value).getTime() > nowMs)
+    );
+    if (Object.keys(validEntries).length !== Object.keys(snoozedUntilByTaskId).length) {
+      setSnoozedUntilByTaskId(validEntries);
+      return;
+    }
+    window.localStorage.setItem(snoozeStorageKey, JSON.stringify(validEntries));
+  }, [nowMs, snoozedUntilByTaskId, snoozeStorageKey]);
+
+  const visibleTasks = useMemo(
+    () =>
+      taskRows.filter((task) => {
+        const snoozedUntil = snoozedUntilByTaskId[task.id];
+        if (!snoozedUntil) return true;
+        return new Date(snoozedUntil).getTime() <= nowMs;
+      }),
+    [nowMs, snoozedUntilByTaskId, taskRows]
+  );
+
+  const overdueCount = useMemo(() => visibleTasks.filter(isOverdueTask).length, [visibleTasks]);
   const orderedTasks = useMemo(
     () =>
-      [...taskRows].sort((left, right) => {
+      [...visibleTasks].sort((left, right) => {
         const leftOverdue = isOverdueTask(left);
         const rightOverdue = isOverdueTask(right);
         if (leftOverdue !== rightOverdue) return leftOverdue ? -1 : 1;
@@ -65,7 +116,7 @@ export function MyTasksSideRail({
         const rightDue = right.due_date ? new Date(right.due_date).getTime() : Number.POSITIVE_INFINITY;
         return leftDue - rightDue;
       }),
-    [taskRows]
+    [visibleTasks]
   );
 
   async function createTaskFromRail(event: React.FormEvent) {
@@ -100,6 +151,7 @@ export function MyTasksSideRail({
           title: createForm.title.trim(),
           due_date: createForm.dueDate || null,
           status: "todo",
+          priority: createForm.priority,
           completed_at: null,
           parent_task_id: null,
           project_id: defaultProjectId ?? null,
@@ -116,12 +168,46 @@ export function MyTasksSideRail({
     }
   }
 
+  function applySnooze(until: Date) {
+    if (!snoozeTarget) return;
+    setSnoozedUntilByTaskId((prev) => ({
+      ...prev,
+      [snoozeTarget.id]: until.toISOString()
+    }));
+    setSnoozeTarget(null);
+    setCustomSnoozeUntil("");
+  }
+
+  function snoozeByHours(hours: number) {
+    const until = new Date(Date.now() + hours * 60 * 60 * 1000);
+    applySnooze(until);
+  }
+
+  function snoozeUntilNextMonday() {
+    const now = new Date();
+    const day = now.getDay();
+    const daysUntilMonday = ((8 - day) % 7) || 7;
+    const until = new Date(now);
+    until.setDate(now.getDate() + daysUntilMonday);
+    until.setHours(9, 0, 0, 0);
+    applySnooze(until);
+  }
+
+  function submitCustomSnooze(event: React.FormEvent) {
+    event.preventDefault();
+    if (!customSnoozeUntil) return;
+    const until = new Date(customSnoozeUntil);
+    if (Number.isNaN(until.getTime())) return;
+    applySnooze(until);
+  }
+
+  const isTaskDetailPage = /\/staff\/tasks\/[^/?#]+/.test(pathname);
+  if (isTaskDetailPage) return null;
+
   return (
     <>
       <div
-        className={`fixed bottom-0 top-32 z-40 flex w-24 min-w-[88px] cursor-pointer flex-col border-l border-slate-200 bg-white/95 px-2 py-4 shadow-sm print:hidden md:top-24 ${
-          isTaskDetailPage ? "right-24 md:right-28" : "right-0"
-        }`}
+        className="fixed bottom-0 right-0 top-0 z-40 flex w-24 min-w-[88px] cursor-pointer flex-col border-l border-slate-200 bg-white/95 px-2 py-4 shadow-sm print:hidden"
         role="button"
         tabIndex={0}
         onClick={() => setIsOpen(true)}
@@ -138,7 +224,7 @@ export function MyTasksSideRail({
         </div>
         <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-center">
           <p className="text-[10px] uppercase tracking-wide text-slate-500">Assigned</p>
-          <p className="text-lg font-semibold text-slate-900">{taskRows.length}</p>
+          <p className="text-lg font-semibold text-slate-900">{visibleTasks.length}</p>
         </div>
         <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-2 py-2 text-center">
           <p className="text-[10px] uppercase tracking-wide text-red-600">Overdue</p>
@@ -148,7 +234,7 @@ export function MyTasksSideRail({
       </div>
 
       {isOpen ? (
-        <div className="fixed inset-x-0 bottom-0 top-32 z-50 print:hidden md:top-24">
+        <div className="fixed inset-x-0 bottom-0 top-0 z-50 print:hidden">
           <button
             type="button"
             aria-label="Close my tasks panel backdrop"
@@ -160,7 +246,7 @@ export function MyTasksSideRail({
               <div>
                 <h4 className="text-base font-semibold text-slate-900">My Tasks</h4>
                 <p className="text-xs text-slate-500">
-                  {taskRows.length} assigned • {overdueCount} overdue
+                  {visibleTasks.length} assigned • {overdueCount} overdue
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -261,7 +347,8 @@ export function MyTasksSideRail({
                     <Link
                       key={task.id}
                       href={withTenantPrefix(`/staff/tasks/${task.id}`)}
-                      className={`block rounded-md border px-3 py-2 text-left hover:bg-slate-50 ${
+                      onClick={() => setIsOpen(false)}
+                      className={`relative block rounded-md border px-3 py-2 pb-6 pr-9 text-left hover:bg-slate-50 ${
                         overdue ? "border-red-200 bg-red-50/60" : "border-slate-200"
                       }`}
                     >
@@ -278,11 +365,89 @@ export function MyTasksSideRail({
                         {task.project_name ? ` • ${task.project_name}` : ""}
                       </p>
                       <p className="text-xs text-slate-500">Due {formatDate(task.due_date)}</p>
+                      <p className="text-[11px] text-slate-500">
+                        Priority: {String(task.priority ?? "medium").replaceAll("_", " ")}
+                      </p>
+                      <button
+                        type="button"
+                        aria-label={`Snooze task ${task.title ?? task.id}`}
+                        className="absolute bottom-2 right-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setSnoozeTarget(task);
+                          setCustomSnoozeUntil("");
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="13" r="7" />
+                          <path d="M12 9v4l3 2" />
+                          <path d="M5 3L3 5" />
+                          <path d="M19 3l2 2" />
+                        </svg>
+                      </button>
                     </Link>
                   );
                 })}
               </div>
             )}
+          </div>
+        </div>
+      ) : null}
+      {snoozeTarget ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 p-4">
+          <button
+            type="button"
+            aria-label="Close snooze dialog backdrop"
+            className="absolute inset-0"
+            onClick={() => {
+              setSnoozeTarget(null);
+              setCustomSnoozeUntil("");
+            }}
+          />
+          <div className="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <h5 className="text-sm font-semibold text-slate-900">Snooze task</h5>
+            <p className="mt-1 text-xs text-slate-600">{snoozeTarget.title || "Task"}</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button type="button" variant="secondary" onClick={() => snoozeByHours(1)}>
+                1 hour
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => snoozeByHours(3)}>
+                3 hours
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => snoozeByHours(8)}>
+                8 hours
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => snoozeByHours(24)}>
+                1 day
+              </Button>
+              <Button type="button" variant="secondary" className="col-span-2" onClick={snoozeUntilNextMonday}>
+                Next Monday
+              </Button>
+            </div>
+            <form className="mt-3 border-t border-slate-200 pt-3" onSubmit={submitCustomSnooze}>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Pick a date and time</label>
+              <Input
+                type="datetime-local"
+                value={customSnoozeUntil}
+                onChange={(event) => setCustomSnoozeUntil(event.target.value)}
+              />
+              <div className="mt-3 flex items-center gap-2">
+                <Button type="submit" disabled={!customSnoozeUntil}>
+                  Snooze
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setSnoozeTarget(null);
+                    setCustomSnoozeUntil("");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}
