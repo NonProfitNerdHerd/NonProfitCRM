@@ -23,6 +23,7 @@ export type PortfolioTaskRow = {
 };
 
 type PortfolioTab = "gantt" | "calendar" | "thirty_sixty_ninety";
+type GanttScale = "week" | "month" | "year";
 
 const ZOOM_DAY_OPTIONS = [30, 60, 90, 120, 180, 365] as const;
 
@@ -68,6 +69,7 @@ export function ProjectsPortfolioGantt({
 }) {
   const [activeTab, setActiveTab] = useState<PortfolioTab>("gantt");
   const [zoomDays, setZoomDays] = useState<number>(90);
+  const [ganttScale, setGanttScale] = useState<GanttScale>("month");
   const [windowStart, setWindowStart] = useState<Date>(() => initialWindowStart(projects));
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
@@ -109,6 +111,59 @@ export function ProjectsPortfolioGantt({
         return { ...row, left, width };
       });
   }, [projectRows, windowRange]);
+
+  const ganttTicks = useMemo(() => {
+    const ticks: Array<{ left: number; label: string; key: string }> = [];
+    const cursor = new Date(windowRange.start);
+    if (ganttScale === "week") {
+      cursor.setDate(cursor.getDate() - cursor.getDay());
+    } else if (ganttScale === "month") {
+      cursor.setDate(1);
+    } else {
+      cursor.setMonth(0, 1);
+    }
+
+    while (cursor <= windowRange.end) {
+      const left =
+        ((cursor.getTime() - windowRange.start.getTime()) / windowRange.spanMs) * 100;
+      if (left >= 0 && left <= 100) {
+        const label =
+          ganttScale === "week"
+            ? `Wk ${cursor.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+            : ganttScale === "month"
+              ? cursor.toLocaleDateString("en-US", { month: "short", year: "numeric" })
+              : cursor.toLocaleDateString("en-US", { year: "numeric" });
+        ticks.push({
+          left,
+          label,
+          key: `${ganttScale}-${cursor.toISOString()}`
+        });
+      }
+
+      if (ganttScale === "week") {
+        cursor.setDate(cursor.getDate() + 7);
+      } else if (ganttScale === "month") {
+        cursor.setMonth(cursor.getMonth() + 1, 1);
+      } else {
+        cursor.setFullYear(cursor.getFullYear() + 1, 0, 1);
+      }
+    }
+
+    if (ticks.length === 0) {
+      ticks.push({
+        left: 0,
+        label: formatDate(windowRange.start),
+        key: `${ganttScale}-start`
+      });
+      ticks.push({
+        left: 100,
+        label: formatDate(windowRange.end),
+        key: `${ganttScale}-end`
+      });
+    }
+
+    return ticks;
+  }, [ganttScale, windowRange]);
 
   const calendarDays = useMemo(() => {
     const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
@@ -201,6 +256,18 @@ export function ProjectsPortfolioGantt({
               Window: {formatDate(windowRange.start)} - {formatDate(windowRange.end)}
             </p>
             <div className="flex flex-wrap items-center gap-1">
+              <label className="mr-1 flex items-center gap-1 text-xs text-slate-700">
+                Scale
+                <select
+                  className="rounded border border-slate-300 px-2 py-1 text-xs"
+                  value={ganttScale}
+                  onChange={(event) => setGanttScale(event.target.value as GanttScale)}
+                >
+                  <option value="week">Week</option>
+                  <option value="month">Month</option>
+                  <option value="year">Year</option>
+                </select>
+              </label>
               <button
                 type="button"
                 className="rounded border border-slate-300 px-2 py-1 text-xs"
@@ -262,6 +329,29 @@ export function ProjectsPortfolioGantt({
             <p className="text-sm text-slate-500">No projects in the visible date range.</p>
           ) : (
             <div className="space-y-2 overflow-hidden">
+              <div className="grid items-center gap-2 md:grid-cols-[260px_1fr]">
+                <div className="px-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Project
+                </div>
+                <div className="relative h-10 w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                  {ganttTicks.map((tick) => (
+                    <div
+                      key={`axis-line-${tick.key}`}
+                      className="absolute inset-y-0 border-l border-slate-300/70"
+                      style={{ left: `${Math.max(0, Math.min(100, tick.left))}%` }}
+                    />
+                  ))}
+                  {ganttTicks.map((tick) => (
+                    <div
+                      key={`axis-label-${tick.key}`}
+                      className="absolute top-1 -translate-x-1/2 text-[10px] text-slate-600"
+                      style={{ left: `${Math.max(0, Math.min(100, tick.left))}%` }}
+                    >
+                      {tick.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
               {visibleBars.map((row) => (
                 <div key={row.id} className="grid items-center gap-2 md:grid-cols-[260px_1fr]">
                   <Link href={`/staff/projects/management/${row.id}`} className="block rounded px-2 py-1 hover:bg-slate-50">
@@ -271,6 +361,13 @@ export function ProjectsPortfolioGantt({
                     </p>
                   </Link>
                   <div className="relative h-8 w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                    {ganttTicks.map((tick) => (
+                      <div
+                        key={`row-line-${row.id}-${tick.key}`}
+                        className="absolute inset-y-0 border-l border-slate-200"
+                        style={{ left: `${Math.max(0, Math.min(100, tick.left))}%` }}
+                      />
+                    ))}
                     <Link
                       href={`/staff/projects/management/${row.id}`}
                       className="absolute top-1/2 h-4 -translate-y-1/2 rounded bg-brand-200 hover:bg-brand-300"
