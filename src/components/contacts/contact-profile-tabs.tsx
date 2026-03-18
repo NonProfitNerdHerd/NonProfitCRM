@@ -145,6 +145,7 @@ export function ContactProfileTabs({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [drilldownDonationId, setDrilldownDonationId] = useState<string | null>(null);
 
   const taskTabClasses = useMemo(() => {
     if (taskUrgency === "red") return "bg-red-100 text-red-800 border-red-200";
@@ -192,6 +193,64 @@ export function ContactProfileTabs({
     setFollowUpBody("");
     setFollowUpAssignedToUserId("");
     setFollowUpSuspenseDate("");
+  }
+
+  function openLatestActivityEntry(entry: Record<string, unknown>) {
+    const entityType = String(entry.entity_type ?? "").toLowerCase();
+    const entityId = String(entry.entity_id ?? "");
+
+    if (entityType === "donation" && entityId) {
+      setActiveTab("donations");
+      setDrilldownDonationId(null);
+      window.setTimeout(() => setDrilldownDonationId(entityId), 0);
+      return;
+    }
+
+    if (entityType === "task" && entityId) {
+      router.push(`/staff/tasks/${entityId}`);
+      return;
+    }
+
+    if (entityType === "note" && entityId) {
+      const note = notes.find((row) => String(row.id ?? "") === entityId);
+      if (note) {
+        openItem({
+          id: String(note.id ?? ""),
+          itemType: "Note",
+          title: String(note.note_type ?? "Note"),
+          summary: String(note.body ?? ""),
+          createdBy: String(note.created_by ?? "Unknown"),
+          createdAt: (note.created_at as string) ?? null,
+          metadata: []
+        });
+        return;
+      }
+    }
+
+    if (entityType === "membership") {
+      setActiveTab("memberships");
+      return;
+    }
+
+    if (entityType === "tag") {
+      setActiveTab("tags");
+      return;
+    }
+
+    if (entityType === "volunteer" && !isOrganizationContact) {
+      setActiveTab("volunteer");
+      return;
+    }
+
+    openItem({
+      id: String(entry.id ?? ""),
+      itemType: formatActivityEntityLabel(entry.entity_type),
+      title: String(entry.action_type ?? "Activity"),
+      summary: String(entry.action_summary ?? ""),
+      createdBy: String(entry.performed_by_user_id ?? "Unknown"),
+      createdAt: (entry.created_at as string) ?? null,
+      metadata: [{ label: "Entity", value: formatActivityEntityLabel(entry.entity_type) }]
+    });
   }
 
   async function submitNote(event: React.FormEvent) {
@@ -411,17 +470,7 @@ export function ContactProfileTabs({
                 type="button"
                 key={entry.id as string}
                 className="w-full rounded-md border border-slate-200 p-3 text-left"
-                onClick={() =>
-                  openItem({
-                    id: String(entry.id ?? ""),
-                    itemType: formatActivityEntityLabel(entry.entity_type),
-                    title: String(entry.action_type ?? "Activity"),
-                    summary: String(entry.action_summary ?? ""),
-                    createdBy: String(entry.performed_by_user_id ?? "Unknown"),
-                    createdAt: (entry.created_at as string) ?? null,
-                    metadata: [{ label: "Entity", value: formatActivityEntityLabel(entry.entity_type) }]
-                  })
-                }
+                onClick={() => openLatestActivityEntry(entry)}
               >
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>{entry.action_type as string}</span>
@@ -579,6 +628,7 @@ export function ContactProfileTabs({
               String(contactInfo.preferredName || "").trim() ||
               `${contactInfo.firstName} ${contactInfo.lastName}`.trim()
           }}
+          initialOpenDonationId={drilldownDonationId}
         />
       ) : null}
 

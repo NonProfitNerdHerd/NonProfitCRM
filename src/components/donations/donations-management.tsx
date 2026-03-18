@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -109,13 +109,15 @@ export function DonationsManagement({
   campaigns,
   detailBasePath,
   campaignBasePath,
-  fixedContact
+  fixedContact,
+  initialOpenDonationId
 }: {
   initialDonations: DonationRow[];
   campaigns: CampaignOption[];
   detailBasePath: string;
   campaignBasePath: string;
   fixedContact?: { id: string; displayName: string };
+  initialOpenDonationId?: string | null;
 }) {
   const [rows, setRows] = useState(initialDonations);
   const [filters, setFilters] = useState({
@@ -143,6 +145,7 @@ export function DonationsManagement({
   const [donorLoading, setDonorLoading] = useState(false);
   const [newDonorMode, setNewDonorMode] = useState(false);
   const [newDonorForm, setNewDonorForm] = useState<NewDonorForm>(EMPTY_NEW_DONOR_FORM);
+  const [hasAutoOpenedDonation, setHasAutoOpenedDonation] = useState(false);
 
   const totalAmountNumber = Number(form.totalAmount || 0);
   const visibleRows = useMemo(() => rows.slice(0, displayLimit), [rows, displayLimit]);
@@ -278,6 +281,22 @@ export function DonationsManagement({
       setDonorSearch(fixedContact.displayName);
     }
   }
+
+  useEffect(() => {
+    setHasAutoOpenedDonation(false);
+  }, [initialOpenDonationId]);
+
+  useEffect(() => {
+    if (hasAutoOpenedDonation) return;
+    const targetId = String(initialOpenDonationId ?? "").trim();
+    if (!targetId) return;
+    const match = rows.find((row) => String(row.id ?? "") === targetId);
+    if (!match) return;
+    setHasAutoOpenedDonation(true);
+    void openInfo(match);
+    // openInfo intentionally omitted: this effect should react to new open requests, not function identity
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenDonationId, rows, hasAutoOpenedDonation]);
 
   function closeModal() {
     setMode(null);
