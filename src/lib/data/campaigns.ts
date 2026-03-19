@@ -39,6 +39,10 @@ function isCampaignTagSchemaError(error: unknown) {
   return message.includes("campaign_tag_id");
 }
 
+function campaignTagSchemaErrorMessage() {
+  return "Campaign tag storage is not available in this environment yet. Please run migration 202603220900_campaign_tagging_requirements.sql.";
+}
+
 async function assertCampaignTagIsUsable(input: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   organizationId: string;
@@ -277,24 +281,17 @@ export async function createCampaign(input: CampaignInput) {
     created_by: context.userId
   };
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from("campaigns")
     .insert(payload)
     .select("id")
     .single();
-  if (error && isCampaignTagSchemaError(error)) {
-    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = payload;
-    void removedCampaignTagId;
-    const fallbackResult = await supabase
-      .from("campaigns")
-      .insert(legacyPayload)
-      .select("id")
-      .single();
-    data = fallbackResult.data;
-    error = fallbackResult.error;
+  if (error) {
+    if (isCampaignTagSchemaError(error)) {
+      throw new Error(campaignTagSchemaErrorMessage());
+    }
+    throw error;
   }
-
-  if (error) throw error;
   if (!data?.id) throw new Error("Campaign create did not return an id.");
 
   await recordActivity({
@@ -372,22 +369,17 @@ export async function updateCampaign(campaignId: string, input: CampaignInput) {
     campaign_tag_id: campaignTagId
   };
 
-  let { error } = await supabase
+  const { error } = await supabase
     .from("campaigns")
     .update(updatePayload)
     .eq("organization_id", context.organizationId)
     .eq("id", campaignId);
-  if (error && isCampaignTagSchemaError(error)) {
-    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = updatePayload;
-    void removedCampaignTagId;
-    const fallbackResult = await supabase
-      .from("campaigns")
-      .update(legacyPayload)
-      .eq("organization_id", context.organizationId)
-      .eq("id", campaignId);
-    error = fallbackResult.error;
+  if (error) {
+    if (isCampaignTagSchemaError(error)) {
+      throw new Error(campaignTagSchemaErrorMessage());
+    }
+    throw error;
   }
-  if (error) throw error;
 
   await recordActivity({
     entityType: "campaign",
@@ -442,23 +434,17 @@ export async function createChildCampaign(parentCampaignId: string, input: Campa
     updated_by: context.userId
   };
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from("sub_campaigns")
     .insert(insertPayload)
     .select("id")
     .single();
-  if (error && isCampaignTagSchemaError(error)) {
-    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = insertPayload;
-    void removedCampaignTagId;
-    const fallbackResult = await supabase
-      .from("sub_campaigns")
-      .insert(legacyPayload)
-      .select("id")
-      .single();
-    data = fallbackResult.data;
-    error = fallbackResult.error;
+  if (error) {
+    if (isCampaignTagSchemaError(error)) {
+      throw new Error(campaignTagSchemaErrorMessage());
+    }
+    throw error;
   }
-  if (error) throw error;
   if (!data?.id) throw new Error("Child campaign create did not return an id.");
 
   await recordActivity({
@@ -530,22 +516,17 @@ export async function updateChildCampaign(
     updated_by: context.userId
   };
 
-  let { error } = await supabase
+  const { error } = await supabase
     .from("sub_campaigns")
     .update(childUpdatePayload)
     .eq("organization_id", context.organizationId)
     .eq("id", childCampaignId);
-  if (error && isCampaignTagSchemaError(error)) {
-    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = childUpdatePayload;
-    void removedCampaignTagId;
-    const fallbackResult = await supabase
-      .from("sub_campaigns")
-      .update(legacyPayload)
-      .eq("organization_id", context.organizationId)
-      .eq("id", childCampaignId);
-    error = fallbackResult.error;
+  if (error) {
+    if (isCampaignTagSchemaError(error)) {
+      throw new Error(campaignTagSchemaErrorMessage());
+    }
+    throw error;
   }
-  if (error) throw error;
 
   await recordActivity({
     entityType: "sub_campaign",
