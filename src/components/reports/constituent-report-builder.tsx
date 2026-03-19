@@ -1,14 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { jsPDF } from "jspdf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  TagMultiSelectAutocomplete,
-  type TagMultiSelectOption
-} from "@/components/tags/tag-multi-select-autocomplete";
-import { searchTagAutocompleteOptions } from "@/lib/tags/tag-autocomplete-client";
 
 type ReportMode = "constituent" | "transaction" | "project";
 type BuilderStep = "filters" | "fields" | "activities" | "mailer" | "letterSetup" | "labelSetup" | "generate";
@@ -72,6 +67,13 @@ type DownloadJob = {
   status: "pending" | "building" | "ready" | "error";
   url: string | null;
   message?: string;
+};
+
+type TagSummaryRow = {
+  tagId: string;
+  tagName: string;
+  tagPath: string;
+  level: number;
 };
 
 const previewColumnOrder = [
@@ -418,7 +420,9 @@ export function ConstituentReportBuilder() {
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [canExportCsv, setCanExportCsv] = useState(true);
   const [canExportExcel, setCanExportExcel] = useState(true);
-  const [selectedTags, setSelectedTags] = useState<TagMultiSelectOption[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [tagSummaryRows, setTagSummaryRows] = useState<TagSummaryRow[]>([]);
+  const [loadingTagSummary, setLoadingTagSummary] = useState(false);
   const [includeActivitiesReport, setIncludeActivitiesReport] = useState<"yes" | "no">("no");
   const [includeLetterMailer, setIncludeLetterMailer] = useState<"yes" | "no">("no");
   const [includeLabelMailer, setIncludeLabelMailer] = useState<"yes" | "no">("no");
@@ -460,6 +464,16 @@ export function ConstituentReportBuilder() {
     membershipStatus: [] as string[]
   });
 
+  const [filterSectionsOpen, setFilterSectionsOpen] = useState({
+    city: true,
+    state: false,
+    entityType: true,
+    trackingStatus: false,
+    taskStatus: false,
+    membershipStatus: false,
+    tags: true
+  });
+
   const availableColumns = useMemo(
     () => metadata?.activeDefinition.columns ?? [],
     [metadata?.activeDefinition.columns]
@@ -491,11 +505,11 @@ export function ConstituentReportBuilder() {
       trackingStatus: filters.trackingStatus.length > 0 ? filters.trackingStatus : undefined,
       city: filters.city || undefined,
       state: filters.state || undefined,
-      tagIds: selectedTags.map((tag) => tag.id),
+      tagIds: selectedTagIds,
       taskStatus: filters.taskStatus.length > 0 ? filters.taskStatus : undefined,
       membershipStatus: filters.membershipStatus.length > 0 ? filters.membershipStatus : undefined
     }),
-    [filters, selectedTags]
+    [filters, selectedTagIds]
   );
 
   const isAllFieldsSelected =
@@ -537,10 +551,57 @@ export function ConstituentReportBuilder() {
     executeEditorCommand(command, value);
   }
 
-  function selectValues(event: ChangeEvent<HTMLSelectElement>) {
-    return Array.from(event.target.selectedOptions)
-      .map((option) => option.value)
-      .filter(Boolean);
+  function toggleSection(section: keyof typeof filterSectionsOpen) {
+    setFilterSectionsOpen((prev) => ({ ...prev, [section]: !prev[section] }));
+  }
+
+  function toggleMultiValueFilter(
+    key: "entityType" | "trackingStatus" | "taskStatus" | "membershipStatus",
+    value: string,
+    checked: boolean
+  ) {
+    setFilters((prev) => {
+      const current = new Set(prev[key]);
+      if (checked) current.add(value);
+      else current.delete(value);
+      return { ...prev, [key]: Array.from(current) };
+    });
+  }
+
+  function toggleTagFilter(tagId: string, checked: boolean) {
+    setSelectedTagIds((prev) => {
+      const current = new Set(prev);
+      if (checked) current.add(tagId);
+      else current.delete(tagId);
+      return Array.from(current);
+    });
+  }
+
+  async function loadTagSummary() {
+    if (loadingTagSummary) return;
+    setLoadingTagSummary(true);
+    try {
+      const response = await fetch("/api/reports/tags/summary");
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message ?? "Unable to load tags.");
+      }
+      const rows = (Array.isArray(payload?.summary) ? payload.summary : []) as Array<Record<string, unknown>>;
+      const mapped = rows
+        .map((row) => ({
+          tagId: toText(row.tagId),
+          tagName: toText(row.tagName),
+          tagPath: toText(row.tagPath),
+          level: Number(row.level ?? 0)
+        }))
+        .filter((row) => row.tagId && row.tagName)
+        .sort((a, b) => a.tagPath.localeCompare(b.tagPath));
+      setTagSummaryRows(mapped);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load tag filters.");
+    } finally {
+      setLoadingTagSummary(false);
+    }
   }
 
   function applyTemplateSelection(templateId: string) {
@@ -1168,6 +1229,13 @@ export function ConstituentReportBuilder() {
   }, [step]);
 
   useEffect(() => {
+    if (step === "filters" && reportMode === "constituent" && tagSummaryRows.length === 0) {
+      void loadTagSummary();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, reportMode, tagSummaryRows.length]);
+
+  useEffect(() => {
     if (step !== "letterSetup" || !editorRef.current) return;
     if (editorRef.current.innerHTML !== letterEditorHtml) {
       editorRef.current.innerHTML = letterEditorHtml;
@@ -1187,25 +1255,28 @@ export function ConstituentReportBuilder() {
 
       {step === "filters" ? (
         <section className="space-y-4 rounded-md border border-slate-200 p-4">
-          <div>
-            <p className="mb-2 text-sm font-semibold text-slate-900">Step 1: Choose Report Type</p>
-            <div className="grid gap-2 md:grid-cols-3">
-              {(["constituent", "transaction", "project"] as const).map((mode) => (
+          <div className="rounded-lg border border-brand-200 bg-gradient-to-r from-brand-50 to-white p-4">
+            <p className="mb-3 text-base font-semibold text-brand-900">Step 1: Choose Report Type</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              {(
+                [
+                  { key: "constituent", title: "Constituent Report", subtitle: "Contacts, donors, and organizations" },
+                  { key: "transaction", title: "Transaction Report", subtitle: "Gifts, payments, and activity" },
+                  { key: "project", title: "Project Report", subtitle: "Project execution and staffing" }
+                ] as const
+              ).map((mode) => (
                 <button
-                  key={mode}
+                  key={mode.key}
                   type="button"
-                  className={`rounded-md border px-3 py-2 text-left text-sm ${
-                    reportMode === mode
-                      ? "border-brand-300 bg-brand-50 text-brand-800"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  className={`rounded-lg border px-4 py-3 text-left transition ${
+                    reportMode === mode.key
+                      ? "border-brand-500 bg-brand-100 shadow-sm"
+                      : "border-slate-200 bg-white hover:border-brand-300 hover:bg-brand-50/50"
                   }`}
-                  onClick={() => setReportMode(mode)}
+                  onClick={() => setReportMode(mode.key)}
                 >
-                  {mode === "constituent"
-                    ? "Constituent Report"
-                    : mode === "transaction"
-                      ? "Transaction Report"
-                      : "Project Report"}
+                  <p className="text-sm font-semibold text-slate-900">{mode.title}</p>
+                  <p className="mt-1 text-xs text-slate-600">{mode.subtitle}</p>
                 </button>
               ))}
             </div>
@@ -1219,112 +1290,210 @@ export function ConstituentReportBuilder() {
             <>
               <div>
                 <p className="mb-2 text-sm font-semibold text-slate-900">Constituent Filters</p>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Entity Type</label>
-                    <select
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      multiple
-                      size={Math.min(Math.max(recordTypeOptions.length, 2), 4)}
-                      value={filters.entityType}
-                      onChange={(event) => setFilters((prev) => ({ ...prev, entityType: selectValues(event) }))}
+                <div className="space-y-3">
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("city")}
                     >
-                      {recordTypeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Tracking Status</label>
-                    <select
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      multiple
-                      size={Math.min(Math.max(trackingOptions.length, 2), 4)}
-                      value={filters.trackingStatus}
-                      onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, trackingStatus: selectValues(event) }))
-                      }
+                      <span>City</span>
+                      <span className="text-xs text-slate-500">{filterSectionsOpen.city ? "Collapse" : "Expand"}</span>
+                    </button>
+                    {filterSectionsOpen.city ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        <Input
+                          value={filters.city}
+                          onChange={(event) => setFilters((prev) => ({ ...prev, city: event.target.value }))}
+                          placeholder="Type city..."
+                        />
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("state")}
                     >
-                      {trackingOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">City</label>
-                    <Input
-                      value={filters.city}
-                      onChange={(event) => setFilters((prev) => ({ ...prev, city: event.target.value }))}
-                      placeholder="City"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">State</label>
-                    <Input
-                      value={filters.state}
-                      onChange={(event) => setFilters((prev) => ({ ...prev, state: event.target.value }))}
-                      placeholder="State"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Tags</label>
-                    <TagMultiSelectAutocomplete
-                      selected={selectedTags}
-                      onChange={setSelectedTags}
-                      placeholder="Start typing tags..."
-                      emptyHint="No matching tags."
-                      loadOptions={(query) =>
-                        searchTagAutocompleteOptions({
-                          query,
-                          module: "contacts",
-                          activeOnly: true,
-                          limit: 20
-                        })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Tasks by Status</label>
-                    <select
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      multiple
-                      size={Math.min(Math.max(taskStatusOptions.length, 2), 5)}
-                      value={filters.taskStatus}
-                      onChange={(event) => setFilters((prev) => ({ ...prev, taskStatus: selectValues(event) }))}
+                      <span>State</span>
+                      <span className="text-xs text-slate-500">{filterSectionsOpen.state ? "Collapse" : "Expand"}</span>
+                    </button>
+                    {filterSectionsOpen.state ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        <Input
+                          value={filters.state}
+                          onChange={(event) => setFilters((prev) => ({ ...prev, state: event.target.value }))}
+                          placeholder="Type state..."
+                        />
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("entityType")}
                     >
-                      {taskStatusOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Memberships</label>
-                    <select
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      multiple
-                      size={Math.min(Math.max(membershipOptions.length, 2), 4)}
-                      value={filters.membershipStatus}
-                      onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, membershipStatus: selectValues(event) }))
-                      }
+                      <span>Entity Type</span>
+                      <span className="text-xs text-slate-500">
+                        {filters.entityType.length > 0 ? `${filters.entityType.length} selected` : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.entityType ? (
+                      <div className="grid gap-2 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        {recordTypeOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={filters.entityType.includes(option.value)}
+                              onChange={(event) =>
+                                toggleMultiValueFilter("entityType", option.value, event.target.checked)
+                              }
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("trackingStatus")}
                     >
-                      {membershipOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <span>Tracking Status</span>
+                      <span className="text-xs text-slate-500">
+                        {filters.trackingStatus.length > 0
+                          ? `${filters.trackingStatus.length} selected`
+                          : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.trackingStatus ? (
+                      <div className="grid gap-2 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        {trackingOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={filters.trackingStatus.includes(option.value)}
+                              onChange={(event) =>
+                                toggleMultiValueFilter("trackingStatus", option.value, event.target.checked)
+                              }
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("taskStatus")}
+                    >
+                      <span>Tasks by Status</span>
+                      <span className="text-xs text-slate-500">
+                        {filters.taskStatus.length > 0 ? `${filters.taskStatus.length} selected` : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.taskStatus ? (
+                      <div className="grid gap-2 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        {taskStatusOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={filters.taskStatus.includes(option.value)}
+                              onChange={(event) =>
+                                toggleMultiValueFilter("taskStatus", option.value, event.target.checked)
+                              }
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("membershipStatus")}
+                    >
+                      <span>Memberships</span>
+                      <span className="text-xs text-slate-500">
+                        {filters.membershipStatus.length > 0
+                          ? `${filters.membershipStatus.length} selected`
+                          : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.membershipStatus ? (
+                      <div className="grid gap-2 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        {membershipOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={filters.membershipStatus.includes(option.value)}
+                              onChange={(event) =>
+                                toggleMultiValueFilter("membershipStatus", option.value, event.target.checked)
+                              }
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("tags")}
+                    >
+                      <span>Tags (Hierarchy)</span>
+                      <span className="text-xs text-slate-500">
+                        {selectedTagIds.length > 0 ? `${selectedTagIds.length} selected` : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.tags ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        {loadingTagSummary ? (
+                          <p className="text-sm text-slate-500">Loading tags...</p>
+                        ) : tagSummaryRows.length === 0 ? (
+                          <p className="text-sm text-slate-500">No tags available.</p>
+                        ) : (
+                          <div className="max-h-56 space-y-1 overflow-auto rounded-md border border-slate-200 p-2">
+                            {tagSummaryRows.map((tag) => {
+                              const indent = Math.max(0, tag.level - 1) * 16;
+                              return (
+                                <label
+                                  key={tag.tagId}
+                                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm text-slate-700 hover:bg-slate-50"
+                                  style={{ paddingLeft: `${indent + 4}px` }}
+                                  title={tag.tagPath}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedTagIds.includes(tag.tagId)}
+                                    onChange={(event) => toggleTagFilter(tag.tagId, event.target.checked)}
+                                  />
+                                  <span>{tag.tagName}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
                 </div>
-                <p className="text-xs text-slate-500">
-                  Tip: dropdown filters support multi-select (Ctrl/Cmd + click).
-                </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button type="button" variant="secondary" onClick={() => void loadPreview(1, pageSize)}>
                     {loadingPreview ? "Running..." : "Apply Filters"}
@@ -1341,7 +1510,7 @@ export function ConstituentReportBuilder() {
                         taskStatus: [],
                         membershipStatus: []
                       });
-                      setSelectedTags([]);
+                      setSelectedTagIds([]);
                       void loadPreview(1, pageSize);
                     }}
                   >
