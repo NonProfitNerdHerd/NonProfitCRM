@@ -96,6 +96,8 @@ export function StaffSidebar({
   const normalizedPathname = pathname.replace(/^\/[^/]+(?=\/staff(\/|$))/, "");
   const tenantPrefix = organizationSlug ? `/${organizationSlug}` : "";
   const withTenantPrefix = (href: string) => `${tenantPrefix}${href}`;
+  const isPathActive = (baseHref: string) =>
+    normalizedPathname === baseHref || normalizedPathname.startsWith(`${baseHref}/`);
   const menu = [
     ...BASE_MENU,
     ...(canAccessVolunteerCoordination
@@ -200,7 +202,10 @@ export function StaffSidebar({
               {isActive && item.children ? (
                 <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
                   {item.children.map((child) => {
-                    const childActive = normalizedPathname.startsWith(child.href);
+                    const childActive =
+                      child.href === "/staff/reports"
+                        ? normalizedPathname === child.href
+                        : isPathActive(child.href);
                     return (
                       <Link
                         key={child.href}

@@ -1054,8 +1054,59 @@ export function ConstituentReportBuilder() {
   function htmlToPrintableLines(html: string) {
     const container = document.createElement("div");
     container.innerHTML = html;
-    const raw = container.innerText.replace(/\r/g, "");
-    return raw.split("\n").map((line) => line.trim());
+    const lines: string[] = [];
+    let currentLine = "";
+    const blockTags = new Set([
+      "p",
+      "div",
+      "section",
+      "article",
+      "li",
+      "ul",
+      "ol",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6"
+    ]);
+    const pushLine = (allowBlank = false) => {
+      const normalized = currentLine.replace(/\s+/g, " ").trim();
+      if (normalized || allowBlank) {
+        lines.push(normalized);
+      }
+      currentLine = "";
+    };
+    const walkNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const textContent = String(node.textContent ?? "").replace(/\s+/g, " ");
+        currentLine += textContent;
+        return;
+      }
+      if (!(node instanceof HTMLElement)) return;
+      const tagName = node.tagName.toLowerCase();
+      if (tagName === "br") {
+        pushLine(true);
+        return;
+      }
+      if (tagName === "li") {
+        currentLine += "• ";
+      }
+      const isBlock = blockTags.has(tagName);
+      if (isBlock && currentLine.trim().length > 0) {
+        pushLine(true);
+      }
+      Array.from(node.childNodes).forEach((child) => walkNode(child));
+      if (isBlock) {
+        pushLine(true);
+      }
+    };
+    Array.from(container.childNodes).forEach((node) => walkNode(node));
+    if (currentLine.trim().length > 0) {
+      pushLine(false);
+    }
+    return lines.length > 0 ? lines : [""];
   }
 
   function extractInlineImages(html: string) {

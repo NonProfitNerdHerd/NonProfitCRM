@@ -52,12 +52,10 @@ export function SavedReportsLibrary() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-slate-900">Saved Reports</h3>
-          <p className="text-sm text-slate-600">
-            Browse and reopen previously saved report definitions.
-          </p>
-        </div>
+        <p className="text-sm text-slate-600">
+          Saved Reports are named report definitions. Generated files for the last 30 days are listed under Report
+          History.
+        </p>
         <Link href="/staff/reports/create">
           <Button type="button">Create New Report</Button>
         </Link>
@@ -120,7 +118,14 @@ export function SavedReportsLibrary() {
               {reports.length === 0 ? (
                 <tr>
                   <td className="py-3 text-slate-500" colSpan={4}>
-                    No saved reports found for the selected filter.
+                    No saved report definitions found for the selected filter.
+                    <span className="ml-1">
+                      Looking for generated outputs? Visit{" "}
+                      <Link href="/staff/reports/history" className="text-brand-700 underline">
+                        Report History
+                      </Link>
+                      .
+                    </span>
                   </td>
                 </tr>
               ) : null}
