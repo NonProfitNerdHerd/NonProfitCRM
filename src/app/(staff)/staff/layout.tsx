@@ -99,7 +99,8 @@ export default async function StaffLayout({ children }: { children: ReactNode })
         associationContacts={associationContacts.map((contact) => ({
           id: String(contact.id ?? ""),
           label: String(contact.label ?? ""),
-          category: contact.category
+          category: contact.category,
+          searchText: String(contact.searchText ?? "").toLowerCase()
         }))}
         projects={(projects ?? []).map((project) => ({
           id: String(project.id ?? ""),

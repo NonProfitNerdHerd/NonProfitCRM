@@ -171,20 +171,8 @@ export type TaskAssociationContactOption = {
   id: string;
   label: string;
   category: "Donor" | "Contact" | "Donor Organization" | "Organization";
+  searchText: string;
 };
-
-function deriveTaskAssociationCategory(
-  row: Record<string, unknown>
-): TaskAssociationContactOption["category"] {
-  const entityType = toText(row.entity_type).toLowerCase() === "organization" ? "organization" : "person";
-  const trackingStatus = toText(row.tracking_status).toLowerCase();
-  const donorStatus = toText(row.donor_status).toLowerCase();
-  const isDonor = trackingStatus === "donor" || donorStatus === "active" || donorStatus === "lapsed";
-  if (entityType === "organization" && isDonor) return "Donor Organization";
-  if (entityType === "organization") return "Organization";
-  if (isDonor) return "Donor";
-  return "Contact";
-}
 
 function deriveTaskAssociationLabel(row: Record<string, unknown>) {
   const entityType = toText(row.entity_type).toLowerCase() === "organization" ? "organization" : "person";
@@ -201,32 +189,111 @@ function deriveTaskAssociationLabel(row: Record<string, unknown>) {
 export async function listTaskAssociationContacts(): Promise<TaskAssociationContactOption[]> {
   const context = await requireStaffPermission("can_view_dashboard");
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("contacts_safe_view")
-    .select(
-      "id,first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,donor_status"
-    )
-    .eq("organization_id", context.organizationId)
-    .order("organization_name", { ascending: true })
-    .order("last_name", { ascending: true })
-    .order("first_name", { ascending: true })
-    .limit(1500);
-  if (error) throw error;
+  const selectColumns =
+    "id,first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,donor_status,email,phone";
+  const [donorsResult, contactsResult, donorOrganizationsResult, organizationsResult] = await Promise.all([
+    supabase
+      .from("contacts_safe_view")
+      .select(selectColumns)
+      .eq("organization_id", context.organizationId)
+      .eq("entity_type", "person")
+      .eq("tracking_status", "donor")
+      .order("last_name", { ascending: true })
+      .order("first_name", { ascending: true })
+      .limit(600),
+    supabase
+      .from("contacts_safe_view")
+      .select(selectColumns)
+      .eq("organization_id", context.organizationId)
+      .eq("entity_type", "person")
+      .in("tracking_status", ["lead", "non_lead"])
+      .order("last_name", { ascending: true })
+      .order("first_name", { ascending: true })
+      .limit(600),
+    supabase
+      .from("contacts_safe_view")
+      .select(selectColumns)
+      .eq("organization_id", context.organizationId)
+      .eq("entity_type", "organization")
+      .eq("tracking_status", "donor")
+      .order("organization_name", { ascending: true })
+      .order("last_name", { ascending: true })
+      .order("first_name", { ascending: true })
+      .limit(600),
+    supabase
+      .from("contacts_safe_view")
+      .select(selectColumns)
+      .eq("organization_id", context.organizationId)
+      .eq("entity_type", "organization")
+      .in("tracking_status", ["lead", "non_lead"])
+      .order("organization_name", { ascending: true })
+      .order("last_name", { ascending: true })
+      .order("first_name", { ascending: true })
+      .limit(600)
+  ]);
+  if (donorsResult.error) throw donorsResult.error;
+  if (contactsResult.error) throw contactsResult.error;
+  if (donorOrganizationsResult.error) throw donorOrganizationsResult.error;
+  if (organizationsResult.error) throw organizationsResult.error;
 
-  return (data ?? [])
-    .map((row) => {
-      const item = row as Record<string, unknown>;
-      return {
-        id: toText(item.id),
-        label: deriveTaskAssociationLabel(item),
-        category: deriveTaskAssociationCategory(item)
-      };
-    })
-    .filter((option) => option.id.length > 0 && option.label.length > 0)
-    .sort((left, right) => {
-      if (left.category !== right.category) return left.category.localeCompare(right.category);
-      return left.label.localeCompare(right.label);
-    });
+  const groupedRows: Array<{
+    category: TaskAssociationContactOption["category"];
+    rows: Array<Record<string, unknown>>;
+  }> = [
+    {
+      category: "Donor",
+      rows: (donorsResult.data ?? []) as Array<Record<string, unknown>>
+    },
+    {
+      category: "Contact",
+      rows: (contactsResult.data ?? []) as Array<Record<string, unknown>>
+    },
+    {
+      category: "Donor Organization",
+      rows: (donorOrganizationsResult.data ?? []) as Array<Record<string, unknown>>
+    },
+    {
+      category: "Organization",
+      rows: (organizationsResult.data ?? []) as Array<Record<string, unknown>>
+    }
+  ];
+
+  const categoryRank: Record<TaskAssociationContactOption["category"], number> = {
+    Donor: 0,
+    Contact: 1,
+    "Donor Organization": 2,
+    Organization: 3
+  };
+  const options: TaskAssociationContactOption[] = [];
+  const seenIds = new Set<string>();
+  for (const group of groupedRows) {
+    for (const row of group.rows) {
+      const id = toText(row.id);
+      if (!id || seenIds.has(id)) continue;
+      const label = deriveTaskAssociationLabel(row);
+      if (!label) continue;
+      const searchText = [
+        label,
+        toText(row.first_name),
+        toText(row.last_name),
+        toText(row.preferred_name),
+        toText(row.organization_name),
+        toText(row.email),
+        toText(row.phone),
+        group.category
+      ]
+        .join(" ")
+        .toLowerCase();
+      options.push({ id, label, category: group.category, searchText });
+      seenIds.add(id);
+    }
+  }
+
+  return options.sort((left, right) => {
+    const categoryDelta = categoryRank[left.category] - categoryRank[right.category];
+    if (categoryDelta !== 0) return categoryDelta;
+    return left.label.localeCompare(right.label);
+  });
 }
 
 export async function createTask(input: {

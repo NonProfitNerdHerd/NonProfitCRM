@@ -41,7 +41,12 @@ export function MyTasksSideRail({
   projects: Array<{ id: string; name: string }>;
   currentUserId: string;
   assignableUsers: Array<{ id: string; name: string }>;
-  associationContacts: Array<{ id: string; label: string; category: TaskAssociationCategory }>;
+  associationContacts: Array<{
+    id: string;
+    label: string;
+    category: TaskAssociationCategory;
+    searchText: string;
+  }>;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const pathname = usePathname();
@@ -113,7 +118,10 @@ export function MyTasksSideRail({
     const query = contactLookupQuery.trim().toLowerCase();
     if (!query) return associationContacts.slice(0, 60);
     return associationContacts
-      .filter((contact) => `${contact.label} ${contact.category}`.toLowerCase().includes(query))
+      .filter((contact) => {
+        const haystack = `${contact.label} ${contact.category} ${contact.searchText}`.toLowerCase();
+        return haystack.includes(query);
+      })
       .slice(0, 60);
   }, [associationContacts, contactLookupQuery]);
   useEffect(() => {
@@ -352,7 +360,7 @@ export function MyTasksSideRail({
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="primary"
                   onClick={() => {
                     setShowCreateTask((prev) => !prev);
                     setCreateError(null);
