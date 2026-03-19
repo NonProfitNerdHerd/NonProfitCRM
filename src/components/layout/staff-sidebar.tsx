@@ -65,6 +65,16 @@ const BASE_MENU: MenuItem[] = [
     href: "/staff/memberships",
     label: "Memberships",
     matches: (pathname) => pathname.startsWith("/staff/memberships")
+  },
+  {
+    id: "reports",
+    href: "/staff/reports/builder",
+    label: "Reports",
+    matches: (pathname) => pathname.startsWith("/staff/reports"),
+    children: [
+      { href: "/staff/reports/builder", label: "Report Builder" },
+      { href: "/staff/reports", label: "Saved Reports" }
+    ]
   }
 ];
 

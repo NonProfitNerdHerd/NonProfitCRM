@@ -61,6 +61,8 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
       { key: "lastActivityDate", label: "Last Activity Date", dataType: "date", sortable: true },
       { key: "membershipType", label: "Membership Type", sortable: true },
       { key: "membershipStatus", label: "Membership Status", sortable: true },
+      { key: "taskStatuses", label: "Task Statuses", sortable: true },
+      { key: "campaignList", label: "Campaigns", sortable: true },
       { key: "tagList", label: "Tags", defaultSelected: true, sortable: true },
       { key: "tagPathList", label: "Tag Paths", sortable: true },
       { key: "totalDonations", label: "Total Donations", dataType: "currency", sortable: true },
@@ -102,6 +104,18 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
         ]
       },
       {
+        key: "taskStatus",
+        label: "Tasks by Status",
+        type: "select",
+        options: [
+          { label: "To Do", value: "todo" },
+          { label: "In Progress", value: "in_progress" },
+          { label: "Completed", value: "completed" },
+          { label: "Blocked", value: "blocked" },
+          { label: "Cancelled", value: "cancelled" }
+        ]
+      },
+      {
         key: "hasEmail",
         label: "Has Email",
         type: "select",
@@ -120,6 +134,7 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
         ]
       },
       { key: "tagContains", label: "Tag Contains", type: "text", placeholder: "Major Donor" },
+      { key: "campaignContains", label: "Campaign Contains", type: "text", placeholder: "General Donation" },
       {
         key: "tagPathContains",
         label: "Tag Path Contains",

@@ -119,7 +119,16 @@ function profileLabel(profile: Record<string, unknown> | null | undefined) {
 
 async function buildContactRows(orgId: string) {
   const supabase = await createClient();
-  const [contactsResult, donationsResult, membershipsResult, activityResult, contactTagsResult] =
+  const [
+    contactsResult,
+    donationsResult,
+    membershipsResult,
+    activityResult,
+    contactTagsResult,
+    tasksResult,
+    allocationsResult,
+    campaignsResult
+  ] =
     await Promise.all([
       supabase
         .from("contacts")
@@ -131,7 +140,7 @@ async function buildContactRows(orgId: string) {
         .limit(10000),
       supabase
         .from("donations")
-        .select("contact_id, amount, donation_date")
+        .select("id, contact_id, amount, donation_date")
         .eq("organization_id", orgId)
         .limit(20000),
       supabase
@@ -150,7 +159,23 @@ async function buildContactRows(orgId: string) {
         .from("contact_tags")
         .select("contact_id,tags(name,path)")
         .eq("organization_id", orgId)
-        .limit(50000)
+        .limit(50000),
+      supabase
+        .from("tasks")
+        .select("contact_id,status")
+        .eq("organization_id", orgId)
+        .not("contact_id", "is", null)
+        .limit(50000),
+      supabase
+        .from("donation_allocations")
+        .select("donation_id,campaign_id")
+        .eq("organization_id", orgId)
+        .limit(50000),
+      supabase
+        .from("campaigns")
+        .select("id,name")
+        .eq("organization_id", orgId)
+        .limit(10000)
     ]);
 
   if (contactsResult.error) throw contactsResult.error;
@@ -158,15 +183,49 @@ async function buildContactRows(orgId: string) {
   if (membershipsResult.error) throw membershipsResult.error;
   if (activityResult.error) throw activityResult.error;
   if (contactTagsResult.error) throw contactTagsResult.error;
+  if (tasksResult.error) throw tasksResult.error;
+  if (allocationsResult.error) throw allocationsResult.error;
+  if (campaignsResult.error) throw campaignsResult.error;
 
   const donationRollup = new Map<string, { total: number; count: number }>();
+  const donationContactById = new Map<string, string>();
   for (const donation of donationsResult.data ?? []) {
+    const donationId = text(donation.id);
     const contactId = text(donation.contact_id);
     if (!contactId) continue;
+    if (donationId) donationContactById.set(donationId, contactId);
     const current = donationRollup.get(contactId) ?? { total: 0, count: 0 };
     current.total += toNumber(donation.amount);
     current.count += 1;
     donationRollup.set(contactId, current);
+  }
+
+  const taskStatusesByContact = new Map<string, Set<string>>();
+  for (const task of tasksResult.data ?? []) {
+    const contactId = text(task.contact_id);
+    const status = text(task.status);
+    if (!contactId || !status) continue;
+    if (!taskStatusesByContact.has(contactId)) taskStatusesByContact.set(contactId, new Set<string>());
+    taskStatusesByContact.get(contactId)?.add(status);
+  }
+
+  const campaignNameById = new Map<string, string>();
+  for (const campaign of campaignsResult.data ?? []) {
+    const id = text(campaign.id);
+    const name = text(campaign.name);
+    if (!id || !name) continue;
+    campaignNameById.set(id, name);
+  }
+
+  const campaignsByContact = new Map<string, Set<string>>();
+  for (const allocation of allocationsResult.data ?? []) {
+    const donationId = text(allocation.donation_id);
+    const campaignId = text(allocation.campaign_id);
+    const contactId = donationContactById.get(donationId);
+    const campaignName = campaignNameById.get(campaignId);
+    if (!contactId || !campaignName) continue;
+    if (!campaignsByContact.has(contactId)) campaignsByContact.set(contactId, new Set<string>());
+    campaignsByContact.get(contactId)?.add(campaignName);
   }
 
   const membershipRollup = new Map<
@@ -220,6 +279,12 @@ async function buildContactRows(orgId: string) {
     const entityType = lower(contact.entity_type) === "organization" ? "Organization" : "Person";
     const trackingStatus = lower(contact.tracking_status) || "lead";
     const tags = tagsByContact.get(contactId) ?? { names: new Set<string>(), paths: new Set<string>() };
+    const taskStatuses = Array.from(taskStatusesByContact.get(contactId) ?? []).sort((a, b) =>
+      a.localeCompare(b)
+    );
+    const campaignList = Array.from(campaignsByContact.get(contactId) ?? []).sort((a, b) =>
+      a.localeCompare(b)
+    );
 
     return {
       id: contactId,
@@ -236,6 +301,8 @@ async function buildContactRows(orgId: string) {
       lastActivityDate: isoDate(lastActivityDate),
       membershipType: membership?.membershipType ?? "",
       membershipStatus: membership?.membershipStatus ?? text(contact.member_status),
+      taskStatuses: taskStatuses.join(", "),
+      campaignList: campaignList.join(", "),
       tagList: Array.from(tags.names).sort((a, b) => a.localeCompare(b)).join(", "),
       tagPathList: Array.from(tags.paths).sort((a, b) => a.localeCompare(b)).join(" | "),
       totalDonations: donation.total,
@@ -757,6 +824,8 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
         if (key === "hasEmail" && lower(row.hasEmail) !== lower(value)) return false;
         if (key === "hasPhone" && lower(row.hasPhone) !== lower(value)) return false;
         if (key === "tagContains" && !containsValue(row.tagList, value)) return false;
+        if (key === "taskStatus" && !containsValue(row.taskStatuses, value)) return false;
+        if (key === "campaignContains" && !containsValue(row.campaignList, value)) return false;
         if (key === "tagPathContains" && !containsValue(row.tagPathList, value)) return false;
         if (key === "lastActivityDateFrom" && !inDateRange(row.lastActivityDate, value, undefined)) return false;
         if (key === "lastActivityDateTo" && !inDateRange(row.lastActivityDate, undefined, value)) return false;
