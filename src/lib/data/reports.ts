@@ -141,7 +141,7 @@ async function buildContactRows(orgId: string) {
       supabase
         .from("contacts")
         .select(
-          "id, first_name, last_name, preferred_name, organization_name, email, phone, address_line_1, address_line_2, city, state, postal_code, entity_type, tracking_status, donor_status, member_status, created_at, updated_at"
+          "id, first_name, last_name, preferred_name, organization_name, email, phone, address_line_1, address_line_2, city, state, postal_code, mailing_city, mailing_state, mailing_postal_code, entity_type, tracking_status, donor_status, member_status, created_at, updated_at"
         )
         .eq("organization_id", orgId)
         .order("last_name", { ascending: true })
@@ -319,6 +319,9 @@ async function buildContactRows(orgId: string) {
       city: text(contact.city),
       state: text(contact.state),
       zip: text(contact.postal_code),
+      mailingCity: text(contact.mailing_city),
+      mailingState: text(contact.mailing_state),
+      mailingZip: text(contact.mailing_postal_code),
       lastActivityDate: isoDate(lastActivityDate),
       membershipType: membership?.membershipType ?? "",
       membershipStatus: membership?.membershipStatus ?? text(contact.member_status),
@@ -815,7 +818,17 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
       }
 
       if (key === "state" || key === "city" || key === "zip") {
-        if (!containsValue(row[key], value)) return false;
+        if (reportType === "contacts") {
+          if (key === "city") {
+            if (!containsValue(row.city, value) && !containsValue(row.mailingCity, value)) return false;
+          } else if (key === "state") {
+            if (!containsValue(row.state, value) && !containsValue(row.mailingState, value)) return false;
+          } else if (!containsValue(row.zip, value) && !containsValue(row.mailingZip, value)) {
+            return false;
+          }
+        } else if (!containsValue(row[key], value)) {
+          return false;
+        }
         continue;
       }
 
