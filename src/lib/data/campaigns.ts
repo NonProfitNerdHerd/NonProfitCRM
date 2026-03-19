@@ -29,6 +29,16 @@ function isTagAccessError(error: unknown) {
   );
 }
 
+function isCampaignTagSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("campaign_tag_id");
+}
+
 async function assertCampaignTagIsUsable(input: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   organizationId: string;
@@ -113,30 +123,62 @@ export async function listCampaigns(filters?: { status?: string; q?: string }) {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
 
-  let parentQuery = supabase
-    .from("campaigns")
-    .select("id, name, description, status, start_date, end_date, campaign_tag_id, owner_user_id, created_at")
-    .eq("organization_id", context.organizationId)
-    .order("start_date", { ascending: false, nullsFirst: false });
-  let childQuery = supabase
-    .from("sub_campaigns")
-    .select("id, campaign_id, name, description, status, start_date, end_date, campaign_tag_id, created_at")
-    .eq("organization_id", context.organizationId)
-    .order("name", { ascending: true });
+  const parentSelectWithTag =
+    "id, name, description, status, start_date, end_date, campaign_tag_id, owner_user_id, created_at";
+  const parentSelectLegacy =
+    "id, name, description, status, start_date, end_date, owner_user_id, created_at";
+  const childSelectWithTag =
+    "id, campaign_id, name, description, status, start_date, end_date, campaign_tag_id, created_at";
+  const childSelectLegacy =
+    "id, campaign_id, name, description, status, start_date, end_date, created_at";
 
-  if (filters?.status && filters.status !== "All") {
-    parentQuery = parentQuery.eq("status", filters.status);
-    childQuery = childQuery.eq("status", filters.status);
+  function buildParentQuery(selectClause: string) {
+    let query = supabase
+      .from("campaigns")
+      .select(selectClause)
+      .eq("organization_id", context.organizationId)
+      .order("start_date", { ascending: false, nullsFirst: false });
+    if (filters?.status && filters.status !== "All") {
+      query = query.eq("status", filters.status);
+    }
+    return query;
   }
 
-  const [{ data: parents, error: parentError }, { data: children, error: childError }] =
-    await Promise.all([parentQuery, childQuery]);
+  function buildChildQuery(selectClause: string) {
+    let query = supabase
+      .from("sub_campaigns")
+      .select(selectClause)
+      .eq("organization_id", context.organizationId)
+      .order("name", { ascending: true });
+    if (filters?.status && filters.status !== "All") {
+      query = query.eq("status", filters.status);
+    }
+    return query;
+  }
+
+  let [{ data: parents, error: parentError }, { data: children, error: childError }] = await Promise.all([
+    buildParentQuery(parentSelectWithTag),
+    buildChildQuery(childSelectWithTag)
+  ]);
+  if (
+    (parentError && isCampaignTagSchemaError(parentError)) ||
+    (childError && isCampaignTagSchemaError(childError))
+  ) {
+    const fallbackResults = await Promise.all([
+      buildParentQuery(parentSelectLegacy),
+      buildChildQuery(childSelectLegacy)
+    ]);
+    parents = fallbackResults[0].data;
+    parentError = fallbackResults[0].error;
+    children = fallbackResults[1].data;
+    childError = fallbackResults[1].error;
+  }
   if (parentError) throw parentError;
   if (childError) throw childError;
 
   const q = filters?.q?.trim().toLowerCase() ?? "";
-  const parentRows = (parents ?? []) as Array<Record<string, unknown>>;
-  const childRows = (children ?? []) as Array<Record<string, unknown>>;
+  const parentRows = (parents ?? []) as unknown as Array<Record<string, unknown>>;
+  const childRows = (children ?? []) as unknown as Array<Record<string, unknown>>;
   const tagLabelById = await loadTagLabelMap({
     supabase,
     organizationId: context.organizationId,
@@ -226,23 +268,37 @@ export async function createCampaign(input: CampaignInput) {
     campaignTagId
   });
 
-  const { data, error } = await supabase
+  const payload = {
+    organization_id: context.organizationId,
+    name: input.name,
+    description: input.description ?? null,
+    status: input.status ?? "Active",
+    start_date: input.startDate ?? null,
+    end_date: input.endDate ?? null,
+    campaign_tag_id: campaignTagId,
+    owner_user_id: context.userId,
+    created_by: context.userId
+  };
+
+  let { data, error } = await supabase
     .from("campaigns")
-    .insert({
-      organization_id: context.organizationId,
-      name: input.name,
-      description: input.description ?? null,
-      status: input.status ?? "Active",
-      start_date: input.startDate ?? null,
-      end_date: input.endDate ?? null,
-      campaign_tag_id: campaignTagId,
-      owner_user_id: context.userId,
-      created_by: context.userId
-    })
+    .insert(payload)
     .select("id")
     .single();
+  if (error && isCampaignTagSchemaError(error)) {
+    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = payload;
+    void removedCampaignTagId;
+    const fallbackResult = await supabase
+      .from("campaigns")
+      .insert(legacyPayload)
+      .select("id")
+      .single();
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
 
   if (error) throw error;
+  if (!data?.id) throw new Error("Campaign create did not return an id.");
 
   await recordActivity({
     entityType: "campaign",
@@ -310,18 +366,30 @@ export async function updateCampaign(campaignId: string, input: CampaignInput) {
     }
   }
 
-  const { error } = await supabase
+  const updatePayload = {
+    name: input.name,
+    description: input.description ?? null,
+    status: input.status ?? "Active",
+    start_date: input.startDate ?? null,
+    end_date: input.endDate ?? null,
+    campaign_tag_id: campaignTagId
+  };
+
+  let { error } = await supabase
     .from("campaigns")
-    .update({
-      name: input.name,
-      description: input.description ?? null,
-      status: input.status ?? "Active",
-      start_date: input.startDate ?? null,
-      end_date: input.endDate ?? null,
-      campaign_tag_id: campaignTagId
-    })
+    .update(updatePayload)
     .eq("organization_id", context.organizationId)
     .eq("id", campaignId);
+  if (error && isCampaignTagSchemaError(error)) {
+    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = updatePayload;
+    void removedCampaignTagId;
+    const fallbackResult = await supabase
+      .from("campaigns")
+      .update(legacyPayload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", campaignId);
+    error = fallbackResult.error;
+  }
   if (error) throw error;
 
   await recordActivity({
@@ -364,23 +432,37 @@ export async function createChildCampaign(parentCampaignId: string, input: Campa
     childEndDate: input.endDate ?? ""
   });
 
-  const { data, error } = await supabase
+  const insertPayload = {
+    organization_id: context.organizationId,
+    campaign_id: parentCampaignId,
+    name: input.name,
+    description: input.description ?? null,
+    status: input.status ?? "Active",
+    start_date: input.startDate ?? null,
+    end_date: input.endDate ?? null,
+    campaign_tag_id: campaignTagId,
+    created_by: context.userId,
+    updated_by: context.userId
+  };
+
+  let { data, error } = await supabase
     .from("sub_campaigns")
-    .insert({
-      organization_id: context.organizationId,
-      campaign_id: parentCampaignId,
-      name: input.name,
-      description: input.description ?? null,
-      status: input.status ?? "Active",
-      start_date: input.startDate ?? null,
-      end_date: input.endDate ?? null,
-      campaign_tag_id: campaignTagId,
-      created_by: context.userId,
-      updated_by: context.userId
-    })
+    .insert(insertPayload)
     .select("id")
     .single();
+  if (error && isCampaignTagSchemaError(error)) {
+    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = insertPayload;
+    void removedCampaignTagId;
+    const fallbackResult = await supabase
+      .from("sub_campaigns")
+      .insert(legacyPayload)
+      .select("id")
+      .single();
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
   if (error) throw error;
+  if (!data?.id) throw new Error("Child campaign create did not return an id.");
 
   await recordActivity({
     entityType: "sub_campaign",
@@ -441,19 +523,31 @@ export async function updateChildCampaign(
     childEndDate: input.endDate ?? ""
   });
 
-  const { error } = await supabase
+  const childUpdatePayload = {
+    name: input.name,
+    description: input.description ?? null,
+    status: input.status ?? "Active",
+    start_date: input.startDate ?? null,
+    end_date: input.endDate ?? null,
+    campaign_tag_id: campaignTagId,
+    updated_by: context.userId
+  };
+
+  let { error } = await supabase
     .from("sub_campaigns")
-    .update({
-      name: input.name,
-      description: input.description ?? null,
-      status: input.status ?? "Active",
-      start_date: input.startDate ?? null,
-      end_date: input.endDate ?? null,
-      campaign_tag_id: campaignTagId,
-      updated_by: context.userId
-    })
+    .update(childUpdatePayload)
     .eq("organization_id", context.organizationId)
     .eq("id", childCampaignId);
+  if (error && isCampaignTagSchemaError(error)) {
+    const { campaign_tag_id: removedCampaignTagId, ...legacyPayload } = childUpdatePayload;
+    void removedCampaignTagId;
+    const fallbackResult = await supabase
+      .from("sub_campaigns")
+      .update(legacyPayload)
+      .eq("organization_id", context.organizationId)
+      .eq("id", childCampaignId);
+    error = fallbackResult.error;
+  }
   if (error) throw error;
 
   await recordActivity({
@@ -468,17 +562,16 @@ export async function getCampaign(campaignId: string) {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
 
-  const [
-    { data: campaign, error: campaignError },
-    { data: donations, error: donationsError },
-    { data: childCampaigns, error: childCampaignsError }
-  ] = await Promise.all([
-    supabase
-      .from("campaigns")
-      .select("id, name, description, status, start_date, end_date, campaign_tag_id, owner_user_id, created_at")
-      .eq("organization_id", context.organizationId)
-      .eq("id", campaignId)
-      .maybeSingle(),
+  const campaignSelectWithTag =
+    "id, name, description, status, start_date, end_date, campaign_tag_id, owner_user_id, created_at";
+  const campaignSelectLegacy =
+    "id, name, description, status, start_date, end_date, owner_user_id, created_at";
+  const childSelectWithTag =
+    "id, campaign_id, name, description, status, start_date, end_date, campaign_tag_id, created_at";
+  const childSelectLegacy =
+    "id, campaign_id, name, description, status, start_date, end_date, created_at";
+
+  const [{ data: donations, error: donationsError }, campaignResult, childCampaignResult] = await Promise.all([
     supabase
       .from("donations")
       .select(
@@ -488,19 +581,52 @@ export async function getCampaign(campaignId: string) {
       .eq("campaign_id", campaignId)
       .order("donation_date", { ascending: false }),
     supabase
+      .from("campaigns")
+      .select(campaignSelectWithTag)
+      .eq("organization_id", context.organizationId)
+      .eq("id", campaignId)
+      .maybeSingle(),
+    supabase
       .from("sub_campaigns")
-      .select("id, campaign_id, name, description, status, start_date, end_date, campaign_tag_id, created_at")
+      .select(childSelectWithTag)
       .eq("organization_id", context.organizationId)
       .eq("campaign_id", campaignId)
       .order("name", { ascending: true })
   ]);
+  let campaign = (campaignResult.data ?? null) as Record<string, unknown> | null;
+  let campaignError = campaignResult.error;
+  let childCampaigns = (childCampaignResult.data ?? []) as unknown as Array<Record<string, unknown>>;
+  let childCampaignsError = childCampaignResult.error;
+  if (
+    (campaignError && isCampaignTagSchemaError(campaignError)) ||
+    (childCampaignsError && isCampaignTagSchemaError(childCampaignsError))
+  ) {
+    const [fallbackCampaignResult, fallbackChildCampaignResult] = await Promise.all([
+      supabase
+        .from("campaigns")
+        .select(campaignSelectLegacy)
+        .eq("organization_id", context.organizationId)
+        .eq("id", campaignId)
+        .maybeSingle(),
+      supabase
+        .from("sub_campaigns")
+        .select(childSelectLegacy)
+        .eq("organization_id", context.organizationId)
+        .eq("campaign_id", campaignId)
+        .order("name", { ascending: true })
+    ]);
+    campaign = (fallbackCampaignResult.data ?? null) as Record<string, unknown> | null;
+    campaignError = fallbackCampaignResult.error;
+    childCampaigns = (fallbackChildCampaignResult.data ?? []) as unknown as Array<Record<string, unknown>>;
+    childCampaignsError = fallbackChildCampaignResult.error;
+  }
 
   if (campaignError) throw campaignError;
   if (donationsError) throw donationsError;
   if (childCampaignsError) throw childCampaignsError;
 
   const donationsRows = (donations ?? []) as Array<Record<string, unknown>>;
-  const childRows = (childCampaigns ?? []) as Array<Record<string, unknown>>;
+  const childRows = childCampaigns;
   const campaignTagIds = [
     toText((campaign as Record<string, unknown> | null)?.campaign_tag_id),
     ...childRows.map((row) => toText(row.campaign_tag_id))
@@ -544,12 +670,22 @@ export async function listActiveCampaigns() {
   const context = await requireStaffPermission("can_view_donations");
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("campaigns")
     .select("id, name, status, campaign_tag_id")
     .eq("organization_id", context.organizationId)
     .eq("status", "Active")
     .order("name", { ascending: true });
+  if (error && isCampaignTagSchemaError(error)) {
+    const fallbackResult = await supabase
+      .from("campaigns")
+      .select("id, name, status")
+      .eq("organization_id", context.organizationId)
+      .eq("status", "Active")
+      .order("name", { ascending: true });
+    data = (fallbackResult.data ?? []) as unknown as typeof data;
+    error = fallbackResult.error;
+  }
 
   if (error) throw error;
   return data ?? [];

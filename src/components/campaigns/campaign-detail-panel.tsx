@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CampaignForm, CampaignFormPayload } from "@/components/forms/campaign-form";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
-type CampaignDetailPayload = {
+export type CampaignDetailPayload = {
   campaign: {
     id: string;
     name: string;
