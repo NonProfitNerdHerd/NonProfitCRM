@@ -28,17 +28,25 @@ function buildCallSheetHtml(tasks: CallSheetTask[]) {
   const generatedAt = formatDateTime(new Date());
   const rows = tasks
     .map((task, index) => {
+      const normalizedPriority = task.priority.trim().toLowerCase();
+      const priorityLabel = normalizedPriority
+        ? normalizedPriority.charAt(0).toUpperCase() + normalizedPriority.slice(1)
+        : "Medium";
+      const priorityWithMarker = normalizedPriority === "high" ? `${priorityLabel}!` : priorityLabel;
       return `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(task.contactName)}</td>
-          <td>${escapeHtml(task.contactPhone)}</td>
-          <td><strong>${escapeHtml(task.title)}</strong><br/>${escapeHtml(task.description || "-")}</td>
-          <td>${escapeHtml(task.priority)}</td>
-          <td>${escapeHtml(task.createdBy)}</td>
-          <td>${escapeHtml(formatDateTime(task.createdAt) || "-")}</td>
-          <td></td>
-        </tr>
+        <section class="call-item">
+          <p class="index">#${index + 1}</p>
+          <p class="headline"><strong>Person to call - Phone Number:</strong> ${escapeHtml(task.contactName)} - ${escapeHtml(task.contactPhone)}</p>
+          <p><strong>Priority:</strong> ${escapeHtml(priorityWithMarker)}</p>
+          <p><strong>Task Title:</strong> ${escapeHtml(task.title)}</p>
+          <p><strong>Task Description:</strong> ${escapeHtml(task.description || "-")}</p>
+          <p class="meta"><strong>Created By:</strong> ${escapeHtml(task.createdBy)} &nbsp; • &nbsp; <strong>Created At:</strong> ${escapeHtml(
+            formatDateTime(task.createdAt) || "-"
+          )}</p>
+          <div class="write-line"></div>
+          <div class="write-line"></div>
+        </section>
+        <hr class="item-divider" />
       `;
     })
     .join("");
@@ -53,40 +61,31 @@ function buildCallSheetHtml(tasks: CallSheetTask[]) {
       body { font-family: Arial, sans-serif; margin: 0.2in; color: #0f172a; }
       h1 { margin: 0 0 8px; font-size: 22px; }
       p { margin: 0 0 14px; color: #475569; }
-      table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-      th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; text-align: left; }
-      th { background: #f1f5f9; }
-      th:nth-child(1), td:nth-child(1) { width: 4%; }
-      th:nth-child(2), td:nth-child(2) { width: 12%; }
-      th:nth-child(3), td:nth-child(3) { width: 11%; }
-      th:nth-child(4), td:nth-child(4) { width: 16%; }
-      th:nth-child(5), td:nth-child(5) { width: 8%; }
-      th:nth-child(6), td:nth-child(6) { width: 10%; }
-      th:nth-child(7), td:nth-child(7) { width: 14%; }
-      th:nth-child(8), td:nth-child(8) { width: 25%; }
+      .call-item { margin: 0 0 6px 0; font-size: 13px; }
+      .call-item p { margin: 0 0 6px 0; color: #0f172a; }
+      .call-item .headline { font-weight: 700; }
+      .call-item .meta { color: #334155; font-size: 12px; }
+      .call-item .index { font-size: 12px; color: #64748b; margin-bottom: 8px; }
+      .write-line {
+        margin: 10px 0;
+        border-bottom: 1px solid #94a3b8;
+        height: 20px;
+      }
+      .item-divider {
+        border: 0;
+        border-top: 2px solid #0f172a;
+        margin: 10px 0 16px 0;
+      }
       @media print { body { margin: 0.1in; } }
     </style>
   </head>
   <body>
     <h1>Call Sheet</h1>
     <p>Generated ${escapeHtml(generatedAt)}</p>
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Contact Name</th>
-          <th>Phone Number</th>
-          <th>Task / Note Details</th>
-          <th>Priority</th>
-          <th>Created By</th>
-          <th>Created At</th>
-          <th>Additional Notes</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows || '<tr><td colspan="8">No call tasks available.</td></tr>'}
-      </tbody>
-    </table>
+    ${
+      rows ||
+      '<section class="call-item"><p><strong>No call tasks available.</strong></p><div class="write-line"></div><div class="write-line"></div></section>'
+    }
   </body>
 </html>`;
 }
