@@ -77,7 +77,6 @@ export async function listMyCallSheetTasks() {
     )
     .eq("organization_id", context.organizationId)
     .eq("assigned_to", context.userId)
-    .not("contact_id", "is", null)
     .order("created_at", { ascending: false })
     .limit(1000);
   if (error) throw error;
