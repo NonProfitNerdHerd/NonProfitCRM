@@ -1580,7 +1580,7 @@ export function ConstituentReportBuilder() {
               </select>
               {loadingTemplates ? <p className="mt-1 text-xs text-slate-500">Loading templates...</p> : null}
               <p className="mt-1 text-xs text-slate-500">
-                Pick an existing template or keep "No template" and design your own.
+                Pick an existing template or keep &quot;No template&quot; and design your own.
               </p>
             </div>
             <div>

@@ -11,7 +11,7 @@ const registerSchema = z.object({
   fileDataUrl: z.string().trim().min(1),
   rowCount: z.coerce.number().min(0).optional(),
   selectedColumns: z.array(z.string()).optional(),
-  filters: z.record(z.unknown()).optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
   reportMode: z.string().trim().optional()
 });
 
