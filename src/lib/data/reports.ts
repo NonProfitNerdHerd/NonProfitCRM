@@ -1121,6 +1121,7 @@ export async function exportReport(input: {
   filters?: ReportFilters;
   sort?: ReportSort;
   format: "csv" | "excel";
+  executionMetadata?: Record<string, unknown>;
 }) {
   const context = await requireStaffPermission(
     input.format === "csv" ? "can_export_csv" : "can_export_excel"
@@ -1147,7 +1148,8 @@ export async function exportReport(input: {
       selected_columns: reportResult.selectedColumns,
       filters: input.filters ?? {},
       sort: input.sort ?? null,
-      export_format: input.format
+      export_format: input.format,
+      ...(input.executionMetadata ?? {})
     }
   });
 
@@ -1347,4 +1349,214 @@ export async function runSavedReport(savedReportId: string, page?: number, pageS
     page,
     pageSize
   });
+}
+
+type ReportHistoryMode = "constituent" | "transaction" | "project";
+
+function deriveHistoryMode(domainKey: string, executionMetadata: Record<string, unknown>): ReportHistoryMode {
+  const metadataMode = lower(executionMetadata.report_mode);
+  if (metadataMode === "project") return "project";
+  if (metadataMode === "transaction") return "transaction";
+  if (metadataMode === "constituent") return "constituent";
+  if (lower(domainKey) === "projects") return "project";
+  if (lower(domainKey) === "contacts") return "constituent";
+  return "transaction";
+}
+
+function summarizeFilters(filters: Record<string, unknown>) {
+  const entries = Object.entries(filters).filter(([, value]) => {
+    if (value === null || value === undefined) return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return text(value) !== "";
+  });
+  if (entries.length === 0) return "No filters";
+  return entries
+    .map(([key, value]) => {
+      if (Array.isArray(value)) {
+        return `${key}: ${value.map((item) => text(item)).filter(Boolean).join(", ")}`;
+      }
+      return `${key}: ${text(value)}`;
+    })
+    .join(" | ");
+}
+
+function isReportType(value: string): value is ReportType {
+  return Object.prototype.hasOwnProperty.call(REPORT_TYPE_DEFINITIONS, value);
+}
+
+export async function registerPdfReportRun(input: {
+  reportType: ReportType;
+  outputKey: string;
+  outputLabel: string;
+  fileName: string;
+  fileDataUrl: string;
+  rowCount: number;
+  selectedColumns: string[];
+  filters?: ReportFilters;
+  reportMode?: string;
+}) {
+  const context = await requireStaffPermission("can_run_reports");
+  await assertReportTypeAccess(input.reportType, context.organizationId);
+  if (!text(input.fileDataUrl).startsWith("data:")) {
+    throw new Error("Generated PDF payload is invalid.");
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("report_runs").insert({
+    organization_id: context.organizationId,
+    domain_key: input.reportType,
+    executed_by: context.userId,
+    export_format: "pdf",
+    row_count: Math.max(0, Math.floor(Number(input.rowCount) || 0)),
+    included_pii: false,
+    execution_metadata: {
+      workflow: "constituent_report_builder",
+      report_mode: text(input.reportMode || "constituent"),
+      selected_columns: input.selectedColumns ?? [],
+      filters: input.filters ?? {},
+      output_key: text(input.outputKey),
+      output_label: text(input.outputLabel),
+      file_name: text(input.fileName),
+      file_data_url: input.fileDataUrl
+    }
+  });
+  if (error) throw error;
+}
+
+export async function listRecentReportHistory(input?: {
+  reportMode?: ReportHistoryMode | "";
+  outputType?: "csv" | "excel" | "pdf" | "";
+}) {
+  const context = await requireStaffPermission("can_run_reports");
+  const supabase = await createClient();
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  let query = supabase
+    .from("report_runs")
+    .select("id,domain_key,export_format,row_count,executed_by,execution_metadata,created_at")
+    .eq("organization_id", context.organizationId)
+    .not("export_format", "is", null)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(2000);
+  if (input?.outputType) {
+    query = query.eq("export_format", input.outputType);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  const userIds = Array.from(new Set((data ?? []).map((row) => text(row.executed_by)).filter(Boolean)));
+  const profilesResult = userIds.length
+    ? await supabase
+        .from("profiles")
+        .select("id, display_name, first_name, last_name, email")
+        .in("id", userIds)
+    : { data: [], error: null };
+  if (profilesResult.error) throw profilesResult.error;
+  const profileMap = new Map<string, Record<string, unknown>>();
+  for (const profile of profilesResult.data ?? []) {
+    profileMap.set(text(profile.id), profile);
+  }
+  const rows = (data ?? []).map((row) => {
+    const executionMetadata =
+      row.execution_metadata && typeof row.execution_metadata === "object"
+        ? (row.execution_metadata as Record<string, unknown>)
+        : {};
+    const reportMode = deriveHistoryMode(text(row.domain_key), executionMetadata);
+    const filters =
+      executionMetadata.filters && typeof executionMetadata.filters === "object"
+        ? (executionMetadata.filters as Record<string, unknown>)
+        : {};
+    const outputType = text(row.export_format || "unknown").toUpperCase();
+    const reportLabel = text(executionMetadata.output_label) || text(row.domain_key) || "Report";
+    return {
+      id: text(row.id),
+      reportMode,
+      reportName: reportLabel,
+      filterCriteria: summarizeFilters(filters),
+      outputType,
+      builtBy:
+        profileLabel(profileMap.get(text(row.executed_by))) || text(row.executed_by) || "Unknown",
+      generatedAt: text(row.created_at),
+      rowCount: toNumber(row.row_count),
+      downloadHref: `/api/reports/history/${text(row.id)}/download`
+    };
+  });
+  return input?.reportMode ? rows.filter((row) => row.reportMode === input.reportMode) : rows;
+}
+
+export async function downloadReportRunById(reportRunId: string) {
+  const context = await requireStaffPermission("can_run_reports");
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("report_runs")
+    .select("id,domain_key,export_format,execution_metadata,row_count")
+    .eq("organization_id", context.organizationId)
+    .eq("id", reportRunId)
+    .single();
+  if (error) throw error;
+  const metadata =
+    data.execution_metadata && typeof data.execution_metadata === "object"
+      ? (data.execution_metadata as Record<string, unknown>)
+      : {};
+  const reportTypeRaw = text(data.domain_key);
+  if (!isReportType(reportTypeRaw)) {
+    throw new Error("Stored report type is no longer supported.");
+  }
+  const exportFormat = lower(data.export_format);
+  if (exportFormat === "pdf") {
+    const dataUrl = text(metadata.file_data_url);
+    const fileName = text(metadata.file_name) || `${reportTypeRaw}-report.pdf`;
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) {
+      throw new Error("Stored PDF artifact is unavailable.");
+    }
+    const contentType = match[1] || "application/pdf";
+    const binary = Buffer.from(match[2], "base64");
+    return { fileName, contentType, data: binary };
+  }
+  if (exportFormat !== "csv" && exportFormat !== "excel") {
+    throw new Error("Stored report format is unsupported.");
+  }
+  const selectedColumns = Array.isArray(metadata.selected_columns)
+    ? metadata.selected_columns.map((entry) => text(entry)).filter(Boolean)
+    : defaultColumnsForType(reportTypeRaw);
+  const filters =
+    metadata.filters && typeof metadata.filters === "object"
+      ? (metadata.filters as ReportFilters)
+      : {};
+  const sort =
+    metadata.sort && typeof metadata.sort === "object"
+      ? (metadata.sort as ReportSort)
+      : undefined;
+  const reportResult = await runReport({
+    reportType: reportTypeRaw,
+    selectedColumns,
+    filters,
+    sort,
+    exportAll: true,
+    recordRun: false
+  });
+  if (exportFormat === "csv") {
+    const headers = reportResult.selectedColumns;
+    const csvRows = [
+      headers.join(","),
+      ...reportResult.rows.map((row) =>
+        headers
+          .map((header) => JSON.stringify(text((row as Record<string, unknown>)[header])))
+          .join(",")
+      )
+    ];
+    return {
+      fileName: text(metadata.file_name) || `${reportTypeRaw}-report.csv`,
+      contentType: "text/csv",
+      data: csvRows.join("\n")
+    };
+  }
+  const sheet = XLSX.utils.json_to_sheet(reportResult.rows as object[]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Report");
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  return {
+    fileName: text(metadata.file_name) || `${reportTypeRaw}-report.xlsx`,
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    data: buffer
+  };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { jsPDF } from "jspdf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,7 +49,7 @@ type MailTemplate = {
   margin_bottom_in: number;
 };
 
-type AveryLabelProduct = {
+type LabelProduct = {
   key: string;
   label: string;
   columns: number;
@@ -93,10 +93,38 @@ const PAPER_SIZE_OPTIONS: Array<{ key: PaperSize; label: string }> = [
   { key: "a5", label: "A5" }
 ];
 
-const AVERY_LABEL_PRODUCTS: AveryLabelProduct[] = [
+const MAIL_LABEL_PRODUCTS: LabelProduct[] = [
   {
     key: "avery_5160",
     label: 'Avery 5160 / 8160 (30 per sheet, 1" x 2.625")',
+    columns: 3,
+    rows: 10,
+    labelWidthIn: 2.625,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.1875,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5260",
+    label: 'Avery 5260 (30 per sheet, 1" x 2.625")',
+    columns: 3,
+    rows: 10,
+    labelWidthIn: 2.625,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.1875,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5960",
+    label: 'Avery 5960 (30 per sheet, 1" x 2.625", clear labels)',
     columns: 3,
     rows: 10,
     labelWidthIn: 2.625,
@@ -163,6 +191,160 @@ const AVERY_LABEL_PRODUCTS: AveryLabelProduct[] = [
     verticalGapIn: 0,
     pageWidthIn: 8.5,
     pageHeightIn: 11
+  },
+  {
+    key: "avery_8167",
+    label: 'Avery 8167 (80 per sheet, 0.5" x 1.75", return address)',
+    columns: 4,
+    rows: 20,
+    labelWidthIn: 1.75,
+    labelHeightIn: 0.5,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.25,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5167",
+    label: 'Avery 5167 (80 per sheet, 0.5" x 1.75", return address)',
+    columns: 4,
+    rows: 20,
+    labelWidthIn: 1.75,
+    labelHeightIn: 0.5,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.25,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5168",
+    label: 'Avery 5168 (4 per sheet, 3.5" x 5")',
+    columns: 2,
+    rows: 2,
+    labelWidthIn: 3.5,
+    labelHeightIn: 5,
+    topMarginIn: 0.5,
+    leftMarginIn: 0,
+    horizontalGapIn: 0,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5169",
+    label: 'Avery 5169 (4 per sheet, 3.5" x 5")',
+    columns: 2,
+    rows: 2,
+    labelWidthIn: 3.5,
+    labelHeightIn: 5,
+    topMarginIn: 0.5,
+    leftMarginIn: 0,
+    horizontalGapIn: 0,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "generic_30_up",
+    label: 'Generic 30-up sheet (1" x 2.625")',
+    columns: 3,
+    rows: 10,
+    labelWidthIn: 2.625,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.1875,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "generic_21_up",
+    label: 'Generic 21-up sheet (1.333" x 2.5")',
+    columns: 3,
+    rows: 7,
+    labelWidthIn: 2.5,
+    labelHeightIn: 1.333,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.25,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "generic_24_up",
+    label: 'Generic 24-up sheet (1" x 2", 4 x 6 layout)',
+    columns: 4,
+    rows: 6,
+    labelWidthIn: 2,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.25,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "generic_10_up",
+    label: 'Generic 10-up sheet (2" x 4")',
+    columns: 2,
+    rows: 5,
+    labelWidthIn: 4,
+    labelHeightIn: 2,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "dymo_30252",
+    label: 'Dymo 30252 compatible (1.125" x 3.5", 14-up)',
+    columns: 2,
+    rows: 7,
+    labelWidthIn: 3.5,
+    labelHeightIn: 1.125,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.5,
+    horizontalGapIn: 0.25,
+    verticalGapIn: 0.125,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "shipping_2x4",
+    label: 'Shipping labels 2" x 4" (6-up)',
+    columns: 2,
+    rows: 3,
+    labelWidthIn: 4,
+    labelHeightIn: 2,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.25,
+    horizontalGapIn: 0,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "shipping_4x6",
+    label: 'Shipping labels 4" x 6" (2-up)',
+    columns: 1,
+    rows: 2,
+    labelWidthIn: 4,
+    labelHeightIn: 6,
+    topMarginIn: 0,
+    leftMarginIn: 2.25,
+    horizontalGapIn: 0,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
   }
 ];
 
@@ -174,6 +356,17 @@ const defaultLetterEditorHtml = [
   "<p>Thank you for your continued partnership and support.</p>",
   "<p>Sincerely,<br/>Your Organization</p>"
 ].join("");
+
+const LETTER_TOKEN_REFERENCE = [
+  { token: "{{today}}", fieldName: "Today", description: "Current date based on browser locale." },
+  { token: "{{name}}", fieldName: "Constituent Name", description: "Contact or organization display name." },
+  { token: "{{address}}", fieldName: "Full Address", description: "Address, city, state, and postal code combined." },
+  { token: "{{email}}", fieldName: "Email", description: "Primary email for the constituent." },
+  { token: "{{phone}}", fieldName: "Phone", description: "Primary phone number for the constituent." },
+  { token: "{{city}}", fieldName: "City", description: "City value from constituent record." },
+  { token: "{{state}}", fieldName: "State", description: "State value from constituent record." },
+  { token: "{{zip}}", fieldName: "Postal Code", description: "Postal code value from constituent record." }
+] as const;
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -194,6 +387,14 @@ function paperSizeCss(size: PaperSize) {
   if (size === "a4") return "A4";
   if (size === "a5") return "A5";
   return "8.5in 11in";
+}
+
+function paperSizePoints(size: PaperSize): [number, number] {
+  if (size === "legal") return [612, 1008];
+  if (size === "tabloid") return [792, 1224];
+  if (size === "a4") return [595.28, 841.89];
+  if (size === "a5") return [419.53, 595.28];
+  return [612, 792];
 }
 
 function templateBodyToHtml(templateBody: string) {
@@ -234,6 +435,9 @@ export function ConstituentReportBuilder() {
   const [templatesLoaded, setTemplatesLoaded] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [letterPaperSize, setLetterPaperSize] = useState<PaperSize>("letter");
   const [letterMargins, setLetterMargins] = useState({
     top: 0.5,
@@ -242,9 +446,10 @@ export function ConstituentReportBuilder() {
     bottom: 0.5
   });
   const [letterEditorHtml, setLetterEditorHtml] = useState(defaultLetterEditorHtml);
+  const [editorFontFamily, setEditorFontFamily] = useState("Arial");
   const editorRef = useRef<HTMLDivElement | null>(null);
 
-  const [selectedAveryKey, setSelectedAveryKey] = useState("avery_5160");
+  const [selectedLabelProductKey, setSelectedLabelProductKey] = useState("avery_5160");
   const [labelMargins, setLabelMargins] = useState({
     top: 0,
     left: 0,
@@ -281,13 +486,11 @@ export function ConstituentReportBuilder() {
     for (const filter of metadata?.activeDefinition.filters ?? []) map.set(filter.key, filter);
     return map;
   }, [metadata?.activeDefinition.filters]);
-  const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
-    [templates, selectedTemplateId]
-  );
-  const selectedAveryProduct = useMemo(
-    () => AVERY_LABEL_PRODUCTS.find((entry) => entry.key === selectedAveryKey) ?? AVERY_LABEL_PRODUCTS[0],
-    [selectedAveryKey]
+  const selectedLabelProduct = useMemo(
+    () =>
+      MAIL_LABEL_PRODUCTS.find((entry) => entry.key === selectedLabelProductKey) ??
+      MAIL_LABEL_PRODUCTS[0],
+    [selectedLabelProductKey]
   );
 
   const filtersPayload = useMemo(
@@ -331,6 +534,106 @@ export function ConstituentReportBuilder() {
     editorRef.current.focus();
     document.execCommand(command, false, value);
     setLetterEditorHtml(editorRef.current.innerHTML);
+  }
+
+  function executeEditorToolbarCommand(
+    event: MouseEvent<HTMLButtonElement | HTMLSelectElement>,
+    command: string,
+    value?: string
+  ) {
+    event.preventDefault();
+    executeEditorCommand(command, value);
+  }
+
+  function applyTemplateSelection(templateId: string) {
+    setSelectedTemplateId(templateId);
+    if (!templateId) return;
+    const template = templates.find((entry) => entry.id === templateId);
+    if (!template) return;
+    setLetterPaperSize(template.paper_size);
+    setLetterMargins({
+      top: Number(template.margin_top_in ?? 0.5),
+      left: Number(template.margin_left_in ?? 0.5),
+      right: Number(template.margin_right_in ?? 0.5),
+      bottom: Number(template.margin_bottom_in ?? 0.5)
+    });
+    setLetterEditorHtml(templateBodyToHtml(template.template_body || ""));
+  }
+
+  async function insertSignatureImage(file: File) {
+    const allowedTypes = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
+    if (!allowedTypes.has(file.type)) {
+      setError("Please upload a PNG, JPG, or WEBP image.");
+      return;
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("Unable to read image file."));
+      reader.readAsDataURL(file);
+    });
+    if (!dataUrl) return;
+    if (editorRef.current) {
+      editorRef.current.focus();
+    }
+    document.execCommand(
+      "insertHTML",
+      false,
+      `<img src="${dataUrl}" alt="Signature" style="max-width:220px;max-height:120px;display:block;margin:8px 0;" />`
+    );
+    if (editorRef.current) {
+      setLetterEditorHtml(editorRef.current.innerHTML);
+    }
+  }
+
+  async function saveTemplateIfRequested() {
+    if (!saveAsTemplate) return;
+    const templateName = newTemplateName.trim();
+    if (!templateName) {
+      throw new Error("Enter a template name before saving.");
+    }
+    setSavingTemplate(true);
+    try {
+      const response = await fetch("/api/mail-builder/templates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: templateName,
+          paperSize: letterPaperSize,
+          templateBody: letterEditorHtml,
+          marginTopIn: letterMargins.top,
+          marginLeftIn: letterMargins.left,
+          marginRightIn: letterMargins.right,
+          marginBottomIn: letterMargins.bottom,
+          isActive: true
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message ?? "Unable to save template.");
+      }
+      const saved = payload?.template as Record<string, unknown> | null;
+      if (!saved) return;
+      const nextTemplate: MailTemplate = {
+        id: toText(saved.id),
+        name: toText(saved.name),
+        paper_size: toText(saved.paper_size) as PaperSize,
+        template_body: String(saved.template_body ?? ""),
+        margin_top_in: Number(saved.margin_top_in ?? 0.5),
+        margin_left_in: Number(saved.margin_left_in ?? 0.5),
+        margin_right_in: Number(saved.margin_right_in ?? 0.5),
+        margin_bottom_in: Number(saved.margin_bottom_in ?? 0.5)
+      };
+      setTemplates((prev) => {
+        const deduped = prev.filter((entry) => entry.id !== nextTemplate.id);
+        return [nextTemplate, ...deduped];
+      });
+      setSelectedTemplateId(nextTemplate.id);
+      setSaveAsTemplate(false);
+      setNewTemplateName("");
+    } finally {
+      setSavingTemplate(false);
+    }
   }
 
   async function loadMetadata() {
@@ -416,7 +719,13 @@ export function ConstituentReportBuilder() {
         reportType: "contacts",
         selectedColumns: selectedFields,
         filters: filtersPayload,
-        format
+        format,
+        executionMetadata: {
+          report_mode: reportMode,
+          workflow: "constituent_report_builder",
+          selected_columns: selectedFields,
+          filters: filtersPayload
+        }
       })
     });
     if (!response.ok) {
@@ -537,14 +846,19 @@ export function ConstituentReportBuilder() {
     });
   }
 
-  async function buildLetterMailerBlob() {
+  async function buildLetterMailerPdfBlob() {
     const recipientRows = await fetchFilteredConstituentsForMailer();
-    const mergedLetters = recipientRows
-      .map((row) => `<section class="letter">${applyLetterTokens(letterEditorHtml, row)}</section>`)
-      .join("\n");
-    const html = [
-      "<!doctype html>",
-      "<html><head><meta charset=\"utf-8\" /><title>Letter Mailer</title>",
+    const contentNode = document.createElement("div");
+    contentNode.style.position = "fixed";
+    contentNode.style.left = "-10000px";
+    contentNode.style.top = "0";
+    contentNode.style.width = "860px";
+    const mergedLetters = recipientRows.length
+      ? recipientRows
+          .map((row) => `<section class="letter">${applyLetterTokens(letterEditorHtml, row)}</section>`)
+          .join("\n")
+      : "<section class=\"letter\"><p>No matching recipients found.</p></section>";
+    contentNode.innerHTML = [
       "<style>",
       `@page { size: ${paperSizeCss(letterPaperSize)}; margin: ${letterMargins.top}in ${letterMargins.right}in ${letterMargins.bottom}in ${letterMargins.left}in; }`,
       "body{font-family:Arial,sans-serif;color:#0f172a;margin:0;}",
@@ -552,47 +866,121 @@ export function ConstituentReportBuilder() {
       ".letter:last-child{page-break-after:auto;}",
       "p{margin:0 0 8px;line-height:1.4;}",
       "ul,ol{margin:0 0 10px 20px;}",
-      "</style></head><body>",
-      mergedLetters || "<p>No matching recipients found.</p>",
-      "</body></html>"
+      "img{max-width:220px;max-height:120px;}",
+      "</style>",
+      mergedLetters
     ].join("\n");
-    return new Blob([html], { type: "text/html" });
+    document.body.appendChild(contentNode);
+    const pageFormat = paperSizePoints(letterPaperSize);
+    const documentPdf = new jsPDF({ unit: "pt", format: pageFormat });
+    const marginPoints = {
+      top: Math.max(0, Number(letterMargins.top || 0)) * 72,
+      left: Math.max(0, Number(letterMargins.left || 0)) * 72,
+      right: Math.max(0, Number(letterMargins.right || 0)) * 72
+    };
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => reject(new Error("Unable to render letter PDF.")), 60000);
+        documentPdf.html(contentNode, {
+          x: marginPoints.left,
+          y: marginPoints.top,
+          width: documentPdf.internal.pageSize.getWidth() - marginPoints.left - marginPoints.right,
+          autoPaging: "text",
+          html2canvas: { scale: 0.6, useCORS: true },
+          callback: () => {
+            window.clearTimeout(timeoutId);
+            resolve();
+          }
+        });
+      });
+      return documentPdf.output("blob");
+    } finally {
+      document.body.removeChild(contentNode);
+    }
   }
 
-  async function buildLabelMailerBlob() {
+  async function buildLabelMailerPdfBlob() {
     const recipientRows = await fetchFilteredConstituentsForMailer();
-    const perSheet = selectedAveryProduct.columns * selectedAveryProduct.rows;
+    const perSheet = selectedLabelProduct.columns * selectedLabelProduct.rows;
     const sheets = chunkArray(recipientRows, perSheet);
-    const sheetHtml = sheets
-      .map((sheetRows) => {
-        const labels = sheetRows
-          .map((row) => {
-            const address = [toText(row.address), toText(row.city), toText(row.state), toText(row.zip)]
-              .filter(Boolean)
-              .join(", ");
-            return `<article class="label"><div class="name">${toText(row.name) || "-"}</div><div class="address">${address || "-"}</div></article>`;
-          })
-          .join("");
-        return `<section class="sheet"><div class="labels">${labels}</div></section>`;
+    const document = new jsPDF({
+      unit: "in",
+      format: [selectedLabelProduct.pageWidthIn, selectedLabelProduct.pageHeightIn]
+    });
+    if (sheets.length === 0) {
+      document.setFont("helvetica", "normal");
+      document.setFontSize(12);
+      document.text("No matching recipients found.", 0.75, 1);
+      return document.output("blob");
+    }
+    for (let sheetIndex = 0; sheetIndex < sheets.length; sheetIndex += 1) {
+      if (sheetIndex > 0) {
+        document.addPage([selectedLabelProduct.pageWidthIn, selectedLabelProduct.pageHeightIn]);
+      }
+      const sheetRows = sheets[sheetIndex];
+      for (let itemIndex = 0; itemIndex < sheetRows.length; itemIndex += 1) {
+        const row = sheetRows[itemIndex];
+        const column = itemIndex % selectedLabelProduct.columns;
+        const rowNumber = Math.floor(itemIndex / selectedLabelProduct.columns);
+        const originX =
+          selectedLabelProduct.leftMarginIn +
+          labelMargins.left +
+          column * (selectedLabelProduct.labelWidthIn + selectedLabelProduct.horizontalGapIn);
+        const originY =
+          selectedLabelProduct.topMarginIn +
+          labelMargins.top +
+          rowNumber * (selectedLabelProduct.labelHeightIn + selectedLabelProduct.verticalGapIn);
+        const innerX = originX + 0.08;
+        let innerY = originY + 0.13;
+        const textWidth = Math.max(0.4, selectedLabelProduct.labelWidthIn - 0.16);
+        const name = toText(row.name) || "-";
+        const address = [toText(row.address), toText(row.city), toText(row.state), toText(row.zip)]
+          .filter(Boolean)
+          .join(", ");
+        document.setFont("helvetica", "bold");
+        document.setFontSize(10);
+        const nameLines = document.splitTextToSize(name, textWidth);
+        const limitedNameLines = Array.isArray(nameLines) ? nameLines.slice(0, 2) : [String(nameLines)];
+        document.text(limitedNameLines, innerX, innerY);
+        innerY += limitedNameLines.length * 0.14 + 0.03;
+        document.setFont("helvetica", "normal");
+        document.setFontSize(9);
+        const addressLines = document.splitTextToSize(address || "-", textWidth);
+        const limitedAddressLines = Array.isArray(addressLines)
+          ? addressLines.slice(0, 4)
+          : [String(addressLines)];
+        document.text(limitedAddressLines, innerX, innerY);
+      }
+    }
+    return document.output("blob");
+  }
+
+  async function blobToDataUrl(blob: Blob) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("Unable to encode generated report."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function registerPdfRunHistory(job: Pick<DownloadJob, "key" | "label" | "fileName">, blob: Blob) {
+    const dataUrl = await blobToDataUrl(blob);
+    await fetch("/api/reports/history/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        reportType: "contacts",
+        outputKey: job.key,
+        outputLabel: job.label,
+        fileName: job.fileName,
+        fileDataUrl: dataUrl,
+        rowCount: totalCount,
+        selectedColumns: selectedFields,
+        filters: filtersPayload,
+        reportMode
       })
-      .join("\n");
-    const html = [
-      "<!doctype html>",
-      "<html><head><meta charset=\"utf-8\" /><title>Label Mailer</title>",
-      "<style>",
-      `@page { size: ${selectedAveryProduct.pageWidthIn}in ${selectedAveryProduct.pageHeightIn}in; margin: 0; }`,
-      "body{margin:0;font-family:Arial,sans-serif;color:#0f172a;}",
-      `.sheet{width:${selectedAveryProduct.pageWidthIn}in;min-height:${selectedAveryProduct.pageHeightIn}in;box-sizing:border-box;padding-top:${selectedAveryProduct.topMarginIn + labelMargins.top}in;padding-left:${selectedAveryProduct.leftMarginIn + labelMargins.left}in;padding-right:${labelMargins.right}in;padding-bottom:${labelMargins.bottom}in;page-break-after:always;}`,
-      ".sheet:last-child{page-break-after:auto;}",
-      `.labels{display:grid;grid-template-columns:repeat(${selectedAveryProduct.columns}, ${selectedAveryProduct.labelWidthIn}in);column-gap:${selectedAveryProduct.horizontalGapIn}in;row-gap:${selectedAveryProduct.verticalGapIn}in;}`,
-      `.label{width:${selectedAveryProduct.labelWidthIn}in;height:${selectedAveryProduct.labelHeightIn}in;box-sizing:border-box;padding:0.08in 0.1in;overflow:hidden;}`,
-      ".name{font-size:11px;font-weight:700;line-height:1.2;}",
-      ".address{margin-top:3px;font-size:10px;line-height:1.2;}",
-      "</style></head><body>",
-      sheetHtml || "<p>No matching recipients found.</p>",
-      "</body></html>"
-    ].join("\n");
-    return new Blob([html], { type: "text/html" });
+    });
   }
 
   function buildPlannedJobs() {
@@ -622,14 +1010,14 @@ export function ConstituentReportBuilder() {
       jobs.push({
         key: "letter",
         label: "Letter Mailer",
-        fileName: "constituent-letter-mailer.html"
+        fileName: "constituent-letter-mailer.pdf"
       });
     }
     if (includeLabelMailer === "yes") {
       jobs.push({
         key: "labels",
         label: "Label Mailer",
-        fileName: "constituent-label-mailer.html"
+        fileName: "constituent-label-mailer.pdf"
       });
     }
     return jobs;
@@ -665,9 +1053,16 @@ export function ConstituentReportBuilder() {
         } else if (job.key === "activities") {
           blob = await buildActivityReportPdfBlob();
         } else if (job.key === "letter") {
-          blob = await buildLetterMailerBlob();
+          blob = await buildLetterMailerPdfBlob();
         } else {
-          blob = await buildLabelMailerBlob();
+          blob = await buildLabelMailerPdfBlob();
+        }
+        if (job.key === "activities" || job.key === "letter" || job.key === "labels") {
+          try {
+            await registerPdfRunHistory(job, blob);
+          } catch {
+            // Keep the generated download available even if history persistence fails.
+          }
         }
         const url = URL.createObjectURL(blob);
         setJobState(job.key, { status: "ready", url });
@@ -702,12 +1097,22 @@ export function ConstituentReportBuilder() {
     setStep("generate");
   }
 
-  function navigateAfterLetterSetupStep() {
-    if (includeLabelMailer === "yes") {
-      setStep("labelSetup");
-      return;
+  async function navigateAfterLetterSetupStep() {
+    try {
+      setError(null);
+      await saveTemplateIfRequested();
+      if (includeLabelMailer === "yes") {
+        setStep("labelSetup");
+        return;
+      }
+      setStep("generate");
+    } catch (navigationError) {
+      setError(
+        navigationError instanceof Error
+          ? navigationError.message
+          : "Unable to continue from letter setup."
+      );
     }
-    setStep("generate");
   }
 
   function navigateBackFromLabelSetup() {
@@ -736,23 +1141,11 @@ export function ConstituentReportBuilder() {
   }, [step]);
 
   useEffect(() => {
-    if (!editorRef.current) return;
+    if (step !== "letterSetup" || !editorRef.current) return;
     if (editorRef.current.innerHTML !== letterEditorHtml) {
       editorRef.current.innerHTML = letterEditorHtml;
     }
-  }, [letterEditorHtml]);
-
-  useEffect(() => {
-    if (!selectedTemplate) return;
-    setLetterPaperSize(selectedTemplate.paper_size);
-    setLetterMargins({
-      top: Number(selectedTemplate.margin_top_in ?? 0.5),
-      left: Number(selectedTemplate.margin_left_in ?? 0.5),
-      right: Number(selectedTemplate.margin_right_in ?? 0.5),
-      bottom: Number(selectedTemplate.margin_bottom_in ?? 0.5)
-    });
-    setLetterEditorHtml(templateBodyToHtml(selectedTemplate.template_body || ""));
-  }, [selectedTemplate]);
+  }, [step, letterEditorHtml]);
 
   useEffect(() => {
     return () => {
@@ -763,13 +1156,6 @@ export function ConstituentReportBuilder() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-md border border-slate-200 p-4">
-        <h3 className="text-base font-semibold text-slate-900">Report Builder</h3>
-        <p className="text-sm text-slate-600">
-          Build constituent reports through a guided step workflow.
-        </p>
-      </section>
-
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
       {step === "filters" ? (
@@ -1117,7 +1503,7 @@ export function ConstituentReportBuilder() {
           </p>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-md border border-slate-200 p-3">
-              <p className="mb-1 text-xs font-medium text-slate-600">Ask for Letter</p>
+              <p className="mb-1 text-xs font-medium text-slate-600">You like to print a mail letter?</p>
               <div className="flex gap-3">
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input
@@ -1140,7 +1526,7 @@ export function ConstituentReportBuilder() {
               </div>
             </div>
             <div className="rounded-md border border-slate-200 p-3">
-              <p className="mb-1 text-xs font-medium text-slate-600">Ask for Labels</p>
+              <p className="mb-1 text-xs font-medium text-slate-600">Will you need to print mailing labels?</p>
               <div className="flex gap-3">
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input
@@ -1183,7 +1569,7 @@ export function ConstituentReportBuilder() {
               <select
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                 value={selectedTemplateId}
-                onChange={(event) => setSelectedTemplateId(event.target.value)}
+                onChange={(event) => applyTemplateSelection(event.target.value)}
               >
                 <option value="">No template</option>
                 {templates.map((template) => (
@@ -1193,6 +1579,9 @@ export function ConstituentReportBuilder() {
                 ))}
               </select>
               {loadingTemplates ? <p className="mt-1 text-xs text-slate-500">Loading templates...</p> : null}
+              <p className="mt-1 text-xs text-slate-500">
+                Pick an existing template or keep "No template" and design your own.
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Page Size</label>
@@ -1210,90 +1599,157 @@ export function ConstituentReportBuilder() {
             </div>
           </div>
 
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+            <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={saveAsTemplate}
+                onChange={(event) => setSaveAsTemplate(event.target.checked)}
+              />
+              Save this as a new template
+            </label>
+            {saveAsTemplate ? (
+              <div className="mt-2">
+                <label className="mb-1 block text-xs font-medium text-slate-600">New Template Name</label>
+                <Input
+                  value={newTemplateName}
+                  onChange={(event) => setNewTemplateName(event.target.value)}
+                  placeholder="Example: Year-End Thank You Letter"
+                />
+              </div>
+            ) : null}
+          </div>
+
           <div className="rounded-md border border-slate-200 p-3">
             <p className="mb-2 text-xs font-medium text-slate-600">Text Editor</p>
             <div className="mb-2 flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("bold")}>
+              <Button
+                type="button"
+                variant="secondary"
+                onMouseDown={(event) => executeEditorToolbarCommand(event, "bold")}
+              >
                 Bold
               </Button>
-              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("italic")}>
+              <Button
+                type="button"
+                variant="secondary"
+                onMouseDown={(event) => executeEditorToolbarCommand(event, "italic")}
+              >
                 Italic
               </Button>
-              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("underline")}>
+              <Button
+                type="button"
+                variant="secondary"
+                onMouseDown={(event) => executeEditorToolbarCommand(event, "underline")}
+              >
                 Underline
               </Button>
-              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("insertUnorderedList")}>
+              <Button
+                type="button"
+                variant="secondary"
+                onMouseDown={(event) => executeEditorToolbarCommand(event, "insertUnorderedList")}
+              >
                 Bullets
               </Button>
-              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("insertOrderedList")}>
+              <Button
+                type="button"
+                variant="secondary"
+                onMouseDown={(event) => executeEditorToolbarCommand(event, "insertOrderedList")}
+              >
                 Numbered
               </Button>
               <select
                 className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                onChange={(event) => executeEditorCommand("fontName", event.target.value)}
-                defaultValue="Arial"
+                value={editorFontFamily}
+                onChange={(event) => {
+                  setEditorFontFamily(event.target.value);
+                  executeEditorCommand("fontName", event.target.value);
+                }}
               >
                 <option value="Arial">Arial</option>
                 <option value="Times New Roman">Times New Roman</option>
                 <option value="Georgia">Georgia</option>
                 <option value="Verdana">Verdana</option>
+                <option value="Brush Script MT">Brush Script MT</option>
+                <option value="Lucida Handwriting">Lucida Handwriting</option>
+                <option value="Comic Sans MS">Comic Sans MS</option>
               </select>
+              <label className="inline-flex cursor-pointer items-center rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                Upload Signature Image
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    void insertSignatureImage(file);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
             </div>
             <div
               ref={editorRef}
               className="min-h-48 rounded-md border border-slate-300 px-3 py-2 text-sm focus-within:ring-1 focus-within:ring-brand-300"
               contentEditable
               suppressContentEditableWarning
+              style={{ fontFamily: editorFontFamily }}
               onInput={(event) => setLetterEditorHtml((event.target as HTMLDivElement).innerHTML)}
             />
-            <p className="mt-2 text-xs text-slate-500">
-              You may use tokens like {"{{name}}"}, {"{{address}}"}, {"{{email}}"}, {"{{phone}}"}, {"{{today}}"}.
-            </p>
           </div>
 
           <div>
             <p className="mb-2 text-xs font-medium text-slate-600">Page Margins (inches, defaults to 0.5)</p>
             <div className="grid gap-3 md:grid-cols-4">
-              <Input
-                type="number"
-                step="0.05"
-                min={0}
-                value={letterMargins.top}
-                onChange={(event) =>
-                  setLetterMargins((prev) => ({ ...prev, top: Number(event.target.value || 0) }))
-                }
-                placeholder="Top"
-              />
-              <Input
-                type="number"
-                step="0.05"
-                min={0}
-                value={letterMargins.right}
-                onChange={(event) =>
-                  setLetterMargins((prev) => ({ ...prev, right: Number(event.target.value || 0) }))
-                }
-                placeholder="Right"
-              />
-              <Input
-                type="number"
-                step="0.05"
-                min={0}
-                value={letterMargins.bottom}
-                onChange={(event) =>
-                  setLetterMargins((prev) => ({ ...prev, bottom: Number(event.target.value || 0) }))
-                }
-                placeholder="Bottom"
-              />
-              <Input
-                type="number"
-                step="0.05"
-                min={0}
-                value={letterMargins.left}
-                onChange={(event) =>
-                  setLetterMargins((prev) => ({ ...prev, left: Number(event.target.value || 0) }))
-                }
-                placeholder="Left"
-              />
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Top Margin</label>
+                <Input
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  value={letterMargins.top}
+                  onChange={(event) =>
+                    setLetterMargins((prev) => ({ ...prev, top: Number(event.target.value || 0) }))
+                  }
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Right Margin</label>
+                <Input
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  value={letterMargins.right}
+                  onChange={(event) =>
+                    setLetterMargins((prev) => ({ ...prev, right: Number(event.target.value || 0) }))
+                  }
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Bottom Margin</label>
+                <Input
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  value={letterMargins.bottom}
+                  onChange={(event) =>
+                    setLetterMargins((prev) => ({ ...prev, bottom: Number(event.target.value || 0) }))
+                  }
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Left Margin</label>
+                <Input
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  value={letterMargins.left}
+                  onChange={(event) =>
+                    setLetterMargins((prev) => ({ ...prev, left: Number(event.target.value || 0) }))
+                  }
+                />
+              </div>
             </div>
           </div>
 
@@ -1301,9 +1757,37 @@ export function ConstituentReportBuilder() {
             <Button type="button" variant="secondary" disabled={!canNavigateBack} onClick={() => setStep("mailer")}>
               Back to Step 4
             </Button>
-            <Button type="button" onClick={navigateAfterLetterSetupStep}>
-              Continue
+            <Button type="button" onClick={() => void navigateAfterLetterSetupStep()} disabled={savingTemplate}>
+              {savingTemplate ? "Saving template..." : "Continue"}
             </Button>
+          </div>
+
+          <div className="rounded-md border border-slate-200">
+            <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Token Reference
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="px-3 py-2">Token</th>
+                    <th className="px-3 py-2">Field Name</th>
+                    <th className="px-3 py-2">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {LETTER_TOKEN_REFERENCE.map((entry) => (
+                    <tr key={entry.token} className="border-b border-slate-100">
+                      <td className="px-3 py-2">
+                        <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">{entry.token}</code>
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">{entry.fieldName}</td>
+                      <td className="px-3 py-2 text-slate-600">{entry.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       ) : null}
@@ -1312,23 +1796,26 @@ export function ConstituentReportBuilder() {
         <section className="space-y-4 rounded-md border border-slate-200 p-4">
           <p className="text-sm font-semibold text-slate-900">Step 6: Set up labels</p>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Avery Product</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Label Product</label>
             <select
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={selectedAveryKey}
-              onChange={(event) => setSelectedAveryKey(event.target.value)}
+              value={selectedLabelProductKey}
+              onChange={(event) => setSelectedLabelProductKey(event.target.value)}
             >
-              {AVERY_LABEL_PRODUCTS.map((product) => (
+              {MAIL_LABEL_PRODUCTS.map((product) => (
                 <option key={product.key} value={product.key}>
                   {product.label}
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-slate-500">
+              Includes Avery plus common generic and shipping label layouts.
+            </p>
           </div>
 
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
             <p>
-              {`Layout: ${selectedAveryProduct.columns} columns × ${selectedAveryProduct.rows} rows (${selectedAveryProduct.labelWidthIn}" × ${selectedAveryProduct.labelHeightIn}")`}
+              {`Layout: ${selectedLabelProduct.columns} columns × ${selectedLabelProduct.rows} rows (${selectedLabelProduct.labelWidthIn}" × ${selectedLabelProduct.labelHeightIn}")`}
             </p>
           </div>
 
@@ -1415,7 +1902,11 @@ export function ConstituentReportBuilder() {
 
           {canGenerate ? (
             <div className="rounded-md border border-slate-200 p-4">
-              <p className="text-lg font-semibold text-slate-900">Please wait, your reports are generating</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {hasPendingJobs
+                  ? "Please wait, your reports are generating"
+                  : "Congratulations, your reports are completed"}
+              </p>
               {hasPendingJobs ? (
                 <div className="mt-2 flex items-center gap-1 text-2xl text-brand-600">
                   <span className="animate-bounce">.</span>
@@ -1423,6 +1914,16 @@ export function ConstituentReportBuilder() {
                   <span className="animate-bounce [animation-delay:240ms]">.</span>
                 </div>
               ) : null}
+              {hasPendingJobs ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  Please stay on this page while outputs generate. After completion, you can leave and re-download from
+                  Report History.
+                </p>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">
+                  You can leave this page now. Completed files are available here and in Report History.
+                </p>
+              )}
               {loadingGeneration ? (
                 <p className="mt-2 text-xs text-slate-500">Processing outputs...</p>
               ) : null}

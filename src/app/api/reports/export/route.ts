@@ -12,7 +12,11 @@ export async function POST(request: Request) {
       selectedColumns: (payload.selectedColumns ?? []) as string[],
       filters: payload.filters ?? {},
       sort: payload.sort ?? undefined,
-      format: payload.format
+      format: payload.format,
+      executionMetadata:
+        payload.executionMetadata && typeof payload.executionMetadata === "object"
+          ? (payload.executionMetadata as Record<string, unknown>)
+          : undefined
     });
 
     const context = await requireSessionContext();

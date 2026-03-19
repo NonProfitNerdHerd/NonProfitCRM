@@ -73,6 +73,7 @@ const BASE_MENU: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/reports"),
     children: [
       { href: "/staff/reports/builder", label: "Report Builder" },
+      { href: "/staff/reports/history", label: "Report History" },
       { href: "/staff/reports", label: "Saved Reports" }
     ]
   }
