@@ -5,6 +5,10 @@ import { createNotification } from "@/lib/data/notifications";
 import { resolveMentions } from "@/lib/data/users";
 import { ensureConstituentOutreachProject } from "@/lib/data/projects";
 
+function toText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 function effectiveTaskStatus(task: {
   status: string;
   due_date: string | null;
@@ -61,6 +65,67 @@ export async function listTasks(filters?: {
     ...task,
     effective_status: effectiveTaskStatus(task)
   }));
+}
+
+export async function listMyCallSheetTasks() {
+  const context = await requireStaffPermission("can_view_dashboard");
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(
+      "id,title,description,priority,status,created_by,created_at,contact_id,contacts(first_name,last_name,preferred_name,phone)"
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("assigned_to", context.userId)
+    .not("contact_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (error) throw error;
+
+  const rows = (data ?? []).filter((row) => {
+    const status = toText(row.status).toLowerCase();
+    if (status === "completed" || status === "cancelled") return false;
+    const title = toText(row.title).toLowerCase();
+    const description = toText(row.description).toLowerCase();
+    return (
+      title.includes("call") ||
+      description.includes("follow-up type: call") ||
+      /\bcall\b/.test(description)
+    );
+  });
+
+  const creatorIds = Array.from(
+    new Set(rows.map((row) => toText(row.created_by)).filter(Boolean))
+  );
+  const { data: creatorProfiles, error: creatorError } = creatorIds.length
+    ? await supabase.from("profiles").select("id, display_name").in("id", creatorIds)
+    : { data: [], error: null as null | Error };
+  if (creatorError) throw creatorError;
+  const creatorMap = new Map(
+    (creatorProfiles ?? []).map((profile) => [
+      toText(profile.id),
+      toText(profile.display_name) || toText(profile.id)
+    ])
+  );
+
+  return rows.map((row) => {
+    const contact = Array.isArray(row.contacts) ? row.contacts[0] : row.contacts;
+    const preferredName = toText((contact as Record<string, unknown> | null)?.preferred_name);
+    const firstName = toText((contact as Record<string, unknown> | null)?.first_name);
+    const lastName = toText((contact as Record<string, unknown> | null)?.last_name);
+    const contactName = preferredName || `${firstName} ${lastName}`.trim() || "Unknown Contact";
+    const createdById = toText(row.created_by);
+    return {
+      id: toText(row.id),
+      title: toText(row.title) || "Task",
+      description: toText(row.description) || "",
+      priority: toText(row.priority) || "medium",
+      createdAt: toText(row.created_at) || null,
+      createdBy: creatorMap.get(createdById) || createdById || "Unknown",
+      contactName,
+      contactPhone: toText((contact as Record<string, unknown> | null)?.phone) || "-"
+    };
+  });
 }
 
 export async function taskFilterOptions() {

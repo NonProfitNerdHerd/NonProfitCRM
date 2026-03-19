@@ -201,7 +201,7 @@ export function MyTasksSideRail({
     applySnooze(until);
   }
 
-  const isTaskDetailPage = /\/staff\/tasks\/[^/?#]+/.test(pathname);
+  const isTaskDetailPage = /\/staff\/tasks\/[0-9a-f]{8}-[0-9a-f-]{27,36}(?:$|[/?#])/i.test(pathname);
   if (isTaskDetailPage) return null;
 
   return (
@@ -270,7 +270,13 @@ export function MyTasksSideRail({
               </div>
             </div>
 
-            <div className="mb-3 flex justify-end">
+            <div className="mb-3 flex flex-wrap justify-end gap-2">
+              <Link
+                href={withTenantPrefix("/staff/tasks/call-sheet")}
+                className="inline-flex items-center rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Print Call Sheet
+              </Link>
               <Link
                 href={withTenantPrefix("/staff/tasks")}
                 className="inline-flex items-center rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
