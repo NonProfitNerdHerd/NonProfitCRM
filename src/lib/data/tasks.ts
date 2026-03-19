@@ -167,6 +167,68 @@ export async function taskFilterOptions() {
   };
 }
 
+export type TaskAssociationContactOption = {
+  id: string;
+  label: string;
+  category: "Donor" | "Contact" | "Donor Organization" | "Organization";
+};
+
+function deriveTaskAssociationCategory(
+  row: Record<string, unknown>
+): TaskAssociationContactOption["category"] {
+  const entityType = toText(row.entity_type).toLowerCase() === "organization" ? "organization" : "person";
+  const trackingStatus = toText(row.tracking_status).toLowerCase();
+  const donorStatus = toText(row.donor_status).toLowerCase();
+  const isDonor = trackingStatus === "donor" || donorStatus === "active" || donorStatus === "lapsed";
+  if (entityType === "organization" && isDonor) return "Donor Organization";
+  if (entityType === "organization") return "Organization";
+  if (isDonor) return "Donor";
+  return "Contact";
+}
+
+function deriveTaskAssociationLabel(row: Record<string, unknown>) {
+  const entityType = toText(row.entity_type).toLowerCase() === "organization" ? "organization" : "person";
+  const preferredName = toText(row.preferred_name);
+  const firstName = toText(row.first_name);
+  const lastName = toText(row.last_name);
+  const organizationName = toText(row.organization_name);
+  if (entityType === "organization") {
+    return organizationName || preferredName || [firstName, lastName].filter(Boolean).join(" ") || "Unnamed Organization";
+  }
+  return preferredName || [firstName, lastName].filter(Boolean).join(" ") || "Unnamed Contact";
+}
+
+export async function listTaskAssociationContacts(): Promise<TaskAssociationContactOption[]> {
+  const context = await requireStaffPermission("can_view_dashboard");
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("contacts_safe_view")
+    .select(
+      "id,first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,donor_status"
+    )
+    .eq("organization_id", context.organizationId)
+    .order("organization_name", { ascending: true })
+    .order("last_name", { ascending: true })
+    .order("first_name", { ascending: true })
+    .limit(1500);
+  if (error) throw error;
+
+  return (data ?? [])
+    .map((row) => {
+      const item = row as Record<string, unknown>;
+      return {
+        id: toText(item.id),
+        label: deriveTaskAssociationLabel(item),
+        category: deriveTaskAssociationCategory(item)
+      };
+    })
+    .filter((option) => option.id.length > 0 && option.label.length > 0)
+    .sort((left, right) => {
+      if (left.category !== right.category) return left.category.localeCompare(right.category);
+      return left.label.localeCompare(right.label);
+    });
+}
+
 export async function createTask(input: {
   title: string;
   description?: string;

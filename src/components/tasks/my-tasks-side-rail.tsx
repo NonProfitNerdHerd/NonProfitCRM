@@ -20,6 +20,7 @@ export type MyTasksSideRailItem = {
 };
 
 type TaskType = "Call" | "Email" | "Mail" | "Other";
+type TaskAssociationCategory = "Donor" | "Contact" | "Donor Organization" | "Organization";
 
 function isOverdueTask(task: MyTasksSideRailItem) {
   if (task.completed_at || task.status === "completed" || task.status === "cancelled") return false;
@@ -32,13 +33,15 @@ export function MyTasksSideRail({
   defaultProjectId,
   projects,
   currentUserId,
-  assignableUsers
+  assignableUsers,
+  associationContacts
 }: {
   tasks: MyTasksSideRailItem[];
   defaultProjectId?: string | null;
   projects: Array<{ id: string; name: string }>;
   currentUserId: string;
   assignableUsers: Array<{ id: string; name: string }>;
+  associationContacts: Array<{ id: string; label: string; category: TaskAssociationCategory }>;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const pathname = usePathname();
@@ -56,6 +59,7 @@ export function MyTasksSideRail({
     taskType: "Other" as TaskType,
     projectId: defaultProjectId ?? "",
     assignedToUserId: currentUserId,
+    contactId: "",
     dueDate: "",
     priority: "medium" as "low" | "medium" | "high" | "urgent"
   });
@@ -99,6 +103,18 @@ export function MyTasksSideRail({
     }
     return options.sort((left, right) => left.name.localeCompare(right.name));
   }, [assignableUsers, currentUserId]);
+  const categorizedAssociationContacts = useMemo(() => {
+    const categories: TaskAssociationCategory[] = [
+      "Donor",
+      "Contact",
+      "Donor Organization",
+      "Organization"
+    ];
+    return categories.map((category) => ({
+      category,
+      options: associationContacts.filter((contact) => contact.category === category)
+    }));
+  }, [associationContacts]);
 
   useEffect(() => {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
@@ -163,6 +179,10 @@ export function MyTasksSideRail({
       setCreateError("Task title is required.");
       return;
     }
+    if (!createForm.description.trim()) {
+      setCreateError("Task description is required.");
+      return;
+    }
     if (!createForm.projectId) {
       setCreateError("Project selection is required.");
       return;
@@ -183,7 +203,8 @@ export function MyTasksSideRail({
           suspenseDate: createForm.dueDate || undefined,
           priority: createForm.priority,
           projectId: createForm.projectId,
-          assignedToUserId: createForm.assignedToUserId || undefined
+          assignedToUserId: createForm.assignedToUserId || undefined,
+          contactId: createForm.contactId || undefined
         })
       });
       const payload = await response.json().catch(() => null);
@@ -215,6 +236,7 @@ export function MyTasksSideRail({
         description: "",
         taskType: "Other",
         assignedToUserId: currentUserId,
+        contactId: "",
         dueDate: "",
         priority: "medium"
       }));
@@ -367,6 +389,7 @@ export function MyTasksSideRail({
                       setCreateForm((prev) => ({ ...prev, description: event.target.value }))
                     }
                     placeholder="Optional details"
+                    required
                   />
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
@@ -407,6 +430,31 @@ export function MyTasksSideRail({
                       ))}
                     </select>
                   </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Tie to Donor / Contact / Donor Organization / Organization
+                  </label>
+                  <select
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    value={createForm.contactId}
+                    onChange={(event) =>
+                      setCreateForm((prev) => ({ ...prev, contactId: event.target.value }))
+                    }
+                  >
+                    <option value="">No related record</option>
+                    {categorizedAssociationContacts.map((group) =>
+                      group.options.length > 0 ? (
+                        <optgroup key={group.category} label={group.category}>
+                          {group.options.map((contact) => (
+                            <option key={contact.id} value={contact.id}>
+                              {contact.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>

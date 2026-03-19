@@ -4,7 +4,7 @@ import { StaffSidebar } from "@/components/layout/staff-sidebar";
 import { StaffHeader } from "@/components/layout/staff-header";
 import { hasAnyStaffPermission, hasRoleKeys, requireStaffPermission } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
-import { listTasks } from "@/lib/data/tasks";
+import { listTaskAssociationContacts, listTasks } from "@/lib/data/tasks";
 import { ensureConstituentOutreachProject, listProjects } from "@/lib/data/projects";
 import { MyTasksSideRail, type MyTasksSideRailItem } from "@/components/tasks/my-tasks-side-rail";
 import { listOrganizationUsers } from "@/lib/data/users";
@@ -36,10 +36,11 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     .select("name,slug,logo_url")
     .eq("id", context.organizationId)
     .maybeSingle();
-  const [myTasks, projects, orgUsers] = await Promise.all([
+  const [myTasks, projects, orgUsers, associationContacts] = await Promise.all([
     listTasks({ assignedTo: context.userId }),
     listProjects({ status: "all" }),
-    listOrganizationUsers().catch(() => [])
+    listOrganizationUsers().catch(() => []),
+    listTaskAssociationContacts().catch(() => [])
   ]);
   let constituentOutreachProjectId: string | null = null;
   try {
@@ -94,6 +95,11 @@ export default async function StaffLayout({ children }: { children: ReactNode })
             String(user.display_name ?? "").trim() ||
             String(user.role_name ?? "").trim() ||
             "Staff User"
+        }))}
+        associationContacts={associationContacts.map((contact) => ({
+          id: String(contact.id ?? ""),
+          label: String(contact.label ?? ""),
+          category: contact.category
         }))}
         projects={(projects ?? []).map((project) => ({
           id: String(project.id ?? ""),
