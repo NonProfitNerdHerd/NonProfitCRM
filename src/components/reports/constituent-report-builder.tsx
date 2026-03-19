@@ -76,6 +76,15 @@ type TagSummaryRow = {
   level: number;
 };
 
+type TagTreeNode = {
+  tagId: string;
+  tagName: string;
+  tagPath: string;
+  level: number;
+  pathKey: string;
+  children: TagTreeNode[];
+};
+
 const previewColumnOrder = [
   "name",
   "entityType",
@@ -370,6 +379,60 @@ const LETTER_TOKEN_REFERENCE = [
   { token: "{{zip}}", fieldName: "Postal Code", description: "Postal code value from constituent record." }
 ] as const;
 
+const US_STATES: Array<{ code: string; name: string }> = [
+  { code: "AL", name: "Alabama" },
+  { code: "AK", name: "Alaska" },
+  { code: "AZ", name: "Arizona" },
+  { code: "AR", name: "Arkansas" },
+  { code: "CA", name: "California" },
+  { code: "CO", name: "Colorado" },
+  { code: "CT", name: "Connecticut" },
+  { code: "DE", name: "Delaware" },
+  { code: "FL", name: "Florida" },
+  { code: "GA", name: "Georgia" },
+  { code: "HI", name: "Hawaii" },
+  { code: "ID", name: "Idaho" },
+  { code: "IL", name: "Illinois" },
+  { code: "IN", name: "Indiana" },
+  { code: "IA", name: "Iowa" },
+  { code: "KS", name: "Kansas" },
+  { code: "KY", name: "Kentucky" },
+  { code: "LA", name: "Louisiana" },
+  { code: "ME", name: "Maine" },
+  { code: "MD", name: "Maryland" },
+  { code: "MA", name: "Massachusetts" },
+  { code: "MI", name: "Michigan" },
+  { code: "MN", name: "Minnesota" },
+  { code: "MS", name: "Mississippi" },
+  { code: "MO", name: "Missouri" },
+  { code: "MT", name: "Montana" },
+  { code: "NE", name: "Nebraska" },
+  { code: "NV", name: "Nevada" },
+  { code: "NH", name: "New Hampshire" },
+  { code: "NJ", name: "New Jersey" },
+  { code: "NM", name: "New Mexico" },
+  { code: "NY", name: "New York" },
+  { code: "NC", name: "North Carolina" },
+  { code: "ND", name: "North Dakota" },
+  { code: "OH", name: "Ohio" },
+  { code: "OK", name: "Oklahoma" },
+  { code: "OR", name: "Oregon" },
+  { code: "PA", name: "Pennsylvania" },
+  { code: "RI", name: "Rhode Island" },
+  { code: "SC", name: "South Carolina" },
+  { code: "SD", name: "South Dakota" },
+  { code: "TN", name: "Tennessee" },
+  { code: "TX", name: "Texas" },
+  { code: "UT", name: "Utah" },
+  { code: "VT", name: "Vermont" },
+  { code: "VA", name: "Virginia" },
+  { code: "WA", name: "Washington" },
+  { code: "WV", name: "West Virginia" },
+  { code: "WI", name: "Wisconsin" },
+  { code: "WY", name: "Wyoming" },
+  { code: "DC", name: "District of Columbia" }
+];
+
 function toText(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -465,14 +528,15 @@ export function ConstituentReportBuilder() {
   });
 
   const [filterSectionsOpen, setFilterSectionsOpen] = useState({
-    city: true,
+    city: false,
     state: false,
-    entityType: true,
+    entityType: false,
     trackingStatus: false,
     taskStatus: false,
     membershipStatus: false,
-    tags: true
+    tags: false
   });
+  const [expandedTagPaths, setExpandedTagPaths] = useState<Set<string>>(new Set());
 
   const availableColumns = useMemo(
     () => metadata?.activeDefinition.columns ?? [],
@@ -518,6 +582,34 @@ export function ConstituentReportBuilder() {
   const recordTypeOptions = filterMap.get("entityType")?.options ?? [];
   const trackingOptions = filterMap.get("trackingStatus")?.options ?? [];
   const taskStatusOptions = filterMap.get("taskStatus")?.options ?? [];
+  const tagTreeRoots = useMemo(() => {
+    const nodesByPath = new Map<string, TagTreeNode>();
+    const roots: TagTreeNode[] = [];
+    const sortedRows = [...tagSummaryRows].sort((a, b) => a.tagPath.localeCompare(b.tagPath));
+    for (const row of sortedRows) {
+      const pathKey = row.tagPath || row.tagName;
+      const parts = pathKey
+        .split(" > ")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const parentPath = parts.length > 1 ? parts.slice(0, -1).join(" > ") : "";
+      const node: TagTreeNode = {
+        tagId: row.tagId,
+        tagName: row.tagName,
+        tagPath: pathKey,
+        level: Math.max(1, row.level || parts.length || 1),
+        pathKey,
+        children: []
+      };
+      nodesByPath.set(pathKey, node);
+      if (parentPath && nodesByPath.has(parentPath)) {
+        nodesByPath.get(parentPath)?.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+    return roots;
+  }, [tagSummaryRows]);
 
   const canNavigateBack = !reportRunLocked;
   const canGenerate = downloadJobs.length > 0 && reportRunLocked;
@@ -555,6 +647,10 @@ export function ConstituentReportBuilder() {
     setFilterSectionsOpen((prev) => ({ ...prev, [section]: !prev[section] }));
   }
 
+  function sectionChevron(isOpen: boolean) {
+    return isOpen ? "▾" : "▸";
+  }
+
   function toggleMultiValueFilter(
     key: "entityType" | "trackingStatus" | "taskStatus" | "membershipStatus",
     value: string,
@@ -575,6 +671,56 @@ export function ConstituentReportBuilder() {
       else current.delete(tagId);
       return Array.from(current);
     });
+  }
+
+  function toggleTagPath(pathKey: string) {
+    setExpandedTagPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(pathKey)) next.delete(pathKey);
+      else next.add(pathKey);
+      return next;
+    });
+  }
+
+  function stateFilterLabel() {
+    const value = filters.state.trim();
+    if (!value) return "blank";
+    return value;
+  }
+
+  function renderTagNode(node: TagTreeNode, depth = 0) {
+    const hasChildren = node.children.length > 0;
+    const expanded = expandedTagPaths.has(node.pathKey);
+    const indent = depth * 16;
+    return (
+      <div key={`${node.pathKey}-${node.tagId}`}>
+        <div
+          className="flex items-center gap-2 rounded px-1 py-1 text-sm text-slate-700 hover:bg-slate-50"
+          style={{ paddingLeft: `${indent + 2}px` }}
+          title={node.tagPath}
+        >
+          {hasChildren ? (
+            <button
+              type="button"
+              className="w-4 text-left text-xs text-slate-600"
+              onClick={() => toggleTagPath(node.pathKey)}
+              aria-label={expanded ? `Collapse ${node.tagName}` : `Expand ${node.tagName}`}
+            >
+              {sectionChevron(expanded)}
+            </button>
+          ) : (
+            <span className="inline-block w-4 text-slate-300">•</span>
+          )}
+          <input
+            type="checkbox"
+            checked={selectedTagIds.includes(node.tagId)}
+            onChange={(event) => toggleTagFilter(node.tagId, event.target.checked)}
+          />
+          <span>{node.tagName}</span>
+        </div>
+        {hasChildren && expanded ? <div>{node.children.map((child) => renderTagNode(child, depth + 1))}</div> : null}
+      </div>
+    );
   }
 
   async function loadTagSummary() {
@@ -1297,8 +1443,11 @@ export function ConstituentReportBuilder() {
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
                       onClick={() => toggleSection("city")}
                     >
-                      <span>City</span>
-                      <span className="text-xs text-slate-500">{filterSectionsOpen.city ? "Collapse" : "Expand"}</span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">{sectionChevron(filterSectionsOpen.city)}</span>
+                        <span>City</span>
+                      </span>
+                      <span className="text-xs text-slate-500">{filters.city.trim() || "blank"}</span>
                     </button>
                     {filterSectionsOpen.city ? (
                       <div className="border-t border-slate-200 px-3 py-3">
@@ -1317,16 +1466,26 @@ export function ConstituentReportBuilder() {
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
                       onClick={() => toggleSection("state")}
                     >
-                      <span>State</span>
-                      <span className="text-xs text-slate-500">{filterSectionsOpen.state ? "Collapse" : "Expand"}</span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">{sectionChevron(filterSectionsOpen.state)}</span>
+                        <span>State</span>
+                      </span>
+                      <span className="text-xs text-slate-500">{stateFilterLabel()}</span>
                     </button>
                     {filterSectionsOpen.state ? (
                       <div className="border-t border-slate-200 px-3 py-3">
-                        <Input
+                        <select
+                          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                           value={filters.state}
                           onChange={(event) => setFilters((prev) => ({ ...prev, state: event.target.value }))}
-                          placeholder="Type state..."
-                        />
+                        >
+                          <option value="">Blank</option>
+                          {US_STATES.map((stateOption) => (
+                            <option key={stateOption.code} value={stateOption.name}>
+                              {stateOption.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     ) : null}
                   </section>
@@ -1337,7 +1496,10 @@ export function ConstituentReportBuilder() {
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
                       onClick={() => toggleSection("entityType")}
                     >
-                      <span>Entity Type</span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">{sectionChevron(filterSectionsOpen.entityType)}</span>
+                        <span>Entity Type</span>
+                      </span>
                       <span className="text-xs text-slate-500">
                         {filters.entityType.length > 0 ? `${filters.entityType.length} selected` : "None selected"}
                       </span>
@@ -1366,7 +1528,12 @@ export function ConstituentReportBuilder() {
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
                       onClick={() => toggleSection("trackingStatus")}
                     >
-                      <span>Tracking Status</span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.trackingStatus)}
+                        </span>
+                        <span>Tracking Status</span>
+                      </span>
                       <span className="text-xs text-slate-500">
                         {filters.trackingStatus.length > 0
                           ? `${filters.trackingStatus.length} selected`
@@ -1397,7 +1564,10 @@ export function ConstituentReportBuilder() {
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
                       onClick={() => toggleSection("taskStatus")}
                     >
-                      <span>Tasks by Status</span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">{sectionChevron(filterSectionsOpen.taskStatus)}</span>
+                        <span>Tasks by Status</span>
+                      </span>
                       <span className="text-xs text-slate-500">
                         {filters.taskStatus.length > 0 ? `${filters.taskStatus.length} selected` : "None selected"}
                       </span>
@@ -1426,7 +1596,12 @@ export function ConstituentReportBuilder() {
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
                       onClick={() => toggleSection("membershipStatus")}
                     >
-                      <span>Memberships</span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.membershipStatus)}
+                        </span>
+                        <span>Memberships</span>
+                      </span>
                       <span className="text-xs text-slate-500">
                         {filters.membershipStatus.length > 0
                           ? `${filters.membershipStatus.length} selected`
@@ -1457,7 +1632,10 @@ export function ConstituentReportBuilder() {
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
                       onClick={() => toggleSection("tags")}
                     >
-                      <span>Tags (Hierarchy)</span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">{sectionChevron(filterSectionsOpen.tags)}</span>
+                        <span>Tags (Hierarchy)</span>
+                      </span>
                       <span className="text-xs text-slate-500">
                         {selectedTagIds.length > 0 ? `${selectedTagIds.length} selected` : "None selected"}
                       </span>
@@ -1470,24 +1648,7 @@ export function ConstituentReportBuilder() {
                           <p className="text-sm text-slate-500">No tags available.</p>
                         ) : (
                           <div className="max-h-56 space-y-1 overflow-auto rounded-md border border-slate-200 p-2">
-                            {tagSummaryRows.map((tag) => {
-                              const indent = Math.max(0, tag.level - 1) * 16;
-                              return (
-                                <label
-                                  key={tag.tagId}
-                                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm text-slate-700 hover:bg-slate-50"
-                                  style={{ paddingLeft: `${indent + 4}px` }}
-                                  title={tag.tagPath}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedTagIds.includes(tag.tagId)}
-                                    onChange={(event) => toggleTagFilter(tag.tagId, event.target.checked)}
-                                  />
-                                  <span>{tag.tagName}</span>
-                                </label>
-                              );
-                            })}
+                            {tagTreeRoots.map((node) => renderTagNode(node))}
                           </div>
                         )}
                       </div>
@@ -1511,6 +1672,7 @@ export function ConstituentReportBuilder() {
                         membershipStatus: []
                       });
                       setSelectedTagIds([]);
+                      setExpandedTagPaths(new Set());
                       void loadPreview(1, pageSize);
                     }}
                   >

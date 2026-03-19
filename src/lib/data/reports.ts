@@ -84,6 +84,96 @@ function listOfText(value: unknown) {
   return single ? [single] : [];
 }
 
+const US_STATE_ENTRIES: Array<[string, string]> = [
+  ["AL", "Alabama"],
+  ["AK", "Alaska"],
+  ["AZ", "Arizona"],
+  ["AR", "Arkansas"],
+  ["CA", "California"],
+  ["CO", "Colorado"],
+  ["CT", "Connecticut"],
+  ["DE", "Delaware"],
+  ["FL", "Florida"],
+  ["GA", "Georgia"],
+  ["HI", "Hawaii"],
+  ["ID", "Idaho"],
+  ["IL", "Illinois"],
+  ["IN", "Indiana"],
+  ["IA", "Iowa"],
+  ["KS", "Kansas"],
+  ["KY", "Kentucky"],
+  ["LA", "Louisiana"],
+  ["ME", "Maine"],
+  ["MD", "Maryland"],
+  ["MA", "Massachusetts"],
+  ["MI", "Michigan"],
+  ["MN", "Minnesota"],
+  ["MS", "Mississippi"],
+  ["MO", "Missouri"],
+  ["MT", "Montana"],
+  ["NE", "Nebraska"],
+  ["NV", "Nevada"],
+  ["NH", "New Hampshire"],
+  ["NJ", "New Jersey"],
+  ["NM", "New Mexico"],
+  ["NY", "New York"],
+  ["NC", "North Carolina"],
+  ["ND", "North Dakota"],
+  ["OH", "Ohio"],
+  ["OK", "Oklahoma"],
+  ["OR", "Oregon"],
+  ["PA", "Pennsylvania"],
+  ["RI", "Rhode Island"],
+  ["SC", "South Carolina"],
+  ["SD", "South Dakota"],
+  ["TN", "Tennessee"],
+  ["TX", "Texas"],
+  ["UT", "Utah"],
+  ["VT", "Vermont"],
+  ["VA", "Virginia"],
+  ["WA", "Washington"],
+  ["WV", "West Virginia"],
+  ["WI", "Wisconsin"],
+  ["WY", "Wyoming"],
+  ["DC", "District of Columbia"]
+];
+
+const US_STATE_ALIAS_TO_CODE = (() => {
+  const aliases = new Map<string, string>();
+  for (const [code, name] of US_STATE_ENTRIES) {
+    aliases.set(code.toLowerCase(), code);
+    aliases.set(name.toLowerCase(), code);
+  }
+  return aliases;
+})();
+
+const US_STATE_CODE_TO_NAME = (() => {
+  const names = new Map<string, string>();
+  for (const [code, name] of US_STATE_ENTRIES) {
+    names.set(code, name);
+  }
+  return names;
+})();
+
+function matchesStateFilter(recordValue: unknown, filterValue: unknown) {
+  const filterRaw = lower(filterValue);
+  if (!filterRaw) return true;
+  const recordRaw = lower(recordValue);
+  if (!recordRaw) return false;
+  const recordCode = US_STATE_ALIAS_TO_CODE.get(recordRaw);
+  const filterCode = US_STATE_ALIAS_TO_CODE.get(filterRaw);
+  if (recordCode && filterCode) return recordCode === filterCode;
+  if (recordCode) {
+    const recordName = lower(US_STATE_CODE_TO_NAME.get(recordCode));
+    if (recordName === filterRaw) return true;
+  }
+  if (filterCode) {
+    const filterName = lower(US_STATE_CODE_TO_NAME.get(filterCode));
+    if (recordRaw === filterName) return true;
+  }
+  return recordRaw.includes(filterRaw);
+}
+
 function hasPermission(
   orgId: string,
   permissionKey: PermissionKey,
@@ -831,7 +921,9 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
           if (key === "city") {
             if (!containsValue(row.city, value) && !containsValue(row.mailingCity, value)) return false;
           } else if (key === "state") {
-            if (!containsValue(row.state, value) && !containsValue(row.mailingState, value)) return false;
+            if (!matchesStateFilter(row.state, value) && !matchesStateFilter(row.mailingState, value)) {
+              return false;
+            }
           } else if (!containsValue(row.zip, value) && !containsValue(row.mailingZip, value)) {
             return false;
           }
