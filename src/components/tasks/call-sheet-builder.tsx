@@ -153,15 +153,33 @@ export function CallSheetBuilder() {
   }
 
   if (loading) {
-    return <p className="text-sm text-slate-700">Your call sheet is being built.</p>;
+    return (
+      <div className="flex min-h-[52vh] flex-col items-center justify-center gap-5 text-center">
+        <p className="text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
+          Your call sheet is being built
+        </p>
+        <div className="inline-flex items-center gap-2" aria-label="Building call sheet">
+          <span className="h-3 w-3 animate-bounce rounded-full bg-brand-600 [animation-delay:0ms]" />
+          <span className="h-3 w-3 animate-bounce rounded-full bg-brand-600 [animation-delay:150ms]" />
+          <span className="h-3 w-3 animate-bounce rounded-full bg-brand-600 [animation-delay:300ms]" />
+        </div>
+      </div>
+    );
   }
 
   if (error) {
-    return <p className="text-sm text-red-700">{error}</p>;
+    return (
+      <div className="flex min-h-[52vh] items-center justify-center">
+        <p className="text-sm text-red-700">{error}</p>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-[52vh] flex-col items-center justify-center gap-4 text-center">
+      <p className="text-3xl font-bold tracking-tight text-slate-900 md:text-4xl">
+        Your call sheet is ready
+      </p>
       <p className="text-sm text-slate-600">
         Call sheet ready with {tasks.length} call task{tasks.length === 1 ? "" : "s"}.
       </p>
