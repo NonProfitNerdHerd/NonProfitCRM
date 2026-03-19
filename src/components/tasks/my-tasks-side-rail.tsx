@@ -19,6 +19,8 @@ export type MyTasksSideRailItem = {
   project_name?: string | null;
 };
 
+type TaskType = "Call" | "Email" | "Mail" | "Other";
+
 function isOverdueTask(task: MyTasksSideRailItem) {
   if (task.completed_at || task.status === "completed" || task.status === "cancelled") return false;
   if (!task.due_date) return false;
@@ -28,11 +30,15 @@ function isOverdueTask(task: MyTasksSideRailItem) {
 export function MyTasksSideRail({
   tasks,
   defaultProjectId,
-  projects
+  projects,
+  currentUserId,
+  assignableUsers
 }: {
   tasks: MyTasksSideRailItem[];
   defaultProjectId?: string | null;
   projects: Array<{ id: string; name: string }>;
+  currentUserId: string;
+  assignableUsers: Array<{ id: string; name: string }>;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const pathname = usePathname();
@@ -47,7 +53,9 @@ export function MyTasksSideRail({
   const [createForm, setCreateForm] = useState({
     title: "",
     description: "",
+    taskType: "Other" as TaskType,
     projectId: defaultProjectId ?? "",
+    assignedToUserId: currentUserId,
     dueDate: "",
     priority: "medium" as "low" | "medium" | "high" | "urgent"
   });
@@ -63,6 +71,12 @@ export function MyTasksSideRail({
       return prev;
     });
   }, [defaultProjectId, projects]);
+  useEffect(() => {
+    setCreateForm((prev) => {
+      if (prev.assignedToUserId) return prev;
+      return { ...prev, assignedToUserId: currentUserId };
+    });
+  }, [currentUserId]);
   const tenantPrefix = useMemo(() => {
     const staffIndex = pathname.indexOf("/staff");
     return staffIndex > 0 ? pathname.slice(0, staffIndex) : "";
@@ -72,6 +86,19 @@ export function MyTasksSideRail({
     [tenantPrefix]
   );
   const withTenantPrefix = (href: string) => `${tenantPrefix}${href}`;
+  const assigneeOptions = useMemo(() => {
+    const options: Array<{ id: string; name: string }> = [];
+    const seen = new Set<string>();
+    for (const user of assignableUsers) {
+      if (!user.id || seen.has(user.id)) continue;
+      options.push({ id: user.id, name: user.name });
+      seen.add(user.id);
+    }
+    if (!seen.has(currentUserId)) {
+      options.unshift({ id: currentUserId, name: "Me" });
+    }
+    return options.sort((left, right) => left.name.localeCompare(right.name));
+  }, [assignableUsers, currentUserId]);
 
   useEffect(() => {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
@@ -143,15 +170,20 @@ export function MyTasksSideRail({
     setCreating(true);
     setCreateError(null);
     try {
+      const typedDescription = createForm.description.trim();
+      const descriptionWithType = [`Follow-Up Type: ${createForm.taskType}`, typedDescription]
+        .filter(Boolean)
+        .join("\n");
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title: createForm.title.trim(),
-          description: createForm.description.trim() || undefined,
+          description: descriptionWithType || undefined,
           suspenseDate: createForm.dueDate || undefined,
           priority: createForm.priority,
-          projectId: createForm.projectId
+          projectId: createForm.projectId,
+          assignedToUserId: createForm.assignedToUserId || undefined
         })
       });
       const payload = await response.json().catch(() => null);
@@ -161,24 +193,28 @@ export function MyTasksSideRail({
       const createdId = String(payload?.id ?? "");
       if (!createdId) throw new Error("Task was created but no id was returned.");
       const selectedProject = projects.find((entry) => entry.id === createForm.projectId);
-      setTaskRows((prev) => [
-        {
-          id: createdId,
-          title: createForm.title.trim(),
-          due_date: createForm.dueDate || null,
-          status: "todo",
-          priority: createForm.priority,
-          completed_at: null,
-          parent_task_id: null,
-          project_id: createForm.projectId,
-          project_name: selectedProject?.name ?? null
-        },
-        ...prev
-      ]);
+      if (createForm.assignedToUserId === currentUserId) {
+        setTaskRows((prev) => [
+          {
+            id: createdId,
+            title: createForm.title.trim(),
+            due_date: createForm.dueDate || null,
+            status: "todo",
+            priority: createForm.priority,
+            completed_at: null,
+            parent_task_id: null,
+            project_id: createForm.projectId,
+            project_name: selectedProject?.name ?? null
+          },
+          ...prev
+        ]);
+      }
       setCreateForm((prev) => ({
         ...prev,
         title: "",
         description: "",
+        taskType: "Other",
+        assignedToUserId: currentUserId,
         dueDate: "",
         priority: "medium"
       }));
@@ -332,6 +368,45 @@ export function MyTasksSideRail({
                     }
                     placeholder="Optional details"
                   />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Task Type</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={createForm.taskType}
+                      onChange={(event) =>
+                        setCreateForm((prev) => ({
+                          ...prev,
+                          taskType: event.target.value as TaskType
+                        }))
+                      }
+                    >
+                      <option value="Call">Phone Call</option>
+                      <option value="Email">Email</option>
+                      <option value="Mail">Mail</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Assign To</label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={createForm.assignedToUserId}
+                      onChange={(event) =>
+                        setCreateForm((prev) => ({
+                          ...prev,
+                          assignedToUserId: event.target.value
+                        }))
+                      }
+                    >
+                      {assigneeOptions.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.id === currentUserId ? `${user.name} (Me)` : user.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>

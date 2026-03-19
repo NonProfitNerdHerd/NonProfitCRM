@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { listTasks } from "@/lib/data/tasks";
 import { ensureConstituentOutreachProject, listProjects } from "@/lib/data/projects";
 import { MyTasksSideRail, type MyTasksSideRailItem } from "@/components/tasks/my-tasks-side-rail";
+import { listOrganizationUsers } from "@/lib/data/users";
 
 export default async function StaffLayout({ children }: { children: ReactNode }) {
   const context = await requireStaffPermission("can_view_dashboard");
@@ -35,9 +36,10 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     .select("name,slug,logo_url")
     .eq("id", context.organizationId)
     .maybeSingle();
-  const [myTasks, projects] = await Promise.all([
+  const [myTasks, projects, orgUsers] = await Promise.all([
     listTasks({ assignedTo: context.userId }),
-    listProjects({ status: "all" })
+    listProjects({ status: "all" }),
+    listOrganizationUsers().catch(() => [])
   ]);
   let constituentOutreachProjectId: string | null = null;
   try {
@@ -85,6 +87,14 @@ export default async function StaffLayout({ children }: { children: ReactNode })
       <MyTasksSideRail
         tasks={myAssignedTasks}
         defaultProjectId={constituentOutreachProjectId}
+        currentUserId={context.userId}
+        assignableUsers={orgUsers.map((user) => ({
+          id: String(user.user_id ?? ""),
+          name:
+            String(user.display_name ?? "").trim() ||
+            String(user.role_name ?? "").trim() ||
+            "Staff User"
+        }))}
         projects={(projects ?? []).map((project) => ({
           id: String(project.id ?? ""),
           name: String(project.name ?? "-")
