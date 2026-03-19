@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from "react";
 import { jsPDF } from "jspdf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -381,14 +381,6 @@ function chunkArray<T>(items: T[], size: number) {
   return output;
 }
 
-function paperSizeCss(size: PaperSize) {
-  if (size === "legal") return "8.5in 14in";
-  if (size === "tabloid") return "11in 17in";
-  if (size === "a4") return "A4";
-  if (size === "a5") return "A5";
-  return "8.5in 11in";
-}
-
 function paperSizePoints(size: PaperSize): [number, number] {
   if (size === "legal") return [612, 1008];
   if (size === "tabloid") return [792, 1224];
@@ -460,12 +452,12 @@ export function ConstituentReportBuilder() {
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
 
   const [filters, setFilters] = useState({
-    entityType: "",
-    trackingStatus: "",
+    entityType: [] as string[],
+    trackingStatus: [] as string[],
     city: "",
     state: "",
-    taskStatus: "",
-    membershipStatus: ""
+    taskStatus: [] as string[],
+    membershipStatus: [] as string[]
   });
 
   const availableColumns = useMemo(
@@ -495,13 +487,13 @@ export function ConstituentReportBuilder() {
 
   const filtersPayload = useMemo(
     () => ({
-      entityType: filters.entityType || undefined,
-      trackingStatus: filters.trackingStatus || undefined,
+      entityType: filters.entityType.length > 0 ? filters.entityType : undefined,
+      trackingStatus: filters.trackingStatus.length > 0 ? filters.trackingStatus : undefined,
       city: filters.city || undefined,
       state: filters.state || undefined,
       tagIds: selectedTags.map((tag) => tag.id),
-      taskStatus: filters.taskStatus || undefined,
-      membershipStatus: filters.membershipStatus || undefined
+      taskStatus: filters.taskStatus.length > 0 ? filters.taskStatus : undefined,
+      membershipStatus: filters.membershipStatus.length > 0 ? filters.membershipStatus : undefined
     }),
     [filters, selectedTags]
   );
@@ -543,6 +535,12 @@ export function ConstituentReportBuilder() {
   ) {
     event.preventDefault();
     executeEditorCommand(command, value);
+  }
+
+  function selectValues(event: ChangeEvent<HTMLSelectElement>) {
+    return Array.from(event.target.selectedOptions)
+      .map((option) => option.value)
+      .filter(Boolean);
   }
 
   function applyTemplateSelection(templateId: string) {
@@ -846,57 +844,86 @@ export function ConstituentReportBuilder() {
     });
   }
 
+  function htmlToPrintableLines(html: string) {
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const raw = container.innerText.replace(/\r/g, "");
+    return raw.split("\n").map((line) => line.trim());
+  }
+
+  function extractInlineImages(html: string) {
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    return Array.from(container.querySelectorAll("img[src]"))
+      .map((img) => String(img.getAttribute("src") ?? ""))
+      .filter((src) => src.startsWith("data:image/"));
+  }
+
   async function buildLetterMailerPdfBlob() {
     const recipientRows = await fetchFilteredConstituentsForMailer();
-    const contentNode = document.createElement("div");
-    contentNode.style.position = "fixed";
-    contentNode.style.left = "-10000px";
-    contentNode.style.top = "0";
-    contentNode.style.width = "860px";
-    const mergedLetters = recipientRows.length
-      ? recipientRows
-          .map((row) => `<section class="letter">${applyLetterTokens(letterEditorHtml, row)}</section>`)
-          .join("\n")
-      : "<section class=\"letter\"><p>No matching recipients found.</p></section>";
-    contentNode.innerHTML = [
-      "<style>",
-      `@page { size: ${paperSizeCss(letterPaperSize)}; margin: ${letterMargins.top}in ${letterMargins.right}in ${letterMargins.bottom}in ${letterMargins.left}in; }`,
-      "body{font-family:Arial,sans-serif;color:#0f172a;margin:0;}",
-      ".letter{page-break-after:always;}",
-      ".letter:last-child{page-break-after:auto;}",
-      "p{margin:0 0 8px;line-height:1.4;}",
-      "ul,ol{margin:0 0 10px 20px;}",
-      "img{max-width:220px;max-height:120px;}",
-      "</style>",
-      mergedLetters
-    ].join("\n");
-    document.body.appendChild(contentNode);
     const pageFormat = paperSizePoints(letterPaperSize);
     const documentPdf = new jsPDF({ unit: "pt", format: pageFormat });
     const marginPoints = {
       top: Math.max(0, Number(letterMargins.top || 0)) * 72,
       left: Math.max(0, Number(letterMargins.left || 0)) * 72,
-      right: Math.max(0, Number(letterMargins.right || 0)) * 72
+      right: Math.max(0, Number(letterMargins.right || 0)) * 72,
+      bottom: Math.max(0, Number(letterMargins.bottom || 0)) * 72
     };
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const timeoutId = window.setTimeout(() => reject(new Error("Unable to render letter PDF.")), 60000);
-        documentPdf.html(contentNode, {
-          x: marginPoints.left,
-          y: marginPoints.top,
-          width: documentPdf.internal.pageSize.getWidth() - marginPoints.left - marginPoints.right,
-          autoPaging: "text",
-          html2canvas: { scale: 0.6, useCORS: true },
-          callback: () => {
-            window.clearTimeout(timeoutId);
-            resolve();
-          }
-        });
-      });
+    const contentWidth = documentPdf.internal.pageSize.getWidth() - marginPoints.left - marginPoints.right;
+    const pageHeight = documentPdf.internal.pageSize.getHeight();
+    if (recipientRows.length === 0) {
+      documentPdf.setFont("helvetica", "normal");
+      documentPdf.setFontSize(11);
+      documentPdf.text("No matching recipients found.", marginPoints.left, marginPoints.top + 14);
       return documentPdf.output("blob");
-    } finally {
-      document.body.removeChild(contentNode);
     }
+    for (let index = 0; index < recipientRows.length; index += 1) {
+      if (index > 0) {
+        documentPdf.addPage(pageFormat);
+      }
+      const mergedHtml = applyLetterTokens(letterEditorHtml, recipientRows[index]);
+      const lines = htmlToPrintableLines(mergedHtml);
+      const images = extractInlineImages(mergedHtml);
+      let y = marginPoints.top + 14;
+      const lineHeight = 14;
+      documentPdf.setFont("helvetica", "normal");
+      documentPdf.setFontSize(11);
+      for (const line of lines) {
+        if (!line) {
+          y += lineHeight;
+          continue;
+        }
+        const wrapped = documentPdf.splitTextToSize(line, contentWidth);
+        for (const wrappedLine of wrapped) {
+          if (y + lineHeight > pageHeight - marginPoints.bottom) {
+            documentPdf.addPage(pageFormat);
+            y = marginPoints.top + 14;
+          }
+          documentPdf.text(String(wrappedLine), marginPoints.left, y);
+          y += lineHeight;
+        }
+      }
+      for (const imageSrc of images) {
+        const imageType = imageSrc.startsWith("data:image/png")
+          ? "PNG"
+          : imageSrc.startsWith("data:image/webp")
+            ? "WEBP"
+            : "JPEG";
+        const imageWidth = 180;
+        const imageHeight = 60;
+        if (y + imageHeight > pageHeight - marginPoints.bottom) {
+          documentPdf.addPage(pageFormat);
+          y = marginPoints.top + 14;
+        }
+        try {
+          documentPdf.addImage(imageSrc, imageType, marginPoints.left, y, imageWidth, imageHeight);
+          y += imageHeight + 8;
+        } catch {
+          // Ignore unsupported embedded images without breaking PDF generation.
+        }
+      }
+    }
+    return documentPdf.output("blob");
   }
 
   async function buildLabelMailerPdfBlob() {
@@ -1194,15 +1221,14 @@ export function ConstituentReportBuilder() {
                 <p className="mb-2 text-sm font-semibold text-slate-900">Constituent Filters</p>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Record Type</label>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Entity Type</label>
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      multiple
+                      size={Math.min(Math.max(recordTypeOptions.length, 2), 4)}
                       value={filters.entityType}
-                      onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, entityType: event.target.value }))
-                      }
+                      onChange={(event) => setFilters((prev) => ({ ...prev, entityType: selectValues(event) }))}
                     >
-                      <option value="">All</option>
                       {recordTypeOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -1214,12 +1240,13 @@ export function ConstituentReportBuilder() {
                     <label className="mb-1 block text-xs font-medium text-slate-600">Tracking Status</label>
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      multiple
+                      size={Math.min(Math.max(trackingOptions.length, 2), 4)}
                       value={filters.trackingStatus}
                       onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, trackingStatus: event.target.value }))
+                        setFilters((prev) => ({ ...prev, trackingStatus: selectValues(event) }))
                       }
                     >
-                      <option value="">All</option>
                       {trackingOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -1264,12 +1291,11 @@ export function ConstituentReportBuilder() {
                     <label className="mb-1 block text-xs font-medium text-slate-600">Tasks by Status</label>
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      multiple
+                      size={Math.min(Math.max(taskStatusOptions.length, 2), 5)}
                       value={filters.taskStatus}
-                      onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, taskStatus: event.target.value }))
-                      }
+                      onChange={(event) => setFilters((prev) => ({ ...prev, taskStatus: selectValues(event) }))}
                     >
-                      <option value="">All</option>
                       {taskStatusOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -1281,12 +1307,13 @@ export function ConstituentReportBuilder() {
                     <label className="mb-1 block text-xs font-medium text-slate-600">Memberships</label>
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      multiple
+                      size={Math.min(Math.max(membershipOptions.length, 2), 4)}
                       value={filters.membershipStatus}
                       onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, membershipStatus: event.target.value }))
+                        setFilters((prev) => ({ ...prev, membershipStatus: selectValues(event) }))
                       }
                     >
-                      <option value="">All</option>
                       {membershipOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -1295,6 +1322,9 @@ export function ConstituentReportBuilder() {
                     </select>
                   </div>
                 </div>
+                <p className="text-xs text-slate-500">
+                  Tip: dropdown filters support multi-select (Ctrl/Cmd + click).
+                </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button type="button" variant="secondary" onClick={() => void loadPreview(1, pageSize)}>
                     {loadingPreview ? "Running..." : "Apply Filters"}
@@ -1304,12 +1334,12 @@ export function ConstituentReportBuilder() {
                     variant="secondary"
                     onClick={() => {
                       setFilters({
-                        entityType: "",
-                        trackingStatus: "",
+                        entityType: [],
+                        trackingStatus: [],
                         city: "",
                         state: "",
-                        taskStatus: "",
-                        membershipStatus: ""
+                        taskStatus: [],
+                        membershipStatus: []
                       });
                       setSelectedTags([]);
                       void loadPreview(1, pageSize);

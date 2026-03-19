@@ -76,6 +76,14 @@ function containsValue(value: unknown, query: unknown) {
   return lower(value).includes(search);
 }
 
+function listOfText(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => text(entry)).filter(Boolean);
+  }
+  const single = text(value);
+  return single ? [single] : [];
+}
+
 function hasPermission(
   orgId: string,
   permissionKey: PermissionKey,
@@ -822,11 +830,32 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
       }
 
       if (reportType === "contacts") {
-        if (key === "entityType" && text(row.entityType) !== text(value)) return false;
+        if (key === "entityType") {
+          const selected = listOfText(value);
+          if (selected.length > 0 && !selected.some((entry) => lower(entry) === lower(row.entityType))) {
+            return false;
+          }
+        }
         if (key === "contactType" && text(row.entityType) !== text(value)) return false;
         if (key === "membershipType" && !containsValue(row.membershipType, value)) return false;
-        if (key === "membershipStatus" && lower(row.membershipStatus) !== lower(value)) return false;
-        if (key === "trackingStatus" && lower(row.trackingStatus) !== lower(value)) return false;
+        if (key === "membershipStatus") {
+          const selected = listOfText(value);
+          if (
+            selected.length > 0 &&
+            !selected.some((entry) => lower(entry) === lower(row.membershipStatus))
+          ) {
+            return false;
+          }
+        }
+        if (key === "trackingStatus") {
+          const selected = listOfText(value);
+          if (
+            selected.length > 0 &&
+            !selected.some((entry) => lower(entry) === lower(row.trackingStatus))
+          ) {
+            return false;
+          }
+        }
         if (key === "donorKind" && lower(row.donorKind) !== lower(value)) return false;
         if (key === "hasEmail" && lower(row.hasEmail) !== lower(value)) return false;
         if (key === "hasPhone" && lower(row.hasPhone) !== lower(value)) return false;
@@ -842,7 +871,17 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
             if (!selectedTagIds.every((selectedTagId) => rowTagIds.includes(selectedTagId))) return false;
           }
         }
-        if (key === "taskStatus" && !containsValue(row.taskStatuses, value)) return false;
+        if (key === "taskStatus") {
+          const selected = listOfText(value).map((entry) => lower(entry));
+          if (selected.length > 0) {
+            const rowTaskStatuses = text(row.taskStatuses)
+              .split(",")
+              .map((entry) => lower(entry))
+              .map((entry) => entry.trim())
+              .filter(Boolean);
+            if (!selected.some((entry) => rowTaskStatuses.includes(entry))) return false;
+          }
+        }
         if (key === "campaignContains" && !containsValue(row.campaignList, value)) return false;
         if (key === "tagPathContains" && !containsValue(row.tagPathList, value)) return false;
         if (key === "lastActivityDateFrom" && !inDateRange(row.lastActivityDate, value, undefined)) return false;
