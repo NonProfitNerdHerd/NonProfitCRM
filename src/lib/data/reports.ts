@@ -286,8 +286,15 @@ async function buildContactRows(orgId: string) {
       .filter(Boolean)
       .join(", ");
     const lastActivityDate = lastActivity.get(contactId) ?? "";
-    const entityType = lower(contact.entity_type) === "organization" ? "Organization" : "Person";
     const trackingStatus = lower(contact.tracking_status) || "lead";
+    const entityType =
+      lower(contact.entity_type) === "organization"
+        ? trackingStatus === "donor"
+          ? "Donor Organization"
+          : "Organization"
+        : trackingStatus === "donor"
+          ? "Donor"
+          : "Contact";
     const tags = tagsByContact.get(contactId) ?? {
       ids: new Set<string>(),
       names: new Set<string>(),
@@ -832,11 +839,41 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
       if (reportType === "contacts") {
         if (key === "entityType") {
           const selected = listOfText(value);
-          if (selected.length > 0 && !selected.some((entry) => lower(entry) === lower(row.entityType))) {
+          const normalizedRowEntityType = lower(row.entityType);
+          if (
+            selected.length > 0 &&
+            !selected.some((entry) => {
+              const normalizedEntry = lower(entry);
+              if (normalizedEntry === "person") {
+                return normalizedRowEntityType === "donor" || normalizedRowEntityType === "contact";
+              }
+              if (normalizedEntry === "organization") {
+                return (
+                  normalizedRowEntityType === "organization" ||
+                  normalizedRowEntityType === "donor organization"
+                );
+              }
+              return normalizedEntry === normalizedRowEntityType;
+            })
+          ) {
             return false;
           }
         }
-        if (key === "contactType" && text(row.entityType) !== text(value)) return false;
+        if (key === "contactType") {
+          const normalizedValue = lower(value);
+          const normalizedRowEntityType = lower(row.entityType);
+          if (normalizedValue === "person") {
+            if (!(normalizedRowEntityType === "donor" || normalizedRowEntityType === "contact")) return false;
+          } else if (normalizedValue === "organization") {
+            if (
+              !(normalizedRowEntityType === "organization" || normalizedRowEntityType === "donor organization")
+            ) {
+              return false;
+            }
+          } else if (normalizedValue && normalizedValue !== normalizedRowEntityType) {
+            return false;
+          }
+        }
         if (key === "membershipType" && !containsValue(row.membershipType, value)) return false;
         if (key === "membershipStatus") {
           const selected = listOfText(value);

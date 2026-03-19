@@ -77,7 +77,9 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
         label: "Entity Type",
         type: "select",
         options: [
-          { label: "Person", value: "Person" },
+          { label: "Donor", value: "Donor" },
+          { label: "Contact", value: "Contact" },
+          { label: "Donor Organization", value: "Donor Organization" },
           { label: "Organization", value: "Organization" }
         ]
       },
