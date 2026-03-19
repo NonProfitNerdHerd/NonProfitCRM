@@ -11,7 +11,9 @@ export async function POST(request: Request) {
       filters: payload.filters,
       sort: payload.sort,
       page: payload.page,
-      pageSize: payload.pageSize
+      pageSize: payload.pageSize,
+      exportAll: Boolean(payload.exportAll),
+      recordRun: payload.recordRun
     });
     return NextResponse.json(result);
   } catch (error) {

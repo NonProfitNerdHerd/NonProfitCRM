@@ -254,16 +254,18 @@ async function buildContactRows(orgId: string) {
     lastActivity.set(contactId, text(activity.created_at));
   }
 
-  const tagsByContact = new Map<string, { names: Set<string>; paths: Set<string> }>();
+  const tagsByContact = new Map<string, { ids: Set<string>; names: Set<string>; paths: Set<string> }>();
   for (const row of contactTagsResult.data ?? []) {
     const contactId = text(row.contact_id);
     const tag = relatedSingle<Record<string, unknown>>(row.tags);
+    const tagId = text(tag?.id);
     const name = text(tag?.name);
     const path = text(tag?.path);
     if (!contactId) continue;
     if (!tagsByContact.has(contactId)) {
-      tagsByContact.set(contactId, { names: new Set<string>(), paths: new Set<string>() });
+      tagsByContact.set(contactId, { ids: new Set<string>(), names: new Set<string>(), paths: new Set<string>() });
     }
+    if (tagId) tagsByContact.get(contactId)?.ids.add(tagId);
     if (name) tagsByContact.get(contactId)?.names.add(name);
     if (path) tagsByContact.get(contactId)?.paths.add(path);
   }
@@ -278,7 +280,11 @@ async function buildContactRows(orgId: string) {
     const lastActivityDate = lastActivity.get(contactId) ?? "";
     const entityType = lower(contact.entity_type) === "organization" ? "Organization" : "Person";
     const trackingStatus = lower(contact.tracking_status) || "lead";
-    const tags = tagsByContact.get(contactId) ?? { names: new Set<string>(), paths: new Set<string>() };
+    const tags = tagsByContact.get(contactId) ?? {
+      ids: new Set<string>(),
+      names: new Set<string>(),
+      paths: new Set<string>()
+    };
     const taskStatuses = Array.from(taskStatusesByContact.get(contactId) ?? []).sort((a, b) =>
       a.localeCompare(b)
     );
@@ -303,6 +309,7 @@ async function buildContactRows(orgId: string) {
       membershipStatus: membership?.membershipStatus ?? text(contact.member_status),
       taskStatuses: taskStatuses.join(", "),
       campaignList: campaignList.join(", "),
+      tagIds: Array.from(tags.ids),
       tagList: Array.from(tags.names).sort((a, b) => a.localeCompare(b)).join(", "),
       tagPathList: Array.from(tags.paths).sort((a, b) => a.localeCompare(b)).join(" | "),
       totalDonations: donation.total,
@@ -824,6 +831,17 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
         if (key === "hasEmail" && lower(row.hasEmail) !== lower(value)) return false;
         if (key === "hasPhone" && lower(row.hasPhone) !== lower(value)) return false;
         if (key === "tagContains" && !containsValue(row.tagList, value)) return false;
+        if (key === "tagIds") {
+          const selectedTagIds = Array.isArray(value)
+            ? value.map((entry) => text(entry)).filter(Boolean)
+            : [text(value)].filter(Boolean);
+          if (selectedTagIds.length > 0) {
+            const rowTagIds = Array.isArray(row.tagIds)
+              ? (row.tagIds as unknown[]).map((entry) => text(entry)).filter(Boolean)
+              : [];
+            if (!selectedTagIds.every((selectedTagId) => rowTagIds.includes(selectedTagId))) return false;
+          }
+        }
         if (key === "taskStatus" && !containsValue(row.taskStatuses, value)) return false;
         if (key === "campaignContains" && !containsValue(row.campaignList, value)) return false;
         if (key === "tagPathContains" && !containsValue(row.tagPathList, value)) return false;
@@ -917,6 +935,15 @@ function selectColumns(rows: ReportRow[], selectedColumns: string[]) {
     }
     return projected;
   });
+}
+
+function chunk<T>(items: T[], size: number) {
+  if (size <= 0) return [items];
+  const output: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    output.push(items.slice(index, index + size));
+  }
+  return output;
 }
 
 async function assertReportTypeAccess(reportType: ReportType, orgId: string) {
@@ -1033,6 +1060,59 @@ export async function runReport(input: RunReportInput) {
     pageSize,
     pageCount: input.exportAll ? 1 : Math.max(1, Math.ceil(totalCount / pageSize))
   };
+}
+
+export async function getConstituentActivitiesReport(input: { filters?: ReportFilters }) {
+  const context = await requireStaffPermission("can_run_reports");
+  await assertReportTypeAccess("contacts", context.organizationId);
+
+  const filters = input.filters ?? {};
+  const contactRows = applyFilters(
+    "contacts",
+    await buildRowsByType("contacts", context.organizationId, filters),
+    filters
+  );
+  const contactIds = contactRows.map((row) => text(row.id)).filter(Boolean);
+  if (contactIds.length === 0) return [] as Array<Record<string, unknown>>;
+
+  const supabase = await createClient();
+  const activitiesByContact = new Map<string, Array<{ createdAt: string; summary: string; actionType: string }>>();
+  const contactIdChunks = chunk(contactIds, 250);
+  for (const contactIdChunk of contactIdChunks) {
+    const { data, error } = await supabase
+      .from("activity_log")
+      .select("related_contact_id,action_type,action_summary,created_at")
+      .eq("organization_id", context.organizationId)
+      .in("related_contact_id", contactIdChunk)
+      .order("created_at", { ascending: false })
+      .limit(20000);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const relatedContactId = text(row.related_contact_id);
+      if (!relatedContactId) continue;
+      if (!activitiesByContact.has(relatedContactId)) activitiesByContact.set(relatedContactId, []);
+      activitiesByContact.get(relatedContactId)?.push({
+        createdAt: text(row.created_at),
+        summary: text(row.action_summary),
+        actionType: text(row.action_type)
+      });
+    }
+  }
+
+  return contactRows.map((row) => {
+    const contactId = text(row.id);
+    const address = [text(row.address), text(row.city), text(row.state), text(row.zip)]
+      .filter(Boolean)
+      .join(", ");
+    return {
+      id: contactId,
+      name: text(row.name),
+      phone: text(row.phone),
+      email: text(row.email),
+      address,
+      activities: activitiesByContact.get(contactId) ?? []
+    };
+  });
 }
 
 export async function exportReport(input: {

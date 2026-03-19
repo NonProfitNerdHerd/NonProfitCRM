@@ -134,7 +134,6 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
         ]
       },
       { key: "tagContains", label: "Tag Contains", type: "text", placeholder: "Major Donor" },
-      { key: "campaignContains", label: "Campaign Contains", type: "text", placeholder: "General Donation" },
       {
         key: "tagPathContains",
         label: "Tag Path Contains",
