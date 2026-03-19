@@ -127,8 +127,26 @@ function profileLabel(profile: Record<string, unknown> | null | undefined) {
 
 async function buildContactRows(orgId: string) {
   const supabase = await createClient();
+  const selectColumns =
+    "id, first_name, last_name, preferred_name, organization_name, email, phone, address_line_1, address_line_2, city, state, postal_code, mailing_city, mailing_state, mailing_postal_code, entity_type, tracking_status, donor_status, member_status, created_at, updated_at";
+  const contactsRows: Array<Record<string, unknown>> = [];
+  const pageSize = 1000;
+  let offset = 0;
+  while (true) {
+    const contactsPage = await supabase
+      .from("contacts")
+      .select(selectColumns)
+      .eq("organization_id", orgId)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (contactsPage.error) throw contactsPage.error;
+    const page = (contactsPage.data ?? []) as Array<Record<string, unknown>>;
+    contactsRows.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+    if (offset > 250000) break;
+  }
   const [
-    contactsResult,
     donationsResult,
     membershipsResult,
     activityResult,
@@ -138,14 +156,6 @@ async function buildContactRows(orgId: string) {
     campaignsResult
   ] =
     await Promise.all([
-      supabase
-        .from("contacts")
-        .select(
-          "id, first_name, last_name, preferred_name, organization_name, email, phone, address_line_1, address_line_2, city, state, postal_code, mailing_city, mailing_state, mailing_postal_code, entity_type, tracking_status, donor_status, member_status, created_at, updated_at"
-        )
-        .eq("organization_id", orgId)
-        .order("last_name", { ascending: true })
-        .limit(10000),
       supabase
         .from("donations")
         .select("id, contact_id, amount, donation_date")
@@ -186,7 +196,6 @@ async function buildContactRows(orgId: string) {
         .limit(10000)
     ]);
 
-  if (contactsResult.error) throw contactsResult.error;
   if (donationsResult.error) throw donationsResult.error;
   if (membershipsResult.error) throw membershipsResult.error;
   if (activityResult.error) throw activityResult.error;
@@ -278,7 +287,7 @@ async function buildContactRows(orgId: string) {
     if (path) tagsByContact.get(contactId)?.paths.add(path);
   }
 
-  return (contactsResult.data ?? []).map((contact) => {
+  return contactsRows.map((contact) => {
     const contactId = text(contact.id);
     const donation = donationRollup.get(contactId) ?? { total: 0, count: 0 };
     const membership = membershipRollup.get(contactId);
