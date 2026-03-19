@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TagMultiSelectAutocomplete, type TagMultiSelectOption } from "@/components/tags/tag-multi-select-autocomplete";
+import {
+  TagMultiSelectAutocomplete,
+  type TagMultiSelectOption
+} from "@/components/tags/tag-multi-select-autocomplete";
 import { searchTagAutocompleteOptions } from "@/lib/tags/tag-autocomplete-client";
 
 type ReportMode = "constituent" | "transaction" | "project";
-type BuilderStep = "filters" | "fields" | "activities" | "downloads";
+type BuilderStep = "filters" | "fields" | "activities" | "mailer" | "letterSetup" | "labelSetup" | "generate";
 type RowRecord = Record<string, unknown>;
+type PaperSize = "letter" | "legal" | "tabloid" | "a4" | "a5";
 
 type ReportColumn = {
   key: string;
@@ -34,6 +38,42 @@ type MetadataPayload = {
   };
 };
 
+type MailTemplate = {
+  id: string;
+  name: string;
+  paper_size: PaperSize;
+  template_body: string;
+  margin_top_in: number;
+  margin_left_in: number;
+  margin_right_in: number;
+  margin_bottom_in: number;
+};
+
+type AveryLabelProduct = {
+  key: string;
+  label: string;
+  columns: number;
+  rows: number;
+  labelWidthIn: number;
+  labelHeightIn: number;
+  topMarginIn: number;
+  leftMarginIn: number;
+  horizontalGapIn: number;
+  verticalGapIn: number;
+  pageWidthIn: number;
+  pageHeightIn: number;
+};
+
+type DownloadJobKey = "excel" | "csv" | "activities" | "letter" | "labels";
+type DownloadJob = {
+  key: DownloadJobKey;
+  label: string;
+  fileName: string;
+  status: "pending" | "building" | "ready" | "error";
+  url: string | null;
+  message?: string;
+};
+
 const previewColumnOrder = [
   "name",
   "entityType",
@@ -45,12 +85,137 @@ const previewColumnOrder = [
   "taskStatuses"
 ] as const;
 
+const PAPER_SIZE_OPTIONS: Array<{ key: PaperSize; label: string }> = [
+  { key: "letter", label: 'Letter (8.5" x 11")' },
+  { key: "legal", label: 'Legal (8.5" x 14")' },
+  { key: "tabloid", label: 'Tabloid (11" x 17")' },
+  { key: "a4", label: "A4" },
+  { key: "a5", label: "A5" }
+];
+
+const AVERY_LABEL_PRODUCTS: AveryLabelProduct[] = [
+  {
+    key: "avery_5160",
+    label: 'Avery 5160 / 8160 (30 per sheet, 1" x 2.625")',
+    columns: 3,
+    rows: 10,
+    labelWidthIn: 2.625,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.1875,
+    horizontalGapIn: 0.125,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5161",
+    label: 'Avery 5161 / 8161 (20 per sheet, 1" x 4")',
+    columns: 2,
+    rows: 10,
+    labelWidthIn: 4,
+    labelHeightIn: 1,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5162",
+    label: 'Avery 5162 / 8162 (14 per sheet, 1.333" x 4")',
+    columns: 2,
+    rows: 7,
+    labelWidthIn: 4,
+    labelHeightIn: 1.333,
+    topMarginIn: 0.833,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5163",
+    label: 'Avery 5163 / 8163 (10 per sheet, 2" x 4")',
+    columns: 2,
+    rows: 5,
+    labelWidthIn: 4,
+    labelHeightIn: 2,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  },
+  {
+    key: "avery_5164",
+    label: 'Avery 5164 / 8164 (6 per sheet, 3.333" x 4")',
+    columns: 2,
+    rows: 3,
+    labelWidthIn: 4,
+    labelHeightIn: 3.333,
+    topMarginIn: 0.5,
+    leftMarginIn: 0.15625,
+    horizontalGapIn: 0.1875,
+    verticalGapIn: 0,
+    pageWidthIn: 8.5,
+    pageHeightIn: 11
+  }
+];
+
+const defaultLetterEditorHtml = [
+  "<p>{{today}}</p>",
+  "<p>{{name}}</p>",
+  "<p>{{address}}</p>",
+  "<p>Dear {{name}},</p>",
+  "<p>Thank you for your continued partnership and support.</p>",
+  "<p>Sincerely,<br/>Your Organization</p>"
+].join("");
+
+function toText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  if (size <= 0) return [items];
+  const output: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    output.push(items.slice(index, index + size));
+  }
+  return output;
+}
+
+function paperSizeCss(size: PaperSize) {
+  if (size === "legal") return "8.5in 14in";
+  if (size === "tabloid") return "11in 17in";
+  if (size === "a4") return "A4";
+  if (size === "a5") return "A5";
+  return "8.5in 11in";
+}
+
+function templateBodyToHtml(templateBody: string) {
+  const escaped = templateBody
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+  return escaped
+    .split("\n")
+    .map((line) => `<p>${line || "<br/>"}</p>`)
+    .join("");
+}
+
 export function ConstituentReportBuilder() {
   const [reportMode, setReportMode] = useState<ReportMode>("constituent");
   const [step, setStep] = useState<BuilderStep>("filters");
   const [error, setError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
-  const [loadingBuild, setLoadingBuild] = useState(false);
+  const [loadingGeneration, setLoadingGeneration] = useState(false);
+  const [reportRunLocked, setReportRunLocked] = useState(false);
   const [rows, setRows] = useState<RowRecord[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -64,16 +229,31 @@ export function ConstituentReportBuilder() {
   const [includeActivitiesReport, setIncludeActivitiesReport] = useState<"yes" | "no">("no");
   const [includeLetterMailer, setIncludeLetterMailer] = useState<"yes" | "no">("no");
   const [includeLabelMailer, setIncludeLabelMailer] = useState<"yes" | "no">("no");
-  const [downloadOptions, setDownloadOptions] = useState({
-    exportCsv: true,
-    exportExcel: true,
-    activitiesPdf: false,
-    letterMailer: false,
-    labelMailer: false
+
+  const [templates, setTemplates] = useState<MailTemplate[]>([]);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [letterPaperSize, setLetterPaperSize] = useState<PaperSize>("letter");
+  const [letterMargins, setLetterMargins] = useState({
+    top: 0.5,
+    left: 0.5,
+    right: 0.5,
+    bottom: 0.5
   });
-  const [preparedDownloads, setPreparedDownloads] = useState<
-    Array<{ key: string; label: string; url: string; fileName: string }>
-  >([]);
+  const [letterEditorHtml, setLetterEditorHtml] = useState(defaultLetterEditorHtml);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+
+  const [selectedAveryKey, setSelectedAveryKey] = useState("avery_5160");
+  const [labelMargins, setLabelMargins] = useState({
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0
+  });
+
+  const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
+
   const [filters, setFilters] = useState({
     entityType: "",
     trackingStatus: "",
@@ -83,7 +263,10 @@ export function ConstituentReportBuilder() {
     membershipStatus: ""
   });
 
-  const availableColumns = metadata?.activeDefinition.columns ?? [];
+  const availableColumns = useMemo(
+    () => metadata?.activeDefinition.columns ?? [],
+    [metadata?.activeDefinition.columns]
+  );
   const columnLabelMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const column of availableColumns) map.set(column.key, column.label);
@@ -98,6 +281,14 @@ export function ConstituentReportBuilder() {
     for (const filter of metadata?.activeDefinition.filters ?? []) map.set(filter.key, filter);
     return map;
   }, [metadata?.activeDefinition.filters]);
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
+    [templates, selectedTemplateId]
+  );
+  const selectedAveryProduct = useMemo(
+    () => AVERY_LABEL_PRODUCTS.find((entry) => entry.key === selectedAveryKey) ?? AVERY_LABEL_PRODUCTS[0],
+    [selectedAveryKey]
+  );
 
   const filtersPayload = useMemo(
     () => ({
@@ -112,6 +303,36 @@ export function ConstituentReportBuilder() {
     [filters, selectedTags]
   );
 
+  const isAllFieldsSelected =
+    availableColumns.length > 0 && selectedFields.length === availableColumns.length;
+  const membershipOptions = filterMap.get("membershipStatus")?.options ?? [];
+  const recordTypeOptions = filterMap.get("entityType")?.options ?? [];
+  const trackingOptions = filterMap.get("trackingStatus")?.options ?? [];
+  const taskStatusOptions = filterMap.get("taskStatus")?.options ?? [];
+
+  const canNavigateBack = !reportRunLocked;
+  const canGenerate = downloadJobs.length > 0 && reportRunLocked;
+  const hasPendingJobs = downloadJobs.some((job) => job.status === "pending" || job.status === "building");
+
+  function revokeDownloadUrls(jobs: DownloadJob[]) {
+    for (const job of jobs) {
+      if (job.url) URL.revokeObjectURL(job.url);
+    }
+  }
+
+  function setJobState(jobKey: DownloadJobKey, patch: Partial<DownloadJob>) {
+    setDownloadJobs((prev) =>
+      prev.map((job) => (job.key === jobKey ? { ...job, ...patch } : job))
+    );
+  }
+
+  function executeEditorCommand(command: string, value?: string) {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
+    document.execCommand(command, false, value);
+    setLetterEditorHtml(editorRef.current.innerHTML);
+  }
+
   async function loadMetadata() {
     setError(null);
     const response = await fetch("/api/reports/fields?reportType=contacts");
@@ -124,11 +345,35 @@ export function ConstituentReportBuilder() {
     setSelectedFields(payload.activeDefinition.defaultColumns ?? []);
     setCanExportCsv(Boolean(payload.capabilities?.canExportCsv));
     setCanExportExcel(Boolean(payload.capabilities?.canExportExcel));
-    setDownloadOptions((prev) => ({
-      ...prev,
-      exportCsv: Boolean(payload.capabilities?.canExportCsv),
-      exportExcel: Boolean(payload.capabilities?.canExportExcel)
-    }));
+  }
+
+  async function loadTemplates() {
+    if (templatesLoaded || loadingTemplates) return;
+    setLoadingTemplates(true);
+    try {
+      const response = await fetch("/api/mail-builder/templates");
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message ?? "Unable to load templates.");
+      }
+      const rows = Array.isArray(payload?.templates) ? payload.templates : [];
+      const mappedTemplates = rows.map((row: unknown) => ({
+        id: toText((row as { id?: unknown }).id),
+        name: toText((row as { name?: unknown }).name),
+        paper_size: toText((row as { paper_size?: unknown }).paper_size) as PaperSize,
+        template_body: String((row as { template_body?: unknown }).template_body ?? ""),
+        margin_top_in: Number((row as { margin_top_in?: unknown }).margin_top_in ?? 0.5),
+        margin_left_in: Number((row as { margin_left_in?: unknown }).margin_left_in ?? 0.5),
+        margin_right_in: Number((row as { margin_right_in?: unknown }).margin_right_in ?? 0.5),
+        margin_bottom_in: Number((row as { margin_bottom_in?: unknown }).margin_bottom_in ?? 0.5)
+      }));
+      setTemplates(mappedTemplates);
+      setTemplatesLoaded(true);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load templates.");
+    } finally {
+      setLoadingTemplates(false);
+    }
   }
 
   async function loadPreview(targetPage = page, targetPageSize = pageSize) {
@@ -163,13 +408,6 @@ export function ConstituentReportBuilder() {
     }
   }
 
-  function revokePreparedDownloads() {
-    for (const item of preparedDownloads) {
-      URL.revokeObjectURL(item.url);
-    }
-    setPreparedDownloads([]);
-  }
-
   async function buildExportBlob(format: "csv" | "excel") {
     const response = await fetch("/api/reports/export", {
       method: "POST",
@@ -198,7 +436,7 @@ export function ConstituentReportBuilder() {
     if (!response.ok) {
       throw new Error(payload?.message ?? "Unable to build activities report.");
     }
-    const rows = (payload?.rows ?? []) as Array<Record<string, unknown>>;
+    const contactRows = (payload?.rows ?? []) as Array<Record<string, unknown>>;
     const document = new jsPDF({ unit: "pt", format: "letter" });
     const pageHeight = document.internal.pageSize.getHeight();
     const marginLeft = 36;
@@ -206,12 +444,12 @@ export function ConstituentReportBuilder() {
     const contentWidth = document.internal.pageSize.getWidth() - marginLeft * 2;
     let y = marginTop;
 
-    for (let index = 0; index < rows.length; index += 1) {
-      const row = rows[index];
-      const name = String(row.name ?? "-");
-      const phone = String(row.phone ?? "-");
-      const email = String(row.email ?? "-");
-      const address = String(row.address ?? "-");
+    for (let index = 0; index < contactRows.length; index += 1) {
+      const row = contactRows[index];
+      const name = toText(row.name) || "-";
+      const phone = toText(row.phone) || "-";
+      const email = toText(row.email) || "-";
+      const address = toText(row.address) || "-";
       const activities = (Array.isArray(row.activities) ? row.activities : []) as Array<Record<string, unknown>>;
 
       const ensureSpace = (lineCount = 1) => {
@@ -225,8 +463,7 @@ export function ConstituentReportBuilder() {
       ensureSpace(4);
       document.setFont("helvetica", "bold");
       document.setFontSize(11);
-      const headline = `${name}  •  ${phone}  •  ${email}`;
-      const wrappedHeadline = document.splitTextToSize(headline, contentWidth);
+      const wrappedHeadline = document.splitTextToSize(`${name}  •  ${phone}  •  ${email}`, contentWidth);
       document.text(wrappedHeadline, marginLeft, y);
       y += wrappedHeadline.length * 14;
       document.setFont("helvetica", "normal");
@@ -241,9 +478,9 @@ export function ConstituentReportBuilder() {
         y += 14;
       } else {
         for (const activity of activities) {
-          const createdAt = String(activity.createdAt ?? "").slice(0, 10);
-          const actionType = String(activity.actionType ?? "");
-          const summary = String(activity.summary ?? "");
+          const createdAt = toText(activity.createdAt).slice(0, 10);
+          const actionType = toText(activity.actionType);
+          const summary = toText(activity.summary);
           const line = ` - ${createdAt} ${actionType ? `[${actionType}] ` : ""}${summary}`;
           const wrapped = document.splitTextToSize(line, contentWidth - 10);
           ensureSpace(wrapped.length);
@@ -281,132 +518,204 @@ export function ConstituentReportBuilder() {
     return (payload?.rows ?? []) as Array<Record<string, unknown>>;
   }
 
+  function applyLetterTokens(templateHtml: string, row: Record<string, unknown>) {
+    const today = new Date().toLocaleDateString();
+    const replacements: Record<string, string> = {
+      today,
+      name: toText(row.name),
+      phone: toText(row.phone),
+      email: toText(row.email),
+      address: [toText(row.address), toText(row.city), toText(row.state), toText(row.zip)]
+        .filter(Boolean)
+        .join(", "),
+      city: toText(row.city),
+      state: toText(row.state),
+      zip: toText(row.zip)
+    };
+    return templateHtml.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_match, token: string) => {
+      return replacements[token.toLowerCase()] ?? "";
+    });
+  }
+
   async function buildLetterMailerBlob() {
-    const rows = await fetchFilteredConstituentsForMailer();
-    const letterHtml = [
+    const recipientRows = await fetchFilteredConstituentsForMailer();
+    const mergedLetters = recipientRows
+      .map((row) => `<section class="letter">${applyLetterTokens(letterEditorHtml, row)}</section>`)
+      .join("\n");
+    const html = [
       "<!doctype html>",
       "<html><head><meta charset=\"utf-8\" /><title>Letter Mailer</title>",
       "<style>",
-      "body{font-family:Arial,sans-serif;margin:36px;color:#0f172a;}",
-      ".letter{page-break-after:always;margin-bottom:40px;}",
-      "h2{margin:0 0 8px;font-size:18px;}",
+      `@page { size: ${paperSizeCss(letterPaperSize)}; margin: ${letterMargins.top}in ${letterMargins.right}in ${letterMargins.bottom}in ${letterMargins.left}in; }`,
+      "body{font-family:Arial,sans-serif;color:#0f172a;margin:0;}",
+      ".letter{page-break-after:always;}",
+      ".letter:last-child{page-break-after:auto;}",
       "p{margin:0 0 8px;line-height:1.4;}",
+      "ul,ol{margin:0 0 10px 20px;}",
       "</style></head><body>",
-      ...rows.map((row) => {
-        const address = [row.address, row.city, row.state, row.zip].map((value) => String(value ?? "").trim()).filter(Boolean).join(", ");
-        return `<section class="letter">
-          <h2>${String(row.name ?? "-")}</h2>
-          <p>${address || "-"}</p>
-          <p>Dear ${String(row.name ?? "Constituent")},</p>
-          <p>Thank you for your continued support. We appreciate your partnership and wanted to share this update.</p>
-          <p>Sincerely,<br/>Your Organization</p>
-        </section>`;
-      }),
+      mergedLetters || "<p>No matching recipients found.</p>",
       "</body></html>"
     ].join("\n");
-    return new Blob([letterHtml], { type: "text/html" });
+    return new Blob([html], { type: "text/html" });
   }
 
   async function buildLabelMailerBlob() {
-    const rows = await fetchFilteredConstituentsForMailer();
-    const csvRows = [
-      "Name,Address,City,State,Zip",
-      ...rows.map((row) =>
-        [
-          JSON.stringify(String(row.name ?? "")),
-          JSON.stringify(String(row.address ?? "")),
-          JSON.stringify(String(row.city ?? "")),
-          JSON.stringify(String(row.state ?? "")),
-          JSON.stringify(String(row.zip ?? ""))
-        ].join(",")
-      )
-    ];
-    return new Blob([csvRows.join("\n")], { type: "text/csv" });
+    const recipientRows = await fetchFilteredConstituentsForMailer();
+    const perSheet = selectedAveryProduct.columns * selectedAveryProduct.rows;
+    const sheets = chunkArray(recipientRows, perSheet);
+    const sheetHtml = sheets
+      .map((sheetRows) => {
+        const labels = sheetRows
+          .map((row) => {
+            const address = [toText(row.address), toText(row.city), toText(row.state), toText(row.zip)]
+              .filter(Boolean)
+              .join(", ");
+            return `<article class="label"><div class="name">${toText(row.name) || "-"}</div><div class="address">${address || "-"}</div></article>`;
+          })
+          .join("");
+        return `<section class="sheet"><div class="labels">${labels}</div></section>`;
+      })
+      .join("\n");
+    const html = [
+      "<!doctype html>",
+      "<html><head><meta charset=\"utf-8\" /><title>Label Mailer</title>",
+      "<style>",
+      `@page { size: ${selectedAveryProduct.pageWidthIn}in ${selectedAveryProduct.pageHeightIn}in; margin: 0; }`,
+      "body{margin:0;font-family:Arial,sans-serif;color:#0f172a;}",
+      `.sheet{width:${selectedAveryProduct.pageWidthIn}in;min-height:${selectedAveryProduct.pageHeightIn}in;box-sizing:border-box;padding-top:${selectedAveryProduct.topMarginIn + labelMargins.top}in;padding-left:${selectedAveryProduct.leftMarginIn + labelMargins.left}in;padding-right:${labelMargins.right}in;padding-bottom:${labelMargins.bottom}in;page-break-after:always;}`,
+      ".sheet:last-child{page-break-after:auto;}",
+      `.labels{display:grid;grid-template-columns:repeat(${selectedAveryProduct.columns}, ${selectedAveryProduct.labelWidthIn}in);column-gap:${selectedAveryProduct.horizontalGapIn}in;row-gap:${selectedAveryProduct.verticalGapIn}in;}`,
+      `.label{width:${selectedAveryProduct.labelWidthIn}in;height:${selectedAveryProduct.labelHeightIn}in;box-sizing:border-box;padding:0.08in 0.1in;overflow:hidden;}`,
+      ".name{font-size:11px;font-weight:700;line-height:1.2;}",
+      ".address{margin-top:3px;font-size:10px;line-height:1.2;}",
+      "</style></head><body>",
+      sheetHtml || "<p>No matching recipients found.</p>",
+      "</body></html>"
+    ].join("\n");
+    return new Blob([html], { type: "text/html" });
   }
 
-  function downloadPreparedFile(item: { url: string; fileName: string }) {
-    const link = document.createElement("a");
-    link.href = item.url;
-    link.download = item.fileName;
-    link.click();
+  function buildPlannedJobs() {
+    const jobs: Array<Pick<DownloadJob, "key" | "label" | "fileName">> = [];
+    if (canExportExcel) {
+      jobs.push({
+        key: "excel",
+        label: "Simple Excel Export",
+        fileName: "constituent-report.xlsx"
+      });
+    }
+    if (canExportCsv) {
+      jobs.push({
+        key: "csv",
+        label: "Simple CSV Export",
+        fileName: "constituent-report.csv"
+      });
+    }
+    if (includeActivitiesReport === "yes") {
+      jobs.push({
+        key: "activities",
+        label: "Activities Report",
+        fileName: "constituent-activities-report.pdf"
+      });
+    }
+    if (includeLetterMailer === "yes") {
+      jobs.push({
+        key: "letter",
+        label: "Letter Mailer",
+        fileName: "constituent-letter-mailer.html"
+      });
+    }
+    if (includeLabelMailer === "yes") {
+      jobs.push({
+        key: "labels",
+        label: "Label Mailer",
+        fileName: "constituent-label-mailer.html"
+      });
+    }
+    return jobs;
   }
 
-  async function prepareSelectedDownloads() {
-    const hasSelection = Object.values(downloadOptions).some(Boolean);
-    if (!hasSelection) {
-      setError("Select at least one report output to prepare.");
+  async function startGeneration() {
+    const planned = buildPlannedJobs();
+    if (planned.length === 0) {
+      setError("No report outputs are available to generate.");
       return;
     }
     setError(null);
-    setLoadingBuild(true);
-    revokePreparedDownloads();
-    const nextDownloads: Array<{ key: string; label: string; url: string; fileName: string }> = [];
-    try {
-      if (downloadOptions.exportCsv && canExportCsv) {
-        const csvBlob = await buildExportBlob("csv");
-        nextDownloads.push({
-          key: "csv",
-          label: "Simple Export (CSV)",
-          url: URL.createObjectURL(csvBlob),
-          fileName: "constituent-report.csv"
-        });
-      }
-      if (downloadOptions.exportExcel && canExportExcel) {
-        const excelBlob = await buildExportBlob("excel");
-        nextDownloads.push({
-          key: "excel",
-          label: "Simple Export (Excel)",
-          url: URL.createObjectURL(excelBlob),
-          fileName: "constituent-report.xlsx"
-        });
-      }
-      if (downloadOptions.activitiesPdf && includeActivitiesReport === "yes") {
-        const activitiesBlob = await buildActivityReportPdfBlob();
-        nextDownloads.push({
-          key: "activities",
-          label: "Activities Report (PDF)",
-          url: URL.createObjectURL(activitiesBlob),
-          fileName: "constituent-activities-report.pdf"
-        });
-      }
-      if (downloadOptions.letterMailer && includeLetterMailer === "yes") {
-        const letterBlob = await buildLetterMailerBlob();
-        nextDownloads.push({
-          key: "letter-mailer",
-          label: "Letter Mailer",
-          url: URL.createObjectURL(letterBlob),
-          fileName: "constituent-letter-mailer.html"
-        });
-      }
-      if (downloadOptions.labelMailer && includeLabelMailer === "yes") {
-        const labelBlob = await buildLabelMailerBlob();
-        nextDownloads.push({
-          key: "label-mailer",
-          label: "Label Mailer",
-          url: URL.createObjectURL(labelBlob),
-          fileName: "constituent-label-mailer.csv"
-        });
-      }
-      setPreparedDownloads(nextDownloads);
-    } catch (buildError) {
-      setError(buildError instanceof Error ? buildError.message : "Unable to build report.");
-    } finally {
-      setLoadingBuild(false);
-    }
-  }
-
-  function toggleField(fieldKey: string) {
-    setSelectedFields((prev) =>
-      prev.includes(fieldKey) ? prev.filter((entry) => entry !== fieldKey) : [...prev, fieldKey]
+    setReportRunLocked(true);
+    setLoadingGeneration(true);
+    revokeDownloadUrls(downloadJobs);
+    setDownloadJobs(
+      planned.map((job) => ({
+        ...job,
+        status: "pending",
+        url: null
+      }))
     );
+    setStep("generate");
+
+    for (const job of planned) {
+      setJobState(job.key, { status: "building", message: undefined });
+      try {
+        let blob: Blob;
+        if (job.key === "excel") {
+          blob = await buildExportBlob("excel");
+        } else if (job.key === "csv") {
+          blob = await buildExportBlob("csv");
+        } else if (job.key === "activities") {
+          blob = await buildActivityReportPdfBlob();
+        } else if (job.key === "letter") {
+          blob = await buildLetterMailerBlob();
+        } else {
+          blob = await buildLabelMailerBlob();
+        }
+        const url = URL.createObjectURL(blob);
+        setJobState(job.key, { status: "ready", url });
+      } catch (jobError) {
+        setJobState(job.key, {
+          status: "error",
+          message: jobError instanceof Error ? jobError.message : "Unable to generate output."
+        });
+      }
+    }
+
+    setLoadingGeneration(false);
   }
 
-  function toggleSelectAll(checked: boolean) {
-    if (checked) {
-      setSelectedFields(availableColumns.map((column) => column.key));
+  function downloadJob(job: DownloadJob) {
+    if (!job.url || job.status !== "ready") return;
+    const link = document.createElement("a");
+    link.href = job.url;
+    link.download = job.fileName;
+    link.click();
+  }
+
+  function navigateAfterMailerStep() {
+    if (includeLetterMailer === "yes") {
+      setStep("letterSetup");
       return;
     }
-    setSelectedFields([]);
+    if (includeLabelMailer === "yes") {
+      setStep("labelSetup");
+      return;
+    }
+    setStep("generate");
+  }
+
+  function navigateAfterLetterSetupStep() {
+    if (includeLabelMailer === "yes") {
+      setStep("labelSetup");
+      return;
+    }
+    setStep("generate");
+  }
+
+  function navigateBackFromLabelSetup() {
+    if (includeLetterMailer === "yes") {
+      setStep("letterSetup");
+      return;
+    }
+    setStep("mailer");
   }
 
   useEffect(() => {
@@ -420,26 +729,44 @@ export function ConstituentReportBuilder() {
   }, [metadata, reportMode]);
 
   useEffect(() => {
-    return () => {
-      for (const item of preparedDownloads) {
-        URL.revokeObjectURL(item.url);
-      }
-    };
-  }, [preparedDownloads]);
+    if (step === "letterSetup") {
+      void loadTemplates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
-  const isAllFieldsSelected =
-    availableColumns.length > 0 && selectedFields.length === availableColumns.length;
-  const membershipOptions = filterMap.get("membershipStatus")?.options ?? [];
-  const recordTypeOptions = filterMap.get("entityType")?.options ?? [];
-  const trackingOptions = filterMap.get("trackingStatus")?.options ?? [];
-  const taskStatusOptions = filterMap.get("taskStatus")?.options ?? [];
+  useEffect(() => {
+    if (!editorRef.current) return;
+    if (editorRef.current.innerHTML !== letterEditorHtml) {
+      editorRef.current.innerHTML = letterEditorHtml;
+    }
+  }, [letterEditorHtml]);
+
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    setLetterPaperSize(selectedTemplate.paper_size);
+    setLetterMargins({
+      top: Number(selectedTemplate.margin_top_in ?? 0.5),
+      left: Number(selectedTemplate.margin_left_in ?? 0.5),
+      right: Number(selectedTemplate.margin_right_in ?? 0.5),
+      bottom: Number(selectedTemplate.margin_bottom_in ?? 0.5)
+    });
+    setLetterEditorHtml(templateBodyToHtml(selectedTemplate.template_body || ""));
+  }, [selectedTemplate]);
+
+  useEffect(() => {
+    return () => {
+      revokeDownloadUrls(downloadJobs);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-4">
       <section className="rounded-md border border-slate-200 p-4">
         <h3 className="text-base font-semibold text-slate-900">Report Builder</h3>
         <p className="text-sm text-slate-600">
-          Build constituent reports through a guided workflow.
+          Build constituent reports through a guided step workflow.
         </p>
       </section>
 
@@ -450,46 +777,30 @@ export function ConstituentReportBuilder() {
           <div>
             <p className="mb-2 text-sm font-semibold text-slate-900">Step 1: Choose Report Type</p>
             <div className="grid gap-2 md:grid-cols-3">
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-2 text-left text-sm ${
-                  reportMode === "constituent"
-                    ? "border-brand-300 bg-brand-50 text-brand-800"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                }`}
-                onClick={() => setReportMode("constituent")}
-              >
-                Constituent Report
-              </button>
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-2 text-left text-sm ${
-                  reportMode === "transaction"
-                    ? "border-brand-300 bg-brand-50 text-brand-800"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                }`}
-                onClick={() => setReportMode("transaction")}
-              >
-                Transaction Report
-              </button>
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-2 text-left text-sm ${
-                  reportMode === "project"
-                    ? "border-brand-300 bg-brand-50 text-brand-800"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                }`}
-                onClick={() => setReportMode("project")}
-              >
-                Project Report
-              </button>
+              {(["constituent", "transaction", "project"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`rounded-md border px-3 py-2 text-left text-sm ${
+                    reportMode === mode
+                      ? "border-brand-300 bg-brand-50 text-brand-800"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                  onClick={() => setReportMode(mode)}
+                >
+                  {mode === "constituent"
+                    ? "Constituent Report"
+                    : mode === "transaction"
+                      ? "Transaction Report"
+                      : "Project Report"}
+                </button>
+              ))}
             </div>
           </div>
 
           {reportMode !== "constituent" ? (
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-              {reportMode === "transaction" ? "Transaction Report" : "Project Report"} steps will be
-              configured next.
+              {reportMode === "transaction" ? "Transaction Report" : "Project Report"} steps will be configured next.
             </div>
           ) : (
             <>
@@ -514,9 +825,7 @@ export function ConstituentReportBuilder() {
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">
-                      Tracking Status
-                    </label>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Tracking Status</label>
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                       value={filters.trackingStatus}
@@ -536,9 +845,7 @@ export function ConstituentReportBuilder() {
                     <label className="mb-1 block text-xs font-medium text-slate-600">City</label>
                     <Input
                       value={filters.city}
-                      onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, city: event.target.value }))
-                      }
+                      onChange={(event) => setFilters((prev) => ({ ...prev, city: event.target.value }))}
                       placeholder="City"
                     />
                   </div>
@@ -546,9 +853,7 @@ export function ConstituentReportBuilder() {
                     <label className="mb-1 block text-xs font-medium text-slate-600">State</label>
                     <Input
                       value={filters.state}
-                      onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, state: event.target.value }))
-                      }
+                      onChange={(event) => setFilters((prev) => ({ ...prev, state: event.target.value }))}
                       placeholder="State"
                     />
                   </div>
@@ -557,7 +862,7 @@ export function ConstituentReportBuilder() {
                     <TagMultiSelectAutocomplete
                       selected={selectedTags}
                       onChange={setSelectedTags}
-                      placeholder="Start typing tag names..."
+                      placeholder="Start typing tags..."
                       emptyHint="No matching tags."
                       loadOptions={(query) =>
                         searchTagAutocompleteOptions({
@@ -570,9 +875,7 @@ export function ConstituentReportBuilder() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">
-                      Tasks by Status
-                    </label>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Tasks by Status</label>
                     <select
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                       value={filters.taskStatus}
@@ -732,7 +1035,13 @@ export function ConstituentReportBuilder() {
             <input
               type="checkbox"
               checked={isAllFieldsSelected}
-              onChange={(event) => toggleSelectAll(event.target.checked)}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  setSelectedFields(availableColumns.map((column) => column.key));
+                } else {
+                  setSelectedFields([]);
+                }
+              }}
             />
             Select All
           </label>
@@ -742,14 +1051,20 @@ export function ConstituentReportBuilder() {
                 <input
                   type="checkbox"
                   checked={selectedFields.includes(column.key)}
-                  onChange={() => toggleField(column.key)}
+                  onChange={() =>
+                    setSelectedFields((prev) =>
+                      prev.includes(column.key)
+                        ? prev.filter((entry) => entry !== column.key)
+                        : [...prev, column.key]
+                    )
+                  }
                 />
                 {column.label}
               </label>
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="secondary" onClick={() => setStep("filters")}>
+            <Button type="button" variant="secondary" disabled={!canNavigateBack} onClick={() => setStep("filters")}>
               Back to Filters
             </Button>
             <Button type="button" onClick={() => setStep("activities")} disabled={selectedFields.length === 0}>
@@ -762,13 +1077,13 @@ export function ConstituentReportBuilder() {
       {step === "activities" ? (
         <section className="space-y-4 rounded-md border border-slate-200 p-4">
           <p className="text-sm font-semibold text-slate-900">
-            Step 3: Include an Activities Report as well?
+            Step 3: Do you want to include an Activities Report as well?
           </p>
           <div className="flex gap-3">
             <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
               <input
                 type="radio"
-                name="include-activities-report"
+                name="include-activities"
                 checked={includeActivitiesReport === "yes"}
                 onChange={() => setIncludeActivitiesReport("yes")}
               />
@@ -777,7 +1092,7 @@ export function ConstituentReportBuilder() {
             <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
               <input
                 type="radio"
-                name="include-activities-report"
+                name="include-activities"
                 checked={includeActivitiesReport === "no"}
                 onChange={() => setIncludeActivitiesReport("no")}
               />
@@ -785,176 +1100,371 @@ export function ConstituentReportBuilder() {
             </label>
           </div>
           <div className="flex gap-2">
-            <Button type="button" variant="secondary" onClick={() => setStep("fields")}>
+            <Button type="button" variant="secondary" disabled={!canNavigateBack} onClick={() => setStep("fields")}>
               Back to Fields
             </Button>
-            <Button type="button" onClick={() => setStep("downloads")}>
+            <Button type="button" onClick={() => setStep("mailer")}>
               Continue to Step 4
             </Button>
           </div>
         </section>
       ) : null}
 
-      {step === "downloads" ? (
+      {step === "mailer" ? (
         <section className="space-y-4 rounded-md border border-slate-200 p-4">
           <p className="text-sm font-semibold text-slate-900">
-            Step 4: Download and Mailer Options
+            Step 4: Do you want to print off letters and labels?
           </p>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-md border border-slate-200 p-3">
-              <p className="mb-2 text-sm font-medium text-slate-800">
-                Would you like letters and labels printed for a mailer?
-              </p>
               <p className="mb-1 text-xs font-medium text-slate-600">Ask for Letter</p>
-              <div className="mb-3 flex gap-3">
+              <div className="flex gap-3">
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input
                     type="radio"
-                    name="include-letter-mailer"
+                    name="letter-mailer"
                     checked={includeLetterMailer === "yes"}
-                    onChange={() => {
-                      setIncludeLetterMailer("yes");
-                      setDownloadOptions((prev) => ({ ...prev, letterMailer: true }));
-                    }}
+                    onChange={() => setIncludeLetterMailer("yes")}
                   />
                   Yes
                 </label>
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input
                     type="radio"
-                    name="include-letter-mailer"
+                    name="letter-mailer"
                     checked={includeLetterMailer === "no"}
-                    onChange={() => {
-                      setIncludeLetterMailer("no");
-                      setDownloadOptions((prev) => ({ ...prev, letterMailer: false }));
-                    }}
+                    onChange={() => setIncludeLetterMailer("no")}
                   />
                   No
                 </label>
               </div>
+            </div>
+            <div className="rounded-md border border-slate-200 p-3">
               <p className="mb-1 text-xs font-medium text-slate-600">Ask for Labels</p>
               <div className="flex gap-3">
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input
                     type="radio"
-                    name="include-label-mailer"
+                    name="label-mailer"
                     checked={includeLabelMailer === "yes"}
-                    onChange={() => {
-                      setIncludeLabelMailer("yes");
-                      setDownloadOptions((prev) => ({ ...prev, labelMailer: true }));
-                    }}
+                    onChange={() => setIncludeLabelMailer("yes")}
                   />
                   Yes
                 </label>
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input
                     type="radio"
-                    name="include-label-mailer"
+                    name="label-mailer"
                     checked={includeLabelMailer === "no"}
-                    onChange={() => {
-                      setIncludeLabelMailer("no");
-                      setDownloadOptions((prev) => ({ ...prev, labelMailer: false }));
-                    }}
+                    onChange={() => setIncludeLabelMailer("no")}
                   />
                   No
                 </label>
               </div>
             </div>
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" disabled={!canNavigateBack} onClick={() => setStep("activities")}>
+              Back to Step 3
+            </Button>
+            <Button type="button" onClick={navigateAfterMailerStep}>
+              Continue
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
-            <div className="rounded-md border border-slate-200 p-3">
-              <p className="mb-2 text-sm font-medium text-slate-800">
-                Select report outputs you want to download
-              </p>
-              <div className="space-y-2 text-sm">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={downloadOptions.exportExcel}
-                    disabled={!canExportExcel}
-                    onChange={(event) =>
-                      setDownloadOptions((prev) => ({ ...prev, exportExcel: event.target.checked }))
-                    }
-                  />
-                  A simple Excel export of the data
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={downloadOptions.exportCsv}
-                    disabled={!canExportCsv}
-                    onChange={(event) =>
-                      setDownloadOptions((prev) => ({ ...prev, exportCsv: event.target.checked }))
-                    }
-                  />
-                  A simple CSV export of the data
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={downloadOptions.activitiesPdf}
-                    disabled={includeActivitiesReport !== "yes"}
-                    onChange={(event) =>
-                      setDownloadOptions((prev) => ({ ...prev, activitiesPdf: event.target.checked }))
-                    }
-                  />
-                  Activities Report (PDF)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={downloadOptions.letterMailer}
-                    disabled={includeLetterMailer !== "yes"}
-                    onChange={(event) =>
-                      setDownloadOptions((prev) => ({ ...prev, letterMailer: event.target.checked }))
-                    }
-                  />
-                  Letter Mailer
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={downloadOptions.labelMailer}
-                    disabled={includeLabelMailer !== "yes"}
-                    onChange={(event) =>
-                      setDownloadOptions((prev) => ({ ...prev, labelMailer: event.target.checked }))
-                    }
-                  />
-                  Label Mailer
-                </label>
-              </div>
+      {step === "letterSetup" ? (
+        <section className="space-y-4 rounded-md border border-slate-200 p-4">
+          <p className="text-sm font-semibold text-slate-900">Step 5: Set up the letter mailer</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Template</label>
+              <select
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={selectedTemplateId}
+                onChange={(event) => setSelectedTemplateId(event.target.value)}
+              >
+                <option value="">No template</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+              {loadingTemplates ? <p className="mt-1 text-xs text-slate-500">Loading templates...</p> : null}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Page Size</label>
+              <select
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={letterPaperSize}
+                onChange={(event) => setLetterPaperSize(event.target.value as PaperSize)}
+              >
+                {PAPER_SIZE_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={() => setStep("activities")}>
-              Back to Step 3
-            </Button>
-            <Button type="button" onClick={() => void prepareSelectedDownloads()} disabled={loadingBuild}>
-              {loadingBuild ? "Preparing..." : "Prepare Selected Downloads"}
-            </Button>
+          <div className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-xs font-medium text-slate-600">Text Editor</p>
+            <div className="mb-2 flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("bold")}>
+                Bold
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("italic")}>
+                Italic
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("underline")}>
+                Underline
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("insertUnorderedList")}>
+                Bullets
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => executeEditorCommand("insertOrderedList")}>
+                Numbered
+              </Button>
+              <select
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                onChange={(event) => executeEditorCommand("fontName", event.target.value)}
+                defaultValue="Arial"
+              >
+                <option value="Arial">Arial</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Verdana">Verdana</option>
+              </select>
+            </div>
+            <div
+              ref={editorRef}
+              className="min-h-48 rounded-md border border-slate-300 px-3 py-2 text-sm focus-within:ring-1 focus-within:ring-brand-300"
+              contentEditable
+              suppressContentEditableWarning
+              onInput={(event) => setLetterEditorHtml((event.target as HTMLDivElement).innerHTML)}
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              You may use tokens like {"{{name}}"}, {"{{address}}"}, {"{{email}}"}, {"{{phone}}"}, {"{{today}}"}.
+            </p>
           </div>
 
-          {loadingBuild ? (
-            <div className="rounded-md border border-slate-200 p-4 text-center">
-              <p className="text-lg font-semibold text-slate-900">Please wait as your report is being built</p>
-              <div className="mt-2 flex items-center justify-center gap-1 text-2xl text-brand-600">
-                <span className="animate-bounce">.</span>
-                <span className="animate-bounce [animation-delay:120ms]">.</span>
-                <span className="animate-bounce [animation-delay:240ms]">.</span>
-              </div>
+          <div>
+            <p className="mb-2 text-xs font-medium text-slate-600">Page Margins (inches, defaults to 0.5)</p>
+            <div className="grid gap-3 md:grid-cols-4">
+              <Input
+                type="number"
+                step="0.05"
+                min={0}
+                value={letterMargins.top}
+                onChange={(event) =>
+                  setLetterMargins((prev) => ({ ...prev, top: Number(event.target.value || 0) }))
+                }
+                placeholder="Top"
+              />
+              <Input
+                type="number"
+                step="0.05"
+                min={0}
+                value={letterMargins.right}
+                onChange={(event) =>
+                  setLetterMargins((prev) => ({ ...prev, right: Number(event.target.value || 0) }))
+                }
+                placeholder="Right"
+              />
+              <Input
+                type="number"
+                step="0.05"
+                min={0}
+                value={letterMargins.bottom}
+                onChange={(event) =>
+                  setLetterMargins((prev) => ({ ...prev, bottom: Number(event.target.value || 0) }))
+                }
+                placeholder="Bottom"
+              />
+              <Input
+                type="number"
+                step="0.05"
+                min={0}
+                value={letterMargins.left}
+                onChange={(event) =>
+                  setLetterMargins((prev) => ({ ...prev, left: Number(event.target.value || 0) }))
+                }
+                placeholder="Left"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" disabled={!canNavigateBack} onClick={() => setStep("mailer")}>
+              Back to Step 4
+            </Button>
+            <Button type="button" onClick={navigateAfterLetterSetupStep}>
+              Continue
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {step === "labelSetup" ? (
+        <section className="space-y-4 rounded-md border border-slate-200 p-4">
+          <p className="text-sm font-semibold text-slate-900">Step 6: Set up labels</p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Avery Product</label>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={selectedAveryKey}
+              onChange={(event) => setSelectedAveryKey(event.target.value)}
+            >
+              {AVERY_LABEL_PRODUCTS.map((product) => (
+                <option key={product.key} value={product.key}>
+                  {product.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <p>
+              {`Layout: ${selectedAveryProduct.columns} columns × ${selectedAveryProduct.rows} rows (${selectedAveryProduct.labelWidthIn}" × ${selectedAveryProduct.labelHeightIn}")`}
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-medium text-slate-600">Additional Margins (inches)</p>
+            <div className="grid gap-3 md:grid-cols-4">
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={labelMargins.top}
+                onChange={(event) =>
+                  setLabelMargins((prev) => ({ ...prev, top: Number(event.target.value || 0) }))
+                }
+                placeholder="Top"
+              />
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={labelMargins.right}
+                onChange={(event) =>
+                  setLabelMargins((prev) => ({ ...prev, right: Number(event.target.value || 0) }))
+                }
+                placeholder="Right"
+              />
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={labelMargins.bottom}
+                onChange={(event) =>
+                  setLabelMargins((prev) => ({ ...prev, bottom: Number(event.target.value || 0) }))
+                }
+                placeholder="Bottom"
+              />
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={labelMargins.left}
+                onChange={(event) =>
+                  setLabelMargins((prev) => ({ ...prev, left: Number(event.target.value || 0) }))
+                }
+                placeholder="Left"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" disabled={!canNavigateBack} onClick={navigateBackFromLabelSetup}>
+              Back
+            </Button>
+            <Button type="button" onClick={() => setStep("generate")}>
+              Continue to Step 7
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {step === "generate" ? (
+        <section className="space-y-4 rounded-md border border-slate-200 p-4">
+          <p className="text-sm font-semibold text-slate-900">Step 7: Generate and Download Reports</p>
+
+          {!reportRunLocked ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!canNavigateBack}
+                onClick={() => {
+                  if (includeLabelMailer === "yes") setStep("labelSetup");
+                  else if (includeLetterMailer === "yes") setStep("letterSetup");
+                  else setStep("mailer");
+                }}
+              >
+                Back
+              </Button>
+              <Button type="button" onClick={() => void startGeneration()}>
+                Run Report
+              </Button>
             </div>
           ) : null}
 
-          {preparedDownloads.length > 0 ? (
-            <div className="rounded-md border border-slate-200 p-3">
-              <p className="mb-2 text-sm font-semibold text-slate-900">Your download files are ready</p>
-              <div className="flex flex-wrap gap-2">
-                {preparedDownloads.map((item) => (
-                  <Button key={item.key} type="button" onClick={() => downloadPreparedFile(item)}>
-                    Download {item.label}
-                  </Button>
-                ))}
-              </div>
+          {canGenerate ? (
+            <div className="rounded-md border border-slate-200 p-4">
+              <p className="text-lg font-semibold text-slate-900">Please wait, your reports are generating</p>
+              {hasPendingJobs ? (
+                <div className="mt-2 flex items-center gap-1 text-2xl text-brand-600">
+                  <span className="animate-bounce">.</span>
+                  <span className="animate-bounce [animation-delay:120ms]">.</span>
+                  <span className="animate-bounce [animation-delay:240ms]">.</span>
+                </div>
+              ) : null}
+              {loadingGeneration ? (
+                <p className="mt-2 text-xs text-slate-500">Processing outputs...</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {downloadJobs.length > 0 ? (
+            <div className="grid gap-2">
+              {downloadJobs.map((job) => {
+                const isReady = job.status === "ready" && Boolean(job.url);
+                return (
+                  <div
+                    key={job.key}
+                    className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">{job.label}</p>
+                      <p className="text-xs text-slate-500">
+                        {job.status === "pending"
+                          ? "Pending"
+                          : job.status === "building"
+                            ? "Generating..."
+                            : job.status === "ready"
+                              ? "Ready"
+                              : job.message || "Failed"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!isReady}
+                      onClick={() => downloadJob(job)}
+                      className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                        isReady
+                          ? "bg-brand-600 text-white hover:bg-brand-700"
+                          : "cursor-not-allowed bg-slate-200 text-slate-500"
+                      }`}
+                    >
+                      Download
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
         </section>

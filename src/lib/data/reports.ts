@@ -157,7 +157,7 @@ async function buildContactRows(orgId: string) {
         .limit(20000),
       supabase
         .from("contact_tags")
-        .select("contact_id,tags(name,path)")
+        .select("contact_id,tags(id,name,path)")
         .eq("organization_id", orgId)
         .limit(50000),
       supabase
