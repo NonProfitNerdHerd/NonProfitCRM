@@ -27,10 +27,12 @@ function isOverdueTask(task: MyTasksSideRailItem) {
 
 export function MyTasksSideRail({
   tasks,
-  defaultProjectId
+  defaultProjectId,
+  projects
 }: {
   tasks: MyTasksSideRailItem[];
   defaultProjectId?: string | null;
+  projects: Array<{ id: string; name: string }>;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const pathname = usePathname();
@@ -45,6 +47,7 @@ export function MyTasksSideRail({
   const [createForm, setCreateForm] = useState({
     title: "",
     description: "",
+    projectId: defaultProjectId ?? "",
     dueDate: "",
     priority: "medium" as "low" | "medium" | "high" | "urgent"
   });
@@ -52,6 +55,14 @@ export function MyTasksSideRail({
   useEffect(() => {
     setTaskRows(tasks);
   }, [tasks]);
+  useEffect(() => {
+    setCreateForm((prev) => {
+      if (prev.projectId) return prev;
+      if (defaultProjectId) return { ...prev, projectId: defaultProjectId };
+      if (projects.length > 0) return { ...prev, projectId: projects[0].id };
+      return prev;
+    });
+  }, [defaultProjectId, projects]);
   const tenantPrefix = useMemo(() => {
     const staffIndex = pathname.indexOf("/staff");
     return staffIndex > 0 ? pathname.slice(0, staffIndex) : "";
@@ -125,6 +136,10 @@ export function MyTasksSideRail({
       setCreateError("Task title is required.");
       return;
     }
+    if (!createForm.projectId) {
+      setCreateError("Project selection is required.");
+      return;
+    }
     setCreating(true);
     setCreateError(null);
     try {
@@ -136,7 +151,7 @@ export function MyTasksSideRail({
           description: createForm.description.trim() || undefined,
           suspenseDate: createForm.dueDate || undefined,
           priority: createForm.priority,
-          projectId: defaultProjectId || undefined
+          projectId: createForm.projectId
         })
       });
       const payload = await response.json().catch(() => null);
@@ -145,6 +160,7 @@ export function MyTasksSideRail({
       }
       const createdId = String(payload?.id ?? "");
       if (!createdId) throw new Error("Task was created but no id was returned.");
+      const selectedProject = projects.find((entry) => entry.id === createForm.projectId);
       setTaskRows((prev) => [
         {
           id: createdId,
@@ -154,12 +170,18 @@ export function MyTasksSideRail({
           priority: createForm.priority,
           completed_at: null,
           parent_task_id: null,
-          project_id: defaultProjectId ?? null,
-          project_name: "consituent-outreach"
+          project_id: createForm.projectId,
+          project_name: selectedProject?.name ?? null
         },
         ...prev
       ]);
-      setCreateForm({ title: "", description: "", dueDate: "", priority: "medium" });
+      setCreateForm((prev) => ({
+        ...prev,
+        title: "",
+        description: "",
+        dueDate: "",
+        priority: "medium"
+      }));
       setShowCreateTask(false);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Unable to create task.");
@@ -230,6 +252,16 @@ export function MyTasksSideRail({
           <p className="text-[10px] uppercase tracking-wide text-red-600">Overdue</p>
           <p className="text-lg font-semibold text-red-700">{overdueCount}</p>
         </div>
+        <Link
+          href={withTenantPrefix("/staff/tasks/call-sheet")}
+          className="mt-3 inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-2 py-2 text-slate-700 hover:bg-slate-50"
+          onClick={(event) => event.stopPropagation()}
+          aria-label="Open call sheet builder"
+        >
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.9 19.9 0 0 1-8.7-3.1 19.5 19.5 0 0 1-6-6A19.9 19.9 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L7.9 9.6a16 16 0 0 0 6.5 6.5l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6A2 2 0 0 1 22 16.9z" />
+          </svg>
+        </Link>
         <div className="mt-auto text-center text-[10px] text-slate-500">Tasks + Subtasks</div>
       </div>
 
@@ -272,12 +304,6 @@ export function MyTasksSideRail({
 
             <div className="mb-3 flex flex-wrap justify-end gap-2">
               <Link
-                href={withTenantPrefix("/staff/tasks/call-sheet")}
-                className="inline-flex items-center rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Print Call Sheet
-              </Link>
-              <Link
                 href={withTenantPrefix("/staff/tasks")}
                 className="inline-flex items-center rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
@@ -306,6 +332,24 @@ export function MyTasksSideRail({
                     }
                     placeholder="Optional details"
                   />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>
+                  <select
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    value={createForm.projectId}
+                    onChange={(event) =>
+                      setCreateForm((prev) => ({ ...prev, projectId: event.target.value }))
+                    }
+                    required
+                  >
+                    <option value="">Select project</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div>

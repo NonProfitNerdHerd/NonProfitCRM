@@ -5,7 +5,7 @@ import { StaffHeader } from "@/components/layout/staff-header";
 import { hasAnyStaffPermission, hasRoleKeys, requireStaffPermission } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 import { listTasks } from "@/lib/data/tasks";
-import { ensureConstituentOutreachProject } from "@/lib/data/projects";
+import { ensureConstituentOutreachProject, listProjects } from "@/lib/data/projects";
 import { MyTasksSideRail, type MyTasksSideRailItem } from "@/components/tasks/my-tasks-side-rail";
 
 export default async function StaffLayout({ children }: { children: ReactNode }) {
@@ -35,7 +35,10 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     .select("name,slug,logo_url")
     .eq("id", context.organizationId)
     .maybeSingle();
-  const myTasks = await listTasks({ assignedTo: context.userId });
+  const [myTasks, projects] = await Promise.all([
+    listTasks({ assignedTo: context.userId }),
+    listProjects({ status: "all" })
+  ]);
   let constituentOutreachProjectId: string | null = null;
   try {
     constituentOutreachProjectId = await ensureConstituentOutreachProject({
@@ -79,7 +82,14 @@ export default async function StaffLayout({ children }: { children: ReactNode })
         </div>
         {children}
       </div>
-      <MyTasksSideRail tasks={myAssignedTasks} defaultProjectId={constituentOutreachProjectId} />
+      <MyTasksSideRail
+        tasks={myAssignedTasks}
+        defaultProjectId={constituentOutreachProjectId}
+        projects={(projects ?? []).map((project) => ({
+          id: String(project.id ?? ""),
+          name: String(project.name ?? "-")
+        }))}
+      />
     </div>
   );
 }

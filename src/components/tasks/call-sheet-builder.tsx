@@ -37,6 +37,7 @@ function buildCallSheetHtml(tasks: CallSheetTask[]) {
           <td>${escapeHtml(task.priority)}</td>
           <td>${escapeHtml(task.createdBy)}</td>
           <td>${escapeHtml(formatDateTime(task.createdAt) || "-")}</td>
+          <td></td>
         </tr>
       `;
     })
@@ -48,13 +49,22 @@ function buildCallSheetHtml(tasks: CallSheetTask[]) {
     <meta charset="utf-8" />
     <title>Call Sheet</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 20px; color: #0f172a; }
+      @page { size: landscape; margin: 0.35in; }
+      body { font-family: Arial, sans-serif; margin: 0.2in; color: #0f172a; }
       h1 { margin: 0 0 8px; font-size: 22px; }
       p { margin: 0 0 14px; color: #475569; }
-      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
       th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; text-align: left; }
       th { background: #f1f5f9; }
-      @media print { body { margin: 8px; } }
+      th:nth-child(1), td:nth-child(1) { width: 4%; }
+      th:nth-child(2), td:nth-child(2) { width: 12%; }
+      th:nth-child(3), td:nth-child(3) { width: 11%; }
+      th:nth-child(4), td:nth-child(4) { width: 16%; }
+      th:nth-child(5), td:nth-child(5) { width: 8%; }
+      th:nth-child(6), td:nth-child(6) { width: 10%; }
+      th:nth-child(7), td:nth-child(7) { width: 14%; }
+      th:nth-child(8), td:nth-child(8) { width: 25%; }
+      @media print { body { margin: 0.1in; } }
     </style>
   </head>
   <body>
@@ -70,10 +80,11 @@ function buildCallSheetHtml(tasks: CallSheetTask[]) {
           <th>Priority</th>
           <th>Created By</th>
           <th>Created At</th>
+          <th>Additional Notes</th>
         </tr>
       </thead>
       <tbody>
-        ${rows || '<tr><td colspan="7">No call tasks available.</td></tr>'}
+        ${rows || '<tr><td colspan="8">No call tasks available.</td></tr>'}
       </tbody>
     </table>
   </body>
