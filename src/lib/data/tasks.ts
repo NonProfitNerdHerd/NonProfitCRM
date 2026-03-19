@@ -171,7 +171,6 @@ export type TaskAssociationContactOption = {
   id: string;
   label: string;
   category: "Donor" | "Contact" | "Donor Organization" | "Organization";
-  searchText: string;
 };
 
 function deriveTaskAssociationLabel(row: Record<string, unknown>) {
@@ -186,9 +185,37 @@ function deriveTaskAssociationLabel(row: Record<string, unknown>) {
   return preferredName || [firstName, lastName].filter(Boolean).join(" ") || "Unnamed Contact";
 }
 
-export async function listTaskAssociationContacts(): Promise<TaskAssociationContactOption[]> {
+function mapTaskAssociationRows(
+  category: TaskAssociationContactOption["category"],
+  rows: Array<Record<string, unknown>>
+) {
+  return rows
+    .map((row) => {
+      const id = toText(row.id);
+      const label = deriveTaskAssociationLabel(row);
+      if (!id || !label) return null;
+      return { id, label, category } satisfies TaskAssociationContactOption;
+    })
+    .filter((option): option is TaskAssociationContactOption => Boolean(option));
+}
+
+export async function searchTaskAssociationContacts(
+  query: string
+): Promise<TaskAssociationContactOption[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
   const context = await requireStaffPermission("can_view_dashboard");
   const supabase = await createClient();
+  const pattern = `%${q}%`;
+  const searchClause = [
+    `first_name.ilike.${pattern}`,
+    `last_name.ilike.${pattern}`,
+    `preferred_name.ilike.${pattern}`,
+    `organization_name.ilike.${pattern}`,
+    `email.ilike.${pattern}`,
+    `phone.ilike.${pattern}`
+  ].join(",");
   const selectColumns =
     "id,first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,donor_status,email,phone";
   const [donorsResult, contactsResult, donorOrganizationsResult, organizationsResult] = await Promise.all([
@@ -198,65 +225,47 @@ export async function listTaskAssociationContacts(): Promise<TaskAssociationCont
       .eq("organization_id", context.organizationId)
       .eq("entity_type", "person")
       .eq("tracking_status", "donor")
+      .or(searchClause)
       .order("last_name", { ascending: true })
       .order("first_name", { ascending: true })
-      .limit(600),
+      .limit(25),
     supabase
       .from("contacts_safe_view")
       .select(selectColumns)
       .eq("organization_id", context.organizationId)
       .eq("entity_type", "person")
       .in("tracking_status", ["lead", "non_lead"])
+      .or(searchClause)
       .order("last_name", { ascending: true })
       .order("first_name", { ascending: true })
-      .limit(600),
+      .limit(25),
     supabase
       .from("contacts_safe_view")
       .select(selectColumns)
       .eq("organization_id", context.organizationId)
       .eq("entity_type", "organization")
       .eq("tracking_status", "donor")
+      .or(searchClause)
       .order("organization_name", { ascending: true })
       .order("last_name", { ascending: true })
       .order("first_name", { ascending: true })
-      .limit(600),
+      .limit(25),
     supabase
       .from("contacts_safe_view")
       .select(selectColumns)
       .eq("organization_id", context.organizationId)
       .eq("entity_type", "organization")
       .in("tracking_status", ["lead", "non_lead"])
+      .or(searchClause)
       .order("organization_name", { ascending: true })
       .order("last_name", { ascending: true })
       .order("first_name", { ascending: true })
-      .limit(600)
+      .limit(25)
   ]);
   if (donorsResult.error) throw donorsResult.error;
   if (contactsResult.error) throw contactsResult.error;
   if (donorOrganizationsResult.error) throw donorOrganizationsResult.error;
   if (organizationsResult.error) throw organizationsResult.error;
-
-  const groupedRows: Array<{
-    category: TaskAssociationContactOption["category"];
-    rows: Array<Record<string, unknown>>;
-  }> = [
-    {
-      category: "Donor",
-      rows: (donorsResult.data ?? []) as Array<Record<string, unknown>>
-    },
-    {
-      category: "Contact",
-      rows: (contactsResult.data ?? []) as Array<Record<string, unknown>>
-    },
-    {
-      category: "Donor Organization",
-      rows: (donorOrganizationsResult.data ?? []) as Array<Record<string, unknown>>
-    },
-    {
-      category: "Organization",
-      rows: (organizationsResult.data ?? []) as Array<Record<string, unknown>>
-    }
-  ];
 
   const categoryRank: Record<TaskAssociationContactOption["category"], number> = {
     Donor: 0,
@@ -264,32 +273,27 @@ export async function listTaskAssociationContacts(): Promise<TaskAssociationCont
     "Donor Organization": 2,
     Organization: 3
   };
-  const options: TaskAssociationContactOption[] = [];
-  const seenIds = new Set<string>();
-  for (const group of groupedRows) {
-    for (const row of group.rows) {
-      const id = toText(row.id);
-      if (!id || seenIds.has(id)) continue;
-      const label = deriveTaskAssociationLabel(row);
-      if (!label) continue;
-      const searchText = [
-        label,
-        toText(row.first_name),
-        toText(row.last_name),
-        toText(row.preferred_name),
-        toText(row.organization_name),
-        toText(row.email),
-        toText(row.phone),
-        group.category
-      ]
-        .join(" ")
-        .toLowerCase();
-      options.push({ id, label, category: group.category, searchText });
-      seenIds.add(id);
-    }
-  }
+  const options: TaskAssociationContactOption[] = [
+    ...mapTaskAssociationRows("Donor", (donorsResult.data ?? []) as Array<Record<string, unknown>>),
+    ...mapTaskAssociationRows("Contact", (contactsResult.data ?? []) as Array<Record<string, unknown>>),
+    ...mapTaskAssociationRows(
+      "Donor Organization",
+      (donorOrganizationsResult.data ?? []) as Array<Record<string, unknown>>
+    ),
+    ...mapTaskAssociationRows(
+      "Organization",
+      (organizationsResult.data ?? []) as Array<Record<string, unknown>>
+    )
+  ];
 
-  return options.sort((left, right) => {
+  const seenIds = new Set<string>();
+  const deduped = options.filter((option) => {
+    if (seenIds.has(option.id)) return false;
+    seenIds.add(option.id);
+    return true;
+  });
+
+  return deduped.sort((left, right) => {
     const categoryDelta = categoryRank[left.category] - categoryRank[right.category];
     if (categoryDelta !== 0) return categoryDelta;
     return left.label.localeCompare(right.label);

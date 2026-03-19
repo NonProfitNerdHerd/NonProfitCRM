@@ -33,20 +33,13 @@ export function MyTasksSideRail({
   defaultProjectId,
   projects,
   currentUserId,
-  assignableUsers,
-  associationContacts
+  assignableUsers
 }: {
   tasks: MyTasksSideRailItem[];
   defaultProjectId?: string | null;
   projects: Array<{ id: string; name: string }>;
   currentUserId: string;
   assignableUsers: Array<{ id: string; name: string }>;
-  associationContacts: Array<{
-    id: string;
-    label: string;
-    category: TaskAssociationCategory;
-    searchText: string;
-  }>;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const pathname = usePathname();
@@ -60,6 +53,10 @@ export function MyTasksSideRail({
   const [snoozedUntilByTaskId, setSnoozedUntilByTaskId] = useState<Record<string, string>>({});
   const [contactLookupQuery, setContactLookupQuery] = useState("");
   const [contactLookupOpen, setContactLookupOpen] = useState(false);
+  const [contactLookupLoading, setContactLookupLoading] = useState(false);
+  const [contactLookupResults, setContactLookupResults] = useState<
+    Array<{ id: string; label: string; category: TaskAssociationCategory }>
+  >([]);
   const [createForm, setCreateForm] = useState({
     title: "",
     description: "",
@@ -110,27 +107,48 @@ export function MyTasksSideRail({
     }
     return options.sort((left, right) => left.name.localeCompare(right.name));
   }, [assignableUsers, currentUserId]);
-  const selectedAssociationContact = useMemo(
-    () => associationContacts.find((contact) => contact.id === createForm.contactId) ?? null,
-    [associationContacts, createForm.contactId]
-  );
-  const filteredAssociationContacts = useMemo(() => {
-    const query = contactLookupQuery.trim().toLowerCase();
-    if (!query) return associationContacts.slice(0, 60);
-    return associationContacts
-      .filter((contact) => {
-        const haystack = `${contact.label} ${contact.category} ${contact.searchText}`.toLowerCase();
-        return haystack.includes(query);
-      })
-      .slice(0, 60);
-  }, [associationContacts, contactLookupQuery]);
+
   useEffect(() => {
-    if (!selectedAssociationContact) return;
-    const selectedLabel = `${selectedAssociationContact.label} (${selectedAssociationContact.category})`;
-    if (!contactLookupQuery) {
-      setContactLookupQuery(selectedLabel);
+    if (!contactLookupOpen) return;
+    const query = contactLookupQuery.trim();
+    if (query.length < 2) {
+      setContactLookupResults([]);
+      setContactLookupLoading(false);
+      return;
     }
-  }, [contactLookupQuery, selectedAssociationContact]);
+    let ignore = false;
+    const timerId = window.setTimeout(async () => {
+      setContactLookupLoading(true);
+      try {
+        const response = await fetch(
+          `/api/tasks/association-contacts?q=${encodeURIComponent(contactLookupQuery.trim())}`
+        );
+        const payload = await response.json().catch(() => null);
+        if (ignore) return;
+        if (!response.ok) {
+          setContactLookupResults([]);
+          return;
+        }
+        const rows = Array.isArray(payload?.results) ? payload.results : [];
+        const mappedRows = rows.map((row: unknown) => ({
+          id: String((row as { id?: unknown }).id ?? ""),
+          label: String((row as { label?: unknown }).label ?? ""),
+          category: String((row as { category?: unknown }).category ?? "Contact") as TaskAssociationCategory
+        }));
+        setContactLookupResults(
+          mappedRows.filter((row: { id: string; label: string }) => row.id.length > 0 && row.label.length > 0)
+        );
+      } catch {
+        if (!ignore) setContactLookupResults([]);
+      } finally {
+        if (!ignore) setContactLookupLoading(false);
+      }
+    }, 250);
+    return () => {
+      ignore = true;
+      window.clearTimeout(timerId);
+    };
+  }, [contactLookupOpen, contactLookupQuery]);
 
   useEffect(() => {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
@@ -258,6 +276,7 @@ export function MyTasksSideRail({
       }));
       setContactLookupQuery("");
       setContactLookupOpen(false);
+      setContactLookupResults([]);
       setShowCreateTask(false);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Unable to create task.");
@@ -488,8 +507,14 @@ export function MyTasksSideRail({
                       >
                         No related record
                       </button>
-                      {filteredAssociationContacts.length > 0 ? (
-                        filteredAssociationContacts.map((contact) => (
+                      {contactLookupQuery.trim().length < 2 ? (
+                        <p className="px-3 py-2 text-sm text-slate-500">
+                          Type at least 2 characters to search.
+                        </p>
+                      ) : contactLookupLoading ? (
+                        <p className="px-3 py-2 text-sm text-slate-500">Searching...</p>
+                      ) : contactLookupResults.length > 0 ? (
+                        contactLookupResults.map((contact) => (
                           <button
                             type="button"
                             key={contact.id}
