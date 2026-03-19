@@ -160,18 +160,15 @@ export async function listCampaigns(filters?: { status?: string; q?: string }) {
     buildParentQuery(parentSelectWithTag),
     buildChildQuery(childSelectWithTag)
   ]);
-  if (
-    (parentError && isCampaignTagSchemaError(parentError)) ||
-    (childError && isCampaignTagSchemaError(childError))
-  ) {
-    const fallbackResults = await Promise.all([
-      buildParentQuery(parentSelectLegacy),
-      buildChildQuery(childSelectLegacy)
-    ]);
-    parents = fallbackResults[0].data;
-    parentError = fallbackResults[0].error;
-    children = fallbackResults[1].data;
-    childError = fallbackResults[1].error;
+  if (parentError && isCampaignTagSchemaError(parentError)) {
+    const fallbackParentResult = await buildParentQuery(parentSelectLegacy);
+    parents = fallbackParentResult.data;
+    parentError = fallbackParentResult.error;
+  }
+  if (childError && isCampaignTagSchemaError(childError)) {
+    const fallbackChildResult = await buildChildQuery(childSelectLegacy);
+    children = fallbackChildResult.data;
+    childError = fallbackChildResult.error;
   }
   if (parentError) throw parentError;
   if (childError) throw childError;
@@ -597,26 +594,23 @@ export async function getCampaign(campaignId: string) {
   let campaignError = campaignResult.error;
   let childCampaigns = (childCampaignResult.data ?? []) as unknown as Array<Record<string, unknown>>;
   let childCampaignsError = childCampaignResult.error;
-  if (
-    (campaignError && isCampaignTagSchemaError(campaignError)) ||
-    (childCampaignsError && isCampaignTagSchemaError(childCampaignsError))
-  ) {
-    const [fallbackCampaignResult, fallbackChildCampaignResult] = await Promise.all([
-      supabase
-        .from("campaigns")
-        .select(campaignSelectLegacy)
-        .eq("organization_id", context.organizationId)
-        .eq("id", campaignId)
-        .maybeSingle(),
-      supabase
-        .from("sub_campaigns")
-        .select(childSelectLegacy)
-        .eq("organization_id", context.organizationId)
-        .eq("campaign_id", campaignId)
-        .order("name", { ascending: true })
-    ]);
+  if (campaignError && isCampaignTagSchemaError(campaignError)) {
+    const fallbackCampaignResult = await supabase
+      .from("campaigns")
+      .select(campaignSelectLegacy)
+      .eq("organization_id", context.organizationId)
+      .eq("id", campaignId)
+      .maybeSingle();
     campaign = (fallbackCampaignResult.data ?? null) as Record<string, unknown> | null;
     campaignError = fallbackCampaignResult.error;
+  }
+  if (childCampaignsError && isCampaignTagSchemaError(childCampaignsError)) {
+    const fallbackChildCampaignResult = await supabase
+      .from("sub_campaigns")
+      .select(childSelectLegacy)
+      .eq("organization_id", context.organizationId)
+      .eq("campaign_id", campaignId)
+      .order("name", { ascending: true });
     childCampaigns = (fallbackChildCampaignResult.data ?? []) as unknown as Array<Record<string, unknown>>;
     childCampaignsError = fallbackChildCampaignResult.error;
   }
