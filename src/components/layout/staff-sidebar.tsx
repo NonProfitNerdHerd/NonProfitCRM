@@ -73,8 +73,7 @@ const BASE_MENU: MenuItem[] = [
     matches: (pathname) => pathname.startsWith("/staff/reports"),
     children: [
       { href: "/staff/reports/builder", label: "Report Builder" },
-      { href: "/staff/reports/history", label: "Report History" },
-      { href: "/staff/reports", label: "Saved Reports" }
+      { href: "/staff/reports/history", label: "Report History" }
     ]
   }
 ];
@@ -202,10 +201,7 @@ export function StaffSidebar({
               {isActive && item.children ? (
                 <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
                   {item.children.map((child) => {
-                    const childActive =
-                      child.href === "/staff/reports"
-                        ? normalizedPathname === child.href
-                        : isPathActive(child.href);
+                    const childActive = isPathActive(child.href);
                     return (
                       <Link
                         key={child.href}

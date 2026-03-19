@@ -8,7 +8,70 @@ type CampaignInput = {
   status?: "Active" | "Inactive";
   startDate?: string;
   endDate?: string;
+  campaignTagId: string;
 };
+
+function toText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function isTagAccessError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return (
+    message.includes("permission denied") ||
+    message.includes("row-level security") ||
+    message.includes("not authorized")
+  );
+}
+
+async function assertCampaignTagIsUsable(input: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  organizationId: string;
+  campaignTagId: string;
+}) {
+  const { data: tag, error } = await input.supabase
+    .from("tags")
+    .select("id,is_active")
+    .eq("organization_id", input.organizationId)
+    .eq("id", input.campaignTagId)
+    .maybeSingle();
+  if (error) {
+    if (isTagAccessError(error)) return;
+    throw error;
+  }
+  if (!tag) throw new Error("Campaign Tag is required.");
+  if (!Boolean(tag.is_active)) throw new Error("Campaign Tag must be active.");
+}
+
+async function loadTagLabelMap(input: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  organizationId: string;
+  tagIds: string[];
+}) {
+  const normalizedIds = Array.from(new Set(input.tagIds.map((entry) => toText(entry)).filter(Boolean)));
+  if (normalizedIds.length === 0) return new Map<string, string>();
+  const { data, error } = await input.supabase
+    .from("tags")
+    .select("id,name,path")
+    .eq("organization_id", input.organizationId)
+    .in("id", normalizedIds);
+  if (error) {
+    if (isTagAccessError(error)) return new Map<string, string>();
+    throw error;
+  }
+  const map = new Map<string, string>();
+  for (const row of data ?? []) {
+    const tagId = toText(row.id);
+    if (!tagId) continue;
+    map.set(tagId, toText(row.path) || toText(row.name) || "Campaign Tag");
+  }
+  return map;
+}
 
 function ensureDateOrder(startDate?: string, endDate?: string) {
   if (startDate && endDate && endDate < startDate) {
@@ -52,12 +115,12 @@ export async function listCampaigns(filters?: { status?: string; q?: string }) {
 
   let parentQuery = supabase
     .from("campaigns")
-    .select("id, name, description, status, start_date, end_date, owner_user_id, created_at")
+    .select("id, name, description, status, start_date, end_date, campaign_tag_id, owner_user_id, created_at")
     .eq("organization_id", context.organizationId)
     .order("start_date", { ascending: false, nullsFirst: false });
   let childQuery = supabase
     .from("sub_campaigns")
-    .select("id, campaign_id, name, description, status, start_date, end_date, created_at")
+    .select("id, campaign_id, name, description, status, start_date, end_date, campaign_tag_id, created_at")
     .eq("organization_id", context.organizationId)
     .order("name", { ascending: true });
 
@@ -74,6 +137,11 @@ export async function listCampaigns(filters?: { status?: string; q?: string }) {
   const q = filters?.q?.trim().toLowerCase() ?? "";
   const parentRows = (parents ?? []) as Array<Record<string, unknown>>;
   const childRows = (children ?? []) as Array<Record<string, unknown>>;
+  const tagLabelById = await loadTagLabelMap({
+    supabase,
+    organizationId: context.organizationId,
+    tagIds: [...parentRows.map((row) => toText(row.campaign_tag_id)), ...childRows.map((row) => toText(row.campaign_tag_id))]
+  });
 
   const childrenByParent = new Map<string, Array<Record<string, unknown>>>();
   for (const child of childRows) {
@@ -116,7 +184,8 @@ export async function listCampaigns(filters?: { status?: string; q?: string }) {
       ...parent,
       is_child: false,
       parent_campaign_id: null,
-      parent_campaign_name: null
+      parent_campaign_name: null,
+      campaign_tag_label: tagLabelById.get(toText(parent.campaign_tag_id)) ?? null
     });
 
     for (const child of matchingChildren) {
@@ -127,6 +196,8 @@ export async function listCampaigns(filters?: { status?: string; q?: string }) {
         status: child.status,
         start_date: child.start_date,
         end_date: child.end_date,
+        campaign_tag_id: child.campaign_tag_id,
+        campaign_tag_label: tagLabelById.get(toText(child.campaign_tag_id)) ?? null,
         created_at: child.created_at,
         is_child: true,
         parent_campaign_id: parent.id,
@@ -147,6 +218,13 @@ export async function createCampaign(input: CampaignInput) {
   if (allowedError) throw allowedError;
   if (!allowed) throw new Error("You are not allowed to create campaigns.");
   ensureDateOrder(input.startDate, input.endDate);
+  const campaignTagId = toText(input.campaignTagId);
+  if (!campaignTagId) throw new Error("Campaign Tag is required.");
+  await assertCampaignTagIsUsable({
+    supabase,
+    organizationId: context.organizationId,
+    campaignTagId
+  });
 
   const { data, error } = await supabase
     .from("campaigns")
@@ -157,6 +235,7 @@ export async function createCampaign(input: CampaignInput) {
       status: input.status ?? "Active",
       start_date: input.startDate ?? null,
       end_date: input.endDate ?? null,
+      campaign_tag_id: campaignTagId,
       owner_user_id: context.userId,
       created_by: context.userId
     })
@@ -185,6 +264,13 @@ export async function updateCampaign(campaignId: string, input: CampaignInput) {
   if (!allowed) throw new Error("You are not allowed to edit campaigns.");
 
   ensureDateOrder(input.startDate, input.endDate);
+  const campaignTagId = toText(input.campaignTagId);
+  if (!campaignTagId) throw new Error("Campaign Tag is required.");
+  await assertCampaignTagIsUsable({
+    supabase,
+    organizationId: context.organizationId,
+    campaignTagId
+  });
 
   const [{ data: campaign, error: campaignError }, { data: childCampaigns, error: childError }] =
     await Promise.all([
@@ -231,7 +317,8 @@ export async function updateCampaign(campaignId: string, input: CampaignInput) {
       description: input.description ?? null,
       status: input.status ?? "Active",
       start_date: input.startDate ?? null,
-      end_date: input.endDate ?? null
+      end_date: input.endDate ?? null,
+      campaign_tag_id: campaignTagId
     })
     .eq("organization_id", context.organizationId)
     .eq("id", campaignId);
@@ -253,6 +340,13 @@ export async function createChildCampaign(parentCampaignId: string, input: Campa
   });
   if (allowedError) throw allowedError;
   if (!allowed) throw new Error("You are not allowed to create campaigns.");
+  const campaignTagId = toText(input.campaignTagId);
+  if (!campaignTagId) throw new Error("Campaign Tag is required.");
+  await assertCampaignTagIsUsable({
+    supabase,
+    organizationId: context.organizationId,
+    campaignTagId
+  });
 
   const { data: parentCampaign, error: parentError } = await supabase
     .from("campaigns")
@@ -280,6 +374,7 @@ export async function createChildCampaign(parentCampaignId: string, input: Campa
       status: input.status ?? "Active",
       start_date: input.startDate ?? null,
       end_date: input.endDate ?? null,
+      campaign_tag_id: campaignTagId,
       created_by: context.userId,
       updated_by: context.userId
     })
@@ -309,6 +404,13 @@ export async function updateChildCampaign(
   });
   if (allowedError) throw allowedError;
   if (!allowed) throw new Error("You are not allowed to edit campaigns.");
+  const campaignTagId = toText(input.campaignTagId);
+  if (!campaignTagId) throw new Error("Campaign Tag is required.");
+  await assertCampaignTagIsUsable({
+    supabase,
+    organizationId: context.organizationId,
+    campaignTagId
+  });
 
   const [{ data: parentCampaign, error: parentError }, { data: childCampaign, error: childError }] =
     await Promise.all([
@@ -347,6 +449,7 @@ export async function updateChildCampaign(
       status: input.status ?? "Active",
       start_date: input.startDate ?? null,
       end_date: input.endDate ?? null,
+      campaign_tag_id: campaignTagId,
       updated_by: context.userId
     })
     .eq("organization_id", context.organizationId)
@@ -372,7 +475,7 @@ export async function getCampaign(campaignId: string) {
   ] = await Promise.all([
     supabase
       .from("campaigns")
-      .select("id, name, description, status, start_date, end_date, owner_user_id, created_at")
+      .select("id, name, description, status, start_date, end_date, campaign_tag_id, owner_user_id, created_at")
       .eq("organization_id", context.organizationId)
       .eq("id", campaignId)
       .maybeSingle(),
@@ -386,7 +489,7 @@ export async function getCampaign(campaignId: string) {
       .order("donation_date", { ascending: false }),
     supabase
       .from("sub_campaigns")
-      .select("id, campaign_id, name, description, status, start_date, end_date, created_at")
+      .select("id, campaign_id, name, description, status, start_date, end_date, campaign_tag_id, created_at")
       .eq("organization_id", context.organizationId)
       .eq("campaign_id", campaignId)
       .order("name", { ascending: true })
@@ -398,6 +501,15 @@ export async function getCampaign(campaignId: string) {
 
   const donationsRows = (donations ?? []) as Array<Record<string, unknown>>;
   const childRows = (childCampaigns ?? []) as Array<Record<string, unknown>>;
+  const campaignTagIds = [
+    toText((campaign as Record<string, unknown> | null)?.campaign_tag_id),
+    ...childRows.map((row) => toText(row.campaign_tag_id))
+  ];
+  const tagLabelById = await loadTagLabelMap({
+    supabase,
+    organizationId: context.organizationId,
+    tagIds: campaignTagIds
+  });
 
   const totalAmount = donationsRows.reduce(
     (sum, donation) => sum + Number(donation.amount ?? 0),
@@ -412,11 +524,17 @@ export async function getCampaign(campaignId: string) {
   }
 
   return {
-    campaign,
+    campaign: campaign
+      ? {
+          ...campaign,
+          campaign_tag_label: tagLabelById.get(toText((campaign as Record<string, unknown>).campaign_tag_id)) ?? null
+        }
+      : campaign,
     donations: donationsRows,
     totalAmount,
     childCampaigns: childRows.map((row) => ({
       ...row,
+      campaign_tag_label: tagLabelById.get(toText(row.campaign_tag_id)) ?? null,
       total_amount: childTotals.get(String(row.id ?? "")) ?? 0
     }))
   };
@@ -428,7 +546,7 @@ export async function listActiveCampaigns() {
 
   const { data, error } = await supabase
     .from("campaigns")
-    .select("id, name, status")
+    .select("id, name, status, campaign_tag_id")
     .eq("organization_id", context.organizationId)
     .eq("status", "Active")
     .order("name", { ascending: true });

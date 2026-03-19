@@ -23,6 +23,7 @@ export type DonationRecord = {
   contacts?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   campaigns?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   donation_allocations?: Array<Record<string, unknown>> | null;
+  campaign_tag_ids?: string[] | null;
   [key: string]: unknown;
 };
 
@@ -36,8 +37,114 @@ function isDonationOrgSchemaError(error: unknown) {
   return message.includes("crm_organization_id") || message.includes("crm_organizations");
 }
 
+function isDonationTagSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string; hint?: string })?.message ??
+      (error as { details?: string })?.details ??
+      (error as { hint?: string })?.hint ??
+      ""
+  ).toLowerCase();
+  return message.includes("campaign_tag_ids");
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function toText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+type CampaignTagLookupRow = {
+  id: string;
+  campaign_tag_id: string | null;
+};
+
+type TagLookupRow = {
+  id: string;
+  parent_tag_id: string | null;
+  is_active: boolean | null;
+};
+
+async function resolveCampaignTagLineageIds(input: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  organizationId: string;
+  campaignRows: CampaignTagLookupRow[];
+}) {
+  const tagCache = new Map<string, TagLookupRow>();
+  const campaignTagIds = input.campaignRows.map((row) => toText(row.campaign_tag_id)).filter(Boolean);
+  if (campaignTagIds.length !== input.campaignRows.length) {
+    throw new Error("Each selected campaign must have a Campaign Tag before saving donations.");
+  }
+
+  async function loadTag(tagId: string) {
+    if (tagCache.has(tagId)) return tagCache.get(tagId) ?? null;
+    const { data, error } = await input.supabase
+      .from("tags")
+      .select("id,parent_tag_id,is_active")
+      .eq("organization_id", input.organizationId)
+      .eq("id", tagId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const normalized: TagLookupRow = {
+      id: toText(data.id),
+      parent_tag_id: toText(data.parent_tag_id) || null,
+      is_active: Boolean(data.is_active)
+    };
+    tagCache.set(normalized.id, normalized);
+    return normalized;
+  }
+
+  const tagIdsToApply = new Set<string>();
+  for (const campaignTagId of campaignTagIds) {
+    let currentTagId: string | null = campaignTagId;
+    let depth = 0;
+    const visited = new Set<string>();
+    while (currentTagId && depth < 15 && !visited.has(currentTagId)) {
+      visited.add(currentTagId);
+      const tag = await loadTag(currentTagId);
+      if (!tag) {
+        throw new Error("One or more campaign tags no longer exist.");
+      }
+      if (!tag.is_active) {
+        throw new Error("Campaign tags must be active before accepting donations.");
+      }
+      tagIdsToApply.add(tag.id);
+      currentTagId = tag.parent_tag_id;
+      depth += 1;
+    }
+  }
+
+  return Array.from(tagIdsToApply);
+}
+
+async function applyDonationCampaignTags(input: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  organizationId: string;
+  userId: string;
+  contactId: string;
+  donationId: string;
+  campaignTagIds: string[];
+}) {
+  const tagIds = Array.from(new Set(input.campaignTagIds.map((entry) => toText(entry)).filter(Boolean)));
+  if (tagIds.length === 0) {
+    throw new Error("At least one campaign tag is required to save the donation.");
+  }
+  const rows = tagIds.map((tagId) => ({
+    organization_id: input.organizationId,
+    contact_id: input.contactId,
+    tag_id: tagId,
+    assigned_by: input.userId,
+    assigned_at: new Date().toISOString(),
+    assignment_source: "donation_rule" as const,
+    notes: `Auto-assigned from donation ${input.donationId}`
+  }));
+  const { error } = await input.supabase.from("contact_tags").upsert(rows, {
+    onConflict: "organization_id,contact_id,tag_id",
+    ignoreDuplicates: true
+  });
+  if (error) throw error;
 }
 
 export async function listDonationsForStaff(filters?: {
@@ -268,7 +375,7 @@ export async function updateDonationForStaff(input: {
   const campaignIds = Array.from(new Set(input.allocations.map((allocation) => allocation.campaignId)));
   const { data: campaigns, error: campaignError } = await supabase
     .from("campaigns")
-    .select("id, name, status")
+    .select("id, name, status, campaign_tag_id")
     .eq("organization_id", context.organizationId)
     .in("id", campaignIds);
   if (campaignError) throw campaignError;
@@ -278,6 +385,11 @@ export async function updateDonationForStaff(input: {
   if (campaigns.some((campaign) => campaign.status !== "Active")) {
     throw new Error("Donation allocations must use active campaigns.");
   }
+  const resolvedCampaignTagIds = await resolveCampaignTagLineageIds({
+    supabase,
+    organizationId: context.organizationId,
+    campaignRows: (campaigns ?? []) as CampaignTagLookupRow[]
+  });
 
   const primaryCampaignId = input.allocations[0].campaignId;
   const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
@@ -296,6 +408,7 @@ export async function updateDonationForStaff(input: {
       external_transaction_id: input.externalDonationId ?? null,
       is_recurring: Boolean(input.recurring),
       campaign: primaryCampaign?.name ?? null,
+      campaign_tag_ids: resolvedCampaignTagIds,
       updated_at: new Date().toISOString()
   };
 
@@ -305,9 +418,17 @@ export async function updateDonationForStaff(input: {
     .eq("organization_id", context.organizationId)
     .eq("id", input.donationId);
 
-  if (donationUpdateError && isDonationOrgSchemaError(donationUpdateError)) {
-    const { crm_organization_id: removedCrmOrgId, ...legacyUpdatePayload } = updatePayload;
+  if (
+    donationUpdateError &&
+    (isDonationOrgSchemaError(donationUpdateError) || isDonationTagSchemaError(donationUpdateError))
+  ) {
+    const {
+      crm_organization_id: removedCrmOrgId,
+      campaign_tag_ids: removedCampaignTagIds,
+      ...legacyUpdatePayload
+    } = updatePayload;
     void removedCrmOrgId;
+    void removedCampaignTagIds;
     const retryResult = await supabase
       .from("donations")
       .update(legacyUpdatePayload)
@@ -347,6 +468,15 @@ export async function updateDonationForStaff(input: {
       .in("campaign_id", removeCampaignIds);
     if (cleanupError) throw cleanupError;
   }
+
+  await applyDonationCampaignTags({
+    supabase,
+    organizationId: context.organizationId,
+    userId: context.userId,
+    contactId: input.contactId,
+    donationId: input.donationId,
+    campaignTagIds: resolvedCampaignTagIds
+  });
 }
 
 export async function createDonationForStaff(input: {
@@ -383,7 +513,7 @@ export async function createDonationForStaff(input: {
   const campaignIds = Array.from(new Set(input.allocations.map((allocation) => allocation.campaignId)));
   const { data: campaigns, error: campaignError } = await supabase
     .from("campaigns")
-    .select("id, name, status")
+    .select("id, name, status, campaign_tag_id")
     .eq("organization_id", context.organizationId)
     .in("id", campaignIds);
   if (campaignError) throw campaignError;
@@ -393,6 +523,11 @@ export async function createDonationForStaff(input: {
   if (campaigns.some((campaign) => campaign.status !== "Active")) {
     throw new Error("Donation must be tied to an active campaign.");
   }
+  const resolvedCampaignTagIds = await resolveCampaignTagLineageIds({
+    supabase,
+    organizationId: context.organizationId,
+    campaignRows: (campaigns ?? []) as CampaignTagLookupRow[]
+  });
 
   const primaryCampaignId = input.allocations[0]?.campaignId;
   const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
@@ -415,13 +550,19 @@ export async function createDonationForStaff(input: {
       external_transaction_id: input.externalDonationId ?? null,
       is_recurring: Boolean(input.recurring),
       campaign: primaryCampaign?.name ?? null,
+      campaign_tag_ids: resolvedCampaignTagIds,
       created_by: context.userId
   };
 
   let { data, error } = await supabase.from("donations").insert(insertPayload).select("id").single();
-  if (error && isDonationOrgSchemaError(error)) {
-    const { crm_organization_id: removedCrmOrgId, ...legacyInsertPayload } = insertPayload;
+  if (error && (isDonationOrgSchemaError(error) || isDonationTagSchemaError(error))) {
+    const {
+      crm_organization_id: removedCrmOrgId,
+      campaign_tag_ids: removedCampaignTagIds,
+      ...legacyInsertPayload
+    } = insertPayload;
     void removedCrmOrgId;
+    void removedCampaignTagIds;
     const retryResult = await supabase
       .from("donations")
       .insert(legacyInsertPayload)
@@ -444,6 +585,15 @@ export async function createDonationForStaff(input: {
     { onConflict: "donation_id,campaign_id" }
   );
   if (allocationsError) throw allocationsError;
+
+  await applyDonationCampaignTags({
+    supabase,
+    organizationId: context.organizationId,
+    userId: context.userId,
+    contactId: input.contactId,
+    donationId: data.id,
+    campaignTagIds: resolvedCampaignTagIds
+  });
 
   return data.id;
 }

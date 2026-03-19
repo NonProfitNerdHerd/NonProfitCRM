@@ -475,6 +475,7 @@ export function ConstituentReportBuilder() {
   const [loadingGeneration, setLoadingGeneration] = useState(false);
   const [reportRunLocked, setReportRunLocked] = useState(false);
   const [rows, setRows] = useState<RowRecord[]>([]);
+  const [hasLoadedPreview, setHasLoadedPreview] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
@@ -889,6 +890,7 @@ export function ConstituentReportBuilder() {
     if (previewColumns.length === 0) return;
     setLoadingPreview(true);
     setError(null);
+    setHasLoadedPreview(true);
     try {
       const response = await fetch("/api/reports/run", {
         method: "POST",
@@ -1413,10 +1415,14 @@ export function ConstituentReportBuilder() {
   }, []);
 
   useEffect(() => {
-    if (!metadata || reportMode !== "constituent") return;
-    void loadPreview(1, pageSize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metadata, reportMode]);
+    if (reportMode !== "constituent") {
+      setRows([]);
+      setTotalCount(0);
+      setPage(1);
+      setPageCount(1);
+      setHasLoadedPreview(false);
+    }
+  }, [reportMode]);
 
   useEffect(() => {
     if (step === "letterSetup") {
@@ -1729,6 +1735,11 @@ export function ConstituentReportBuilder() {
                   >
                     Clear Filters
                   </Button>
+                  {!loadingPreview ? (
+                    <Button type="button" onClick={() => setStep("fields")}>
+                      Run Report and Download
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
@@ -1737,9 +1748,6 @@ export function ConstituentReportBuilder() {
                   <p className="text-sm font-semibold text-slate-900">
                     Constituents ({totalCount.toLocaleString()})
                   </p>
-                  <Button type="button" onClick={() => setStep("fields")}>
-                    Run Report and Download
-                  </Button>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -1762,7 +1770,11 @@ export function ConstituentReportBuilder() {
                             colSpan={previewColumns.length || 1}
                             className="px-3 py-4 text-center text-sm text-slate-500"
                           >
-                            {loadingPreview ? "Loading results..." : "No contacts matched current filters."}
+                            {loadingPreview
+                              ? "Loading results..."
+                              : hasLoadedPreview
+                                ? "No contacts matched current filters."
+                                : "Table is blank until you click Apply Filters."}
                           </td>
                         </tr>
                       ) : (
@@ -1785,6 +1797,7 @@ export function ConstituentReportBuilder() {
                     <select
                       className="rounded-md border border-slate-300 px-2 py-1 text-sm"
                       value={pageSize}
+                      disabled={!hasLoadedPreview}
                       onChange={(event) => {
                         const nextPageSize = Number(event.target.value);
                         setPageSize(nextPageSize);
@@ -1800,7 +1813,7 @@ export function ConstituentReportBuilder() {
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={page <= 1 || loadingPreview}
+                      disabled={!hasLoadedPreview || page <= 1 || loadingPreview}
                       onClick={() => void loadPreview(Math.max(1, page - 1), pageSize)}
                     >
                       Prev
@@ -1811,7 +1824,7 @@ export function ConstituentReportBuilder() {
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={page >= pageCount || loadingPreview}
+                      disabled={!hasLoadedPreview || page >= pageCount || loadingPreview}
                       onClick={() => void loadPreview(Math.min(pageCount, page + 1), pageSize)}
                     >
                       Next

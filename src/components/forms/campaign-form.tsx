@@ -3,6 +3,11 @@
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TagMultiSelectAutocomplete, type TagMultiSelectOption } from "@/components/tags/tag-multi-select-autocomplete";
+import {
+  ensureTagAutocompleteOption,
+  searchTagAutocompleteOptions
+} from "@/lib/tags/tag-autocomplete-client";
 
 export type CampaignFormPayload = {
   name: string;
@@ -10,6 +15,7 @@ export type CampaignFormPayload = {
   status: "Active" | "Inactive";
   startDate?: string;
   endDate?: string;
+  campaignTagId: string;
 };
 
 type CampaignFormValues = {
@@ -18,6 +24,8 @@ type CampaignFormValues = {
   status: "Active" | "Inactive";
   startDate: string;
   endDate: string;
+  campaignTagId: string;
+  campaignTagLabel?: string;
 };
 
 export function CampaignForm({
@@ -47,6 +55,17 @@ export function CampaignForm({
     startDate: initialValues?.startDate ?? "",
     endDate: initialValues?.endDate ?? ""
   });
+  const [selectedCampaignTag, setSelectedCampaignTag] = useState<TagMultiSelectOption[]>(
+    initialValues?.campaignTagId
+      ? [
+          {
+            id: initialValues.campaignTagId,
+            name: initialValues.campaignTagLabel ?? "Campaign Tag",
+            label: initialValues.campaignTagLabel ?? "Campaign Tag"
+          }
+        ]
+      : []
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +103,11 @@ export function CampaignForm({
       setLoading(false);
       return;
     }
+    if (!selectedCampaignTag[0]?.id) {
+      setError("Campaign Tag is required.");
+      setLoading(false);
+      return;
+    }
 
     try {
       await onSubmitCampaign({
@@ -91,7 +115,8 @@ export function CampaignForm({
         description: form.description.trim() || undefined,
         status: form.status as "Active" | "Inactive",
         startDate: form.startDate || undefined,
-        endDate: form.endDate || undefined
+        endDate: form.endDate || undefined,
+        campaignTagId: selectedCampaignTag[0].id
       });
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to save campaign.");
@@ -105,6 +130,7 @@ export function CampaignForm({
       startDate: "",
       endDate: ""
     });
+    setSelectedCampaignTag([]);
     setLoading(false);
     await onSuccess();
   }
@@ -135,6 +161,34 @@ export function CampaignForm({
             rows={4}
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
           />
+        </div>
+
+        <div className="md:col-span-2">
+          <TagMultiSelectAutocomplete
+            label="Campaign Tag *"
+            selected={selectedCampaignTag}
+            onChange={(next) => setSelectedCampaignTag(next.slice(0, 1))}
+            loadOptions={(value) =>
+              searchTagAutocompleteOptions({
+                query: value,
+                activeOnly: true,
+                limit: 20,
+                module: "contacts"
+              })
+            }
+            onCreateOption={(value) =>
+              ensureTagAutocompleteOption({
+                name: value,
+                module: "contacts"
+              })
+            }
+            placeholder="Select or create a campaign tag"
+            emptyHint="No matching tags."
+            maxSelections={1}
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            This tag is applied automatically to donations and donor records for this campaign.
+          </p>
         </div>
 
         <div>

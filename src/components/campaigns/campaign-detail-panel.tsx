@@ -15,6 +15,8 @@ type CampaignDetailPayload = {
     status: "Active" | "Inactive";
     start_date: string | null;
     end_date: string | null;
+    campaign_tag_id?: string | null;
+    campaign_tag_label?: string | null;
   } | null;
   donations: Array<Record<string, unknown>>;
   childCampaigns?: Array<Record<string, unknown>>;
@@ -28,6 +30,8 @@ type ChildCampaignDraft = {
   status: "Active" | "Inactive";
   startDate: string;
   endDate: string;
+  campaignTagId: string;
+  campaignTagLabel?: string;
 };
 
 type ParentCampaignDraft = {
@@ -36,6 +40,8 @@ type ParentCampaignDraft = {
   status: "Active" | "Inactive";
   startDate: string;
   endDate: string;
+  campaignTagId: string;
+  campaignTagLabel?: string;
 };
 
 export function CampaignDetailPanel({
@@ -126,14 +132,16 @@ export function CampaignDetailPanel({
                 description: campaign.description ?? "",
                 status: campaign.status,
                 startDate: campaign.start_date ?? "",
-                endDate: campaign.end_date ?? ""
+                endDate: campaign.end_date ?? "",
+                campaignTagId: String(campaign.campaign_tag_id ?? ""),
+                campaignTagLabel: String(campaign.campaign_tag_label ?? "")
               })
             }
           >
             Edit Campaign
           </Button>
         </div>
-        <div className="grid gap-3 text-sm md:grid-cols-4">
+        <div className="grid gap-3 text-sm md:grid-cols-5">
           <div>
             <p className="text-slate-500">Status</p>
             <p>{campaign.status}</p>
@@ -149,6 +157,10 @@ export function CampaignDetailPanel({
           <div>
             <p className="text-slate-500">Total Donations (Parent Rollup)</p>
             <p>{formatCurrency(data.totalAmount)}</p>
+          </div>
+          <div>
+            <p className="text-slate-500">Campaign Tag</p>
+            <p>{String(campaign.campaign_tag_label ?? "-")}</p>
           </div>
         </div>
       </Card>
@@ -204,7 +216,9 @@ export function CampaignDetailPanel({
                           status: String(child.status ?? "Active") as "Active" | "Inactive",
                           startDate:
                             typeof child.start_date === "string" ? String(child.start_date) : "",
-                          endDate: typeof child.end_date === "string" ? String(child.end_date) : ""
+                          endDate: typeof child.end_date === "string" ? String(child.end_date) : "",
+                          campaignTagId: String(child.campaign_tag_id ?? ""),
+                          campaignTagLabel: String(child.campaign_tag_label ?? "")
                         })
                       }
                     >
@@ -256,7 +270,9 @@ export function CampaignDetailPanel({
                                     ? String(child.start_date)
                                     : "",
                                 endDate:
-                                  typeof child.end_date === "string" ? String(child.end_date) : ""
+                                  typeof child.end_date === "string" ? String(child.end_date) : "",
+                                campaignTagId: String(child.campaign_tag_id ?? ""),
+                                campaignTagLabel: String(child.campaign_tag_label ?? "")
                               });
                             }}
                           >

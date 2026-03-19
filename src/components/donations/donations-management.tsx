@@ -193,6 +193,43 @@ export function DonationsManagement({
     [form.allocations]
   );
   const remainingAmount = totalAmountNumber - allocationTotal;
+  const canEditAllocations = editable && totalAmountNumber > 0;
+  const hasDonationAmount = Number.isFinite(totalAmountNumber) && totalAmountNumber > 0;
+  const hasAtLeastOneAllocation = form.allocations.some((row) => {
+    const amount = Number(row.amount);
+    return Boolean(row.campaignId) && Number.isFinite(amount) && amount > 0;
+  });
+  const hasPartialAllocationRows = form.allocations.some((row) => {
+    const hasCampaign = row.campaignId.trim().length > 0;
+    const hasAmountText = row.amount.trim().length > 0;
+    return hasCampaign !== hasAmountText;
+  });
+  const hasDuplicateCampaignAllocations = (() => {
+    const seenCampaignIds = new Set<string>();
+    for (const row of form.allocations) {
+      const campaignId = row.campaignId.trim();
+      if (!campaignId) continue;
+      if (seenCampaignIds.has(campaignId)) return true;
+      seenCampaignIds.add(campaignId);
+    }
+    return false;
+  })();
+  const hasPaymentReference =
+    form.paymentType === "Check"
+      ? form.checkNumber.trim().length > 0
+      : form.paymentType === "Card"
+        ? form.transactionId.trim().length > 0
+        : true;
+  const canSaveDonation =
+    editable &&
+    !saving &&
+    Boolean(form.donationDate) &&
+    hasDonationAmount &&
+    hasAtLeastOneAllocation &&
+    !hasPartialAllocationRows &&
+    !hasDuplicateCampaignAllocations &&
+    Math.abs(remainingAmount) <= 0.009 &&
+    hasPaymentReference;
 
   function exportVisibleRowsToExcel() {
     const dataset = visibleRows.map((donation) => {
@@ -808,17 +845,77 @@ export function DonationsManagement({
               <section className="rounded-md border border-slate-200 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-sm font-semibold">Campaign Allocations / Donation Splits</p>
-                  <Button type="button" variant="secondary" disabled={!editable} onClick={() => setForm((prev) => ({ ...prev, allocations: [...prev.allocations, { campaignId: "", amount: "" }] }))}>Add Split</Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!canEditAllocations}
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        allocations: [...prev.allocations, { campaignId: "", amount: "" }]
+                      }))
+                    }
+                  >
+                    Add Split
+                  </Button>
                 </div>
+                {!hasDonationAmount ? (
+                  <p className="mb-2 text-xs text-amber-700">
+                    Enter Total Donation Amount first, then allocate campaign amounts.
+                  </p>
+                ) : null}
                 <div className="space-y-2">
                   {form.allocations.map((allocation, index) => (
                     <div key={`${index}-${allocation.campaignId}`} className="grid gap-2 md:grid-cols-3">
-                      <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={allocation.campaignId} onChange={(event) => setForm((prev) => ({ ...prev, allocations: prev.allocations.map((row, rowIndex) => rowIndex === index ? { ...row, campaignId: event.target.value } : row) }))} disabled={!editable}>
+                      <select
+                        className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={allocation.campaignId}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            allocations: prev.allocations.map((row, rowIndex) =>
+                              rowIndex === index ? { ...row, campaignId: event.target.value } : row
+                            )
+                          }))
+                        }
+                        required={editable && (index === 0 || allocation.amount.trim().length > 0)}
+                        disabled={!canEditAllocations}
+                      >
                         <option value="">Select Campaign</option>
                         {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaignOptionLabel(campaign)}</option>)}
                       </select>
-                      <Input type="number" step="0.01" value={allocation.amount} onChange={(event) => setForm((prev) => ({ ...prev, allocations: prev.allocations.map((row, rowIndex) => rowIndex === index ? { ...row, amount: event.target.value } : row) }))} placeholder="Allocation Amount" disabled={!editable} />
-                      <Button type="button" variant="secondary" disabled={!editable} onClick={() => setForm((prev) => ({ ...prev, allocations: prev.allocations.length === 1 ? prev.allocations : prev.allocations.filter((_, rowIndex) => rowIndex !== index) }))}>Remove</Button>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={allocation.amount}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            allocations: prev.allocations.map((row, rowIndex) =>
+                              rowIndex === index ? { ...row, amount: event.target.value } : row
+                            )
+                          }))
+                        }
+                        placeholder="Campaign Amount *"
+                        required={editable && (index === 0 || allocation.campaignId.trim().length > 0)}
+                        disabled={!canEditAllocations}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={!canEditAllocations}
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            allocations:
+                              prev.allocations.length === 1
+                                ? prev.allocations
+                                : prev.allocations.filter((_, rowIndex) => rowIndex !== index)
+                          }))
+                        }
+                      >
+                        Remove
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -831,7 +928,9 @@ export function DonationsManagement({
 
               <div className="flex flex-wrap gap-2">
                 {editable ? (
-                  <Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+                  <Button type="submit" disabled={!canSaveDonation}>
+                    {saving ? "Saving..." : "Save"}
+                  </Button>
                 ) : (
                   <Button
                     type="button"

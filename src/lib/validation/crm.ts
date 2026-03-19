@@ -6,7 +6,8 @@ export const campaignSchema = z
     description: z.string().optional(),
     status: z.enum(["Active", "Inactive"]).default("Active"),
     startDate: z.string().optional(),
-    endDate: z.string().optional()
+    endDate: z.string().optional(),
+    campaignTagId: z.string().uuid("Campaign Tag is required.")
   })
   .refine(
     (input) => {
