@@ -4,6 +4,7 @@ import { getContactProfileData } from "@/lib/data/contact-profile";
 import { ContactProfileTabs } from "@/components/contacts/contact-profile-tabs";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaffPermission } from "@/lib/auth/guards";
+import { ensureConstituentOutreachProject, listProjects } from "@/lib/data/projects";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -31,6 +32,13 @@ export default async function ContactDetailPage({ params }: PageProps) {
         .in("id", staffUserIds)
     : { data: [] as Array<{ id: string; display_name: string | null }> };
   const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile.display_name]));
+  const [projects, defaultProjectId] = await Promise.all([
+    listProjects({ status: "all" }).catch(() => []),
+    ensureConstituentOutreachProject({
+      organizationId: context.organizationId,
+      userId: context.userId
+    }).catch(() => null)
+  ]);
 
   return (
     <div className="space-y-4">
@@ -70,19 +78,6 @@ export default async function ContactDetailPage({ params }: PageProps) {
               )}
             </div>
           </div>
-          {profile.customFields.length > 0 ? (
-            <div className="md:col-span-2">
-              <p className="text-slate-500">Custom Fields</p>
-              <div className="mt-1 grid gap-1 md:grid-cols-2">
-                {profile.customFields.map((entry) => (
-                  <p key={`${String(entry.internalKey)}-${String(entry.label)}`}>
-                    <span className="font-medium text-slate-700">{String(entry.label)}:</span>{" "}
-                    <span className="text-slate-900">{String(entry.value || "-")}</span>
-                  </p>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
       </Card>
       <Card>
@@ -100,6 +95,18 @@ export default async function ContactDetailPage({ params }: PageProps) {
           tasks={profile.tasks}
           memberships={profile.memberships}
           campaigns={profile.campaigns}
+          customFields={profile.customFields.map((entry) => ({
+            label: String(entry.label ?? ""),
+            value: String(entry.value ?? ""),
+            internalKey: String(entry.internalKey ?? ""),
+            dataType: String(entry.dataType ?? ""),
+            displayOrder: Number(entry.displayOrder ?? 0)
+          }))}
+          projects={(projects ?? []).map((project) => ({
+            id: String(project.id ?? ""),
+            name: String(project.name ?? "-")
+          }))}
+          defaultProjectId={defaultProjectId}
           staffUsers={(memberships ?? []).map((membership) => ({
             user_id: membership.user_id as string,
             display_name: profileMap.get(membership.user_id as string) ?? null

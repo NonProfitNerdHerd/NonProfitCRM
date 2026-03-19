@@ -24,6 +24,15 @@ type ContactProfileTabsProps = {
   memberships: Array<Record<string, unknown>>;
   campaigns: Array<Record<string, unknown>>;
   staffUsers: Array<{ user_id: string; display_name?: string | null }>;
+  customFields: Array<{
+    label: string;
+    value: string;
+    internalKey?: string;
+    dataType?: string;
+    displayOrder?: number;
+  }>;
+  projects: Array<{ id: string; name: string }>;
+  defaultProjectId?: string | null;
 };
 
 type WorkbenchItem = {
@@ -111,7 +120,10 @@ export function ContactProfileTabs({
   tasks,
   memberships,
   campaigns,
-  staffUsers
+  staffUsers,
+  customFields,
+  projects,
+  defaultProjectId
 }: ContactProfileTabsProps) {
   const router = useRouter();
   const isOrganizationContact = String(contactDetails.entity_type ?? "person") === "organization";
@@ -179,9 +191,31 @@ export function ContactProfileTabs({
   const [loading, setLoading] = useState(false);
   const [drilldownDonationId, setDrilldownDonationId] = useState<string | null>(null);
   const [creatingContactTask, setCreatingContactTask] = useState(false);
+  const [showCreateContactTaskModal, setShowCreateContactTaskModal] = useState(false);
+  const defaultTaskProjectId = useMemo(
+    () => defaultProjectId ?? projects[0]?.id ?? "",
+    [defaultProjectId, projects]
+  );
+  const currentConstituentLabel = useMemo(() => {
+    if (isOrganizationContact) {
+      return (
+        String(contactInfo.organizationName || "").trim() ||
+        String(contactInfo.preferredName || "").trim() ||
+        `${String(contactInfo.firstName || "").trim()} ${String(contactInfo.lastName || "").trim()}`.trim() ||
+        "Current constituent"
+      );
+    }
+    return (
+      String(contactInfo.preferredName || "").trim() ||
+      `${String(contactInfo.firstName || "").trim()} ${String(contactInfo.lastName || "").trim()}`.trim() ||
+      "Current constituent"
+    );
+  }, [contactInfo.firstName, contactInfo.lastName, contactInfo.organizationName, contactInfo.preferredName, isOrganizationContact]);
   const [newContactTaskForm, setNewContactTaskForm] = useState({
     title: "",
     description: "",
+    taskType: "Call" as "Call" | "Email" | "Mail" | "Other",
+    projectId: defaultTaskProjectId,
     dueDate: "",
     priority: "medium" as "low" | "medium" | "high" | "urgent",
     assignedToUserId: ""
@@ -208,6 +242,22 @@ export function ContactProfileTabs({
       ),
     [notes]
   );
+  const sortedTasks = useMemo(
+    () =>
+      [...tasks].sort(
+        (left, right) =>
+          new Date(String(right.created_at ?? "")).getTime() -
+          new Date(String(left.created_at ?? "")).getTime()
+      ),
+    [tasks]
+  );
+
+  useEffect(() => {
+    setNewContactTaskForm((prev) => {
+      if (prev.projectId) return prev;
+      return { ...prev, projectId: defaultTaskProjectId };
+    });
+  }, [defaultTaskProjectId]);
 
   function resolveStaffLabel(userId: unknown) {
     const id = String(userId ?? "").trim();
@@ -269,7 +319,7 @@ export function ContactProfileTabs({
     }
 
     if (entityType === "task" && entityId) {
-      router.push(`/staff/tasks/${entityId}`);
+      router.push(`/staff/tasks/${entityId}?returnTo=profile&contactId=${encodeURIComponent(contactId)}`);
       return;
     }
 
@@ -401,19 +451,32 @@ export function ContactProfileTabs({
       setError("Task title is required.");
       return;
     }
+    if (!newContactTaskForm.description.trim()) {
+      setError("Task description is required.");
+      return;
+    }
+    if (!newContactTaskForm.projectId) {
+      setError("Project selection is required.");
+      return;
+    }
     setCreatingContactTask(true);
     setError(null);
     setMessage(null);
     try {
+      const typedDescription = newContactTaskForm.description.trim();
+      const descriptionWithType = [`Follow-Up Type: ${newContactTaskForm.taskType}`, typedDescription]
+        .filter(Boolean)
+        .join("\n");
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title: newContactTaskForm.title.trim(),
-          description: newContactTaskForm.description.trim() || undefined,
+          description: descriptionWithType || undefined,
           suspenseDate: newContactTaskForm.dueDate || undefined,
           priority: newContactTaskForm.priority,
           assignedToUserId: newContactTaskForm.assignedToUserId || undefined,
+          projectId: newContactTaskForm.projectId,
           contactId
         })
       });
@@ -425,10 +488,13 @@ export function ContactProfileTabs({
       setNewContactTaskForm({
         title: "",
         description: "",
+        taskType: "Call",
+        projectId: defaultTaskProjectId,
         dueDate: "",
         priority: "medium",
         assignedToUserId: ""
       });
+      setShowCreateContactTaskModal(false);
       router.refresh();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Unable to create task.");
@@ -717,6 +783,22 @@ export function ContactProfileTabs({
             <p className="mb-2 text-sm font-semibold text-slate-900">External Data Points</p>
             <LabeledValue label="GivingFuel ID" value={contactInfo.webconnexId} />
           </section>
+          <section className="rounded-md border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-semibold text-slate-900">Custom Fields</p>
+            {customFields.length === 0 ? (
+              <p className="text-sm text-slate-500">No custom fields available for this constituent.</p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {customFields.map((entry) => (
+                  <LabeledValue
+                    key={`${String(entry.internalKey ?? entry.label)}-${String(entry.label)}`}
+                    label={String(entry.label)}
+                    value={String(entry.value || "-")}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       ) : null}
 
@@ -910,90 +992,15 @@ export function ContactProfileTabs({
 
       {activeTab === "tasks" ? (
         <div className="space-y-2">
-          <form onSubmit={submitContactTask} className="rounded-md border border-slate-200 p-3">
-            <p className="mb-2 text-sm font-semibold text-slate-900">Add Task</p>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium text-slate-700">Task Title</label>
-                <Input
-                  value={newContactTaskForm.title}
-                  onChange={(event) =>
-                    setNewContactTaskForm((prev) => ({ ...prev, title: event.target.value }))
-                  }
-                  placeholder="Enter task title"
-                  required
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-                <textarea
-                  className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={newContactTaskForm.description}
-                  onChange={(event) =>
-                    setNewContactTaskForm((prev) => ({ ...prev, description: event.target.value }))
-                  }
-                  placeholder="Task details"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
-                <Input
-                  type="date"
-                  value={newContactTaskForm.dueDate}
-                  onChange={(event) =>
-                    setNewContactTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
-                  }
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
-                <select
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={newContactTaskForm.priority}
-                  onChange={(event) =>
-                    setNewContactTaskForm((prev) => ({
-                      ...prev,
-                      priority: event.target.value as "low" | "medium" | "high" | "urgent"
-                    }))
-                  }
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-              </div>
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Assign Staff Member
-                </label>
-                <select
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  value={newContactTaskForm.assignedToUserId}
-                  onChange={(event) =>
-                    setNewContactTaskForm((prev) => ({
-                      ...prev,
-                      assignedToUserId: event.target.value
-                    }))
-                  }
-                >
-                  <option value="">Assign to me</option>
-                  {staffUsers.map((user) => (
-                    <option key={user.user_id} value={user.user_id}>
-                      {user.display_name || user.user_id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <Button className="mt-3" type="submit" disabled={creatingContactTask}>
-              {creatingContactTask ? "Creating..." : "Create Task"}
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setShowCreateContactTaskModal(true)}>
+              Create Task
             </Button>
-          </form>
-          {tasks.length === 0 ? (
+          </div>
+          {sortedTasks.length === 0 ? (
             <p className="text-sm text-slate-500">No tasks linked to this contact.</p>
           ) : (
-            tasks.map((task) => {
+            sortedTasks.map((task) => {
               const project = Array.isArray(task.projects)
                 ? task.projects[0]
                 : (task.projects as Record<string, unknown> | null);
@@ -1005,7 +1012,9 @@ export function ContactProfileTabs({
                   type="button"
                   key={taskId}
                   className="w-full rounded-md border border-slate-200 p-3 text-left"
-                  onClick={() => router.push(`/staff/tasks/${taskId}`)}
+                  onClick={() =>
+                    router.push(`/staff/tasks/${taskId}?returnTo=profile&contactId=${encodeURIComponent(contactId)}`)
+                  }
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900">{task.title as string}</p>
@@ -1020,6 +1029,153 @@ export function ContactProfileTabs({
               );
             })
           )}
+          {showCreateContactTaskModal ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+              <div className="max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-xl">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-slate-900">Create Task</h3>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                    onClick={() => setShowCreateContactTaskModal(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <form onSubmit={submitContactTask} className="space-y-3 rounded-md border border-slate-200 p-3">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      Task Title <span className="text-red-600">*</span>
+                    </label>
+                    <Input
+                      value={newContactTaskForm.title}
+                      onChange={(event) =>
+                        setNewContactTaskForm((prev) => ({ ...prev, title: event.target.value }))
+                      }
+                      placeholder="Enter task title"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      Description <span className="text-red-600">*</span>
+                    </label>
+                    <textarea
+                      className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={newContactTaskForm.description}
+                      onChange={(event) =>
+                        setNewContactTaskForm((prev) => ({ ...prev, description: event.target.value }))
+                      }
+                      placeholder="Enter task description"
+                      required
+                    />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Task Type</label>
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={newContactTaskForm.taskType}
+                        onChange={(event) =>
+                          setNewContactTaskForm((prev) => ({
+                            ...prev,
+                            taskType: event.target.value as "Call" | "Email" | "Mail" | "Other"
+                          }))
+                        }
+                      >
+                        <option value="Call">Phone Call</option>
+                        <option value="Email">Email</option>
+                        <option value="Mail">Mail</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Assign To</label>
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={newContactTaskForm.assignedToUserId}
+                        onChange={(event) =>
+                          setNewContactTaskForm((prev) => ({
+                            ...prev,
+                            assignedToUserId: event.target.value
+                          }))
+                        }
+                      >
+                        <option value="">Assign to me</option>
+                        {staffUsers.map((user) => (
+                          <option key={user.user_id} value={user.user_id}>
+                            {user.display_name || user.user_id}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Constituent Contact</label>
+                    <Input value={currentConstituentLabel} readOnly aria-readonly />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      Project <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      value={newContactTaskForm.projectId}
+                      onChange={(event) =>
+                        setNewContactTaskForm((prev) => ({ ...prev, projectId: event.target.value }))
+                      }
+                      required
+                    >
+                      <option value="">Select project</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Due Date</label>
+                      <Input
+                        type="date"
+                        value={newContactTaskForm.dueDate}
+                        onChange={(event) =>
+                          setNewContactTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+                      <select
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        value={newContactTaskForm.priority}
+                        onChange={(event) =>
+                          setNewContactTaskForm((prev) => ({
+                            ...prev,
+                            priority: event.target.value as "low" | "medium" | "high" | "urgent"
+                          }))
+                        }
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="submit" disabled={creatingContactTask}>
+                      {creatingContactTask ? "Creating..." : "Create Task"}
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => setShowCreateContactTaskModal(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

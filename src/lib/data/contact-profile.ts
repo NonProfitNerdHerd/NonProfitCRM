@@ -270,7 +270,7 @@ export async function getContactProfileData(contactId: string) {
       )
       .eq("organization_id", context.organizationId)
       .eq("contact_id", contactId)
-      .order("due_date", { ascending: true }),
+      .order("created_at", { ascending: false }),
     supabase
       .from("memberships")
       .select(
