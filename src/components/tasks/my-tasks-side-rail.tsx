@@ -53,6 +53,8 @@ export function MyTasksSideRail({
   const [snoozeTarget, setSnoozeTarget] = useState<MyTasksSideRailItem | null>(null);
   const [customSnoozeUntil, setCustomSnoozeUntil] = useState("");
   const [snoozedUntilByTaskId, setSnoozedUntilByTaskId] = useState<Record<string, string>>({});
+  const [contactLookupQuery, setContactLookupQuery] = useState("");
+  const [contactLookupOpen, setContactLookupOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
     title: "",
     description: "",
@@ -103,18 +105,24 @@ export function MyTasksSideRail({
     }
     return options.sort((left, right) => left.name.localeCompare(right.name));
   }, [assignableUsers, currentUserId]);
-  const categorizedAssociationContacts = useMemo(() => {
-    const categories: TaskAssociationCategory[] = [
-      "Donor",
-      "Contact",
-      "Donor Organization",
-      "Organization"
-    ];
-    return categories.map((category) => ({
-      category,
-      options: associationContacts.filter((contact) => contact.category === category)
-    }));
-  }, [associationContacts]);
+  const selectedAssociationContact = useMemo(
+    () => associationContacts.find((contact) => contact.id === createForm.contactId) ?? null,
+    [associationContacts, createForm.contactId]
+  );
+  const filteredAssociationContacts = useMemo(() => {
+    const query = contactLookupQuery.trim().toLowerCase();
+    if (!query) return associationContacts.slice(0, 60);
+    return associationContacts
+      .filter((contact) => `${contact.label} ${contact.category}`.toLowerCase().includes(query))
+      .slice(0, 60);
+  }, [associationContacts, contactLookupQuery]);
+  useEffect(() => {
+    if (!selectedAssociationContact) return;
+    const selectedLabel = `${selectedAssociationContact.label} (${selectedAssociationContact.category})`;
+    if (!contactLookupQuery) {
+      setContactLookupQuery(selectedLabel);
+    }
+  }, [contactLookupQuery, selectedAssociationContact]);
 
   useEffect(() => {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
@@ -240,6 +248,8 @@ export function MyTasksSideRail({
         dueDate: "",
         priority: "medium"
       }));
+      setContactLookupQuery("");
+      setContactLookupOpen(false);
       setShowCreateTask(false);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Unable to create task.");
@@ -372,7 +382,9 @@ export function MyTasksSideRail({
             {showCreateTask ? (
               <form className="space-y-3 rounded-md border border-slate-200 p-3" onSubmit={createTaskFromRail}>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Task Title</label>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Task Title <span className="text-red-600">*</span>
+                  </label>
                   <Input
                     value={createForm.title}
                     onChange={(event) => setCreateForm((prev) => ({ ...prev, title: event.target.value }))}
@@ -381,14 +393,16 @@ export function MyTasksSideRail({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Description <span className="text-red-600">*</span>
+                  </label>
                   <textarea
                     className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                     value={createForm.description}
                     onChange={(event) =>
                       setCreateForm((prev) => ({ ...prev, description: event.target.value }))
                     }
-                    placeholder="Optional details"
+                    placeholder="Enter task description"
                     required
                   />
                 </div>
@@ -431,33 +445,71 @@ export function MyTasksSideRail({
                     </select>
                   </div>
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">
-                    Tie to Donor / Contact / Donor Organization / Organization
-                  </label>
-                  <select
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    value={createForm.contactId}
-                    onChange={(event) =>
-                      setCreateForm((prev) => ({ ...prev, contactId: event.target.value }))
-                    }
-                  >
-                    <option value="">No related record</option>
-                    {categorizedAssociationContacts.map((group) =>
-                      group.options.length > 0 ? (
-                        <optgroup key={group.category} label={group.category}>
-                          {group.options.map((contact) => (
-                            <option key={contact.id} value={contact.id}>
-                              {contact.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ) : null
-                    )}
-                  </select>
+                <div className="relative">
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Constituent Contact</label>
+                  <Input
+                    value={contactLookupQuery}
+                    onFocus={() => setContactLookupOpen(true)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setContactLookupQuery(value);
+                      setContactLookupOpen(true);
+                      if (createForm.contactId) {
+                        setCreateForm((prev) => ({ ...prev, contactId: "" }));
+                      }
+                    }}
+                    onBlur={() => {
+                      window.setTimeout(() => setContactLookupOpen(false), 120);
+                    }}
+                    placeholder="Type to search and select a constituent"
+                    aria-label="Constituent Contact"
+                  />
+                  {contactLookupOpen ? (
+                    <div className="absolute z-30 mt-1 max-h-52 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                      <button
+                        type="button"
+                        className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${
+                          !createForm.contactId ? "bg-slate-50 font-medium text-slate-900" : "text-slate-700"
+                        }`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setCreateForm((prev) => ({ ...prev, contactId: "" }));
+                          setContactLookupQuery("");
+                          setContactLookupOpen(false);
+                        }}
+                      >
+                        No related record
+                      </button>
+                      {filteredAssociationContacts.length > 0 ? (
+                        filteredAssociationContacts.map((contact) => (
+                          <button
+                            type="button"
+                            key={contact.id}
+                            className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${
+                              createForm.contactId === contact.id
+                                ? "bg-blue-50 font-medium text-blue-700"
+                                : "text-slate-700"
+                            }`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              setCreateForm((prev) => ({ ...prev, contactId: contact.id }));
+                              setContactLookupQuery(`${contact.label} (${contact.category})`);
+                              setContactLookupOpen(false);
+                            }}
+                          >
+                            {contact.label} <span className="text-xs text-slate-500">({contact.category})</span>
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-3 py-2 text-sm text-slate-500">No matching constituents found.</p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Project <span className="text-red-600">*</span>
+                  </label>
                   <select
                     className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                     value={createForm.projectId}
