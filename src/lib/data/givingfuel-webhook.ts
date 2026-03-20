@@ -322,6 +322,41 @@ function extractFormIdFromWebhookEventRow(row: Record<string, unknown>) {
   );
 }
 
+function resolveTransactionAmount(normalized: GivingFuelNormalizedPayload) {
+  const direct = toNumber(normalized.transaction.amount);
+  if (direct !== null && direct > 0) return direct;
+
+  const raw = normalized.rawPayload;
+  const event = pickObject(raw.event) ?? raw;
+  const data = pickObject(event.data) ?? event;
+  const transaction =
+    pickObject(valueByPath(data, "transaction")) ??
+    pickObject(valueByPath(data, "donation")) ??
+    pickObject(valueByPath(raw, "transaction")) ??
+    pickObject(valueByPath(raw, "donation")) ??
+    data;
+
+  const fallback =
+    readNumber(transaction ?? {}, [
+      "amount",
+      "total",
+      "value",
+      "deductibleTotal",
+      "subscription.amount",
+      "order.total",
+      "order.amount"
+    ]) ??
+    readNumber(data ?? {}, [
+      "amount",
+      "total",
+      "value",
+      "deductibleTotal",
+      "subscription.amount"
+    ]);
+
+  return fallback !== null && fallback > 0 ? fallback : null;
+}
+
 function verifyWebhookAuthenticity(input: {
   headers: Headers;
   rawBody: string;
@@ -626,7 +661,7 @@ async function createDonationFromImport(input: {
   if (!externalTransactionId) {
     throw new Error("External transaction ID is required for donation creation.");
   }
-  const amount = input.normalized.transaction.amount;
+  const amount = resolveTransactionAmount(input.normalized);
   if (!Number.isFinite(amount) || Number(amount) <= 0) {
     throw new Error("Transaction amount is missing or invalid.");
   }
