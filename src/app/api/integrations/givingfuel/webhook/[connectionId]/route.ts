@@ -7,10 +7,12 @@ type RouteProps = {
 
 export async function POST(request: Request, { params }: RouteProps) {
   try {
-    const { connectionId } = await params;
+    const { connectionId: webhookId } = await params;
     const rawBody = await request.text();
     const result = await processGivingFuelWebhookRequest({
-      connectionId,
+      webhookId,
+      requestMethod: request.method,
+      requestUrl: request.url,
       headers: request.headers,
       rawBody
     });

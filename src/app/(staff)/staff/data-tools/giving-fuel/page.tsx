@@ -3,16 +3,18 @@ import { GivingFuelOperationsDashboard } from "@/components/givingfuel/giving-fu
 import {
   getGivingFuelOperationalDashboard,
   getGivingFuelPageCampaignConfiguration,
+  listGivingFuelWebhookInbox,
   listGivingFuelReviewQueue,
   requireGivingFuelOperationalAccess
 } from "@/lib/data/givingfuel-webhook";
 
 export default async function GivingFuelDataToolsPage() {
   await requireGivingFuelOperationalAccess();
-  const [initialDashboard, initialReview, initialMappings] = await Promise.all([
+  const [initialDashboard, initialReview, initialMappings, initialInbox] = await Promise.all([
     getGivingFuelOperationalDashboard(),
     listGivingFuelReviewQueue({}),
-    getGivingFuelPageCampaignConfiguration()
+    getGivingFuelPageCampaignConfiguration(),
+    listGivingFuelWebhookInbox({ limit: 50 })
   ]);
   return (
     <Card>
@@ -24,6 +26,7 @@ export default async function GivingFuelDataToolsPage() {
         initialDashboard={initialDashboard}
         initialReview={initialReview}
         initialMappings={initialMappings}
+        initialInbox={initialInbox}
       />
     </Card>
   );

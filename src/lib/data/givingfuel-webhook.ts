@@ -688,67 +688,144 @@ async function createDonationFromImport(input: {
 }
 
 export async function processGivingFuelWebhookRequest(input: {
-  connectionId: string;
+  webhookId: string;
+  requestMethod: string;
+  requestUrl: string;
   headers: Headers;
   rawBody: string;
+  replayOfEventId?: string | null;
+  forceTestEvent?: boolean;
+  sourceSystem?: string;
 }) {
   const supabase = createAdminClient();
-  const connection = await loadWebhookConnectionById(input.connectionId);
-  if (!connection) {
-    return {
-      statusCode: 404,
-      body: { message: "Integration connection not found." }
-    };
-  }
-  if (connection.provider_key !== GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) {
-    return {
-      statusCode: 400,
-      body: { message: "Connection is not configured for GivingFuel Webhook." }
-    };
-  }
+  const connection = await loadWebhookConnectionById(input.webhookId);
+  const now = new Date().toISOString();
+  const requestHeaders = Object.fromEntries(input.headers.entries());
+  const initialIdempotencyKey = sha256Hex(`${input.webhookId}:${input.rawBody || now}`);
+  const initialInsert = await supabase
+    .from("integration_webhook_events")
+    .insert({
+      organization_id: connection?.organization_id ?? null,
+      integration_connection_id: connection?.id ?? null,
+      matched_integration_id: connection?.id ?? null,
+      provider_key: connection?.provider_key || GIVINGFUEL_WEBHOOK_INTEGRATION_KEY,
+      provider_event_id: null,
+      event_type: "request_received",
+      received_at: now,
+      processed_at: null,
+      processing_status: "received",
+      validation_status: "pending",
+      processing_attempts: 1,
+      request_method: input.requestMethod,
+      request_url: input.requestUrl,
+      webhook_route_id: input.webhookId,
+      request_headers: requestHeaders,
+      raw_body_text: input.rawBody,
+      raw_payload_json: {},
+      parsed_body_json: {},
+      normalized_payload_json: {},
+      error_message: null,
+      idempotency_key: initialIdempotencyKey,
+      source_system: input.sourceSystem ?? "GivingFuel",
+      is_test_event: Boolean(input.forceTestEvent),
+      environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? null,
+      replay_of_webhook_event_id: toText(input.replayOfEventId) || null
+    })
+    .select("id")
+    .single();
+  if (initialInsert.error) throw initialInsert.error;
+
+  const eventId = toText(initialInsert.data.id);
+  console.info("GivingFuel webhook received", {
+    eventId,
+    webhookId: input.webhookId,
+    hasMatchedIntegration: Boolean(connection?.id)
+  });
 
   let rawPayload: Record<string, unknown> = {};
   try {
     const parsed = JSON.parse(input.rawBody);
     rawPayload = pickObject(parsed) ?? {};
   } catch {
-    const eventIdempotencyKey = sha256Hex(input.rawBody || `${Date.now()}`);
-    const { data: invalidEvent } = await supabase
+    await supabase
       .from("integration_webhook_events")
-      .insert({
-        organization_id: connection.organization_id,
-        integration_connection_id: connection.id,
-        provider_key: connection.provider_key,
-        provider_event_id: null,
+      .update({
+        validation_status: "invalid",
+        processing_status: "failed",
         event_type: "invalid_json",
-        processing_status: "invalid",
-        processing_attempts: 1,
-        request_headers: Object.fromEntries(input.headers.entries()),
-        raw_payload_json: {},
-        normalized_payload_json: {},
-        error_message: "Webhook payload is not valid JSON.",
-        idempotency_key: eventIdempotencyKey,
-        received_at: new Date().toISOString(),
-        processed_at: new Date().toISOString()
+        parsed_body_json: {},
+        processed_at: new Date().toISOString(),
+        response_status_code: 400,
+        error_message: "Webhook payload is not valid JSON."
       })
-      .select("id")
-      .maybeSingle();
+      .eq("id", eventId);
+    console.warn("GivingFuel webhook validation failed", { eventId, reason: "invalid_json" });
     return {
       statusCode: 400,
-      body: {
-        message: "Invalid JSON payload.",
-        eventId: toText(invalidEvent?.id) || null
-      }
+      body: { message: "Invalid JSON payload.", eventId }
     };
   }
 
   const normalized = normalizeGivingFuelPayload(rawPayload, input.rawBody);
+  const isTestEvent =
+    Boolean(input.forceTestEvent) ||
+    toText(normalized.eventType).toLowerCase().includes("test") ||
+    toText(readHeaderValue(input.headers, ["x-webconnex-event", "x-givingfuel-event"]))
+      .toLowerCase()
+      .includes("test");
+
+  await supabase
+    .from("integration_webhook_events")
+    .update({
+      parsed_body_json: rawPayload,
+      raw_payload_json: rawPayload,
+      event_type: normalized.eventType,
+      provider_event_id: normalized.providerEventId,
+      idempotency_key: normalized.idempotencyKey || initialIdempotencyKey,
+      is_test_event: isTestEvent
+    })
+    .eq("id", eventId);
+
+  if (!connection) {
+    await supabase
+      .from("integration_webhook_events")
+      .update({
+        validation_status: "invalid",
+        processing_status: "failed",
+        processed_at: new Date().toISOString(),
+        response_status_code: 404,
+        error_message: "Integration connection not found for webhook ID."
+      })
+      .eq("id", eventId);
+    console.warn("GivingFuel webhook unknown webhook ID", { eventId, webhookId: input.webhookId });
+    return {
+      statusCode: 404,
+      body: { message: "Unknown webhook ID.", eventId }
+    };
+  }
+
+  if (connection.provider_key !== GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) {
+    await supabase
+      .from("integration_webhook_events")
+      .update({
+        validation_status: "invalid",
+        processing_status: "failed",
+        processed_at: new Date().toISOString(),
+        response_status_code: 400,
+        error_message: "Connection is not configured for GivingFuel Webhook."
+      })
+      .eq("id", eventId);
+    return {
+      statusCode: 400,
+      body: { message: "Connection is not configured for GivingFuel Webhook.", eventId }
+    };
+  }
+
   const config = (connection.configuration_json ?? {}) as Record<string, unknown>;
   const signatureHeaderName = toText(config.signatureHeaderName) || "x-webconnex-signature";
   const secretHeaderName = toText(config.secretHeaderName) || "x-webconnex-token";
   const encryptedSecret = toText(config.encryptedWebhookSecret);
   const webhookSecret = encryptedSecret ? decryptIntegrationSecret(encryptedSecret) : "";
-
   const verify = verifyWebhookAuthenticity({
     headers: input.headers,
     rawBody: input.rawBody,
@@ -756,60 +833,64 @@ export async function processGivingFuelWebhookRequest(input: {
     signatureHeaderName,
     secretHeaderName
   });
-
-  const eventInsert = await supabase
-    .from("integration_webhook_events")
-    .insert({
-      organization_id: connection.organization_id,
-      integration_connection_id: connection.id,
-      provider_key: connection.provider_key,
-      provider_event_id: normalized.providerEventId,
-      event_type: normalized.eventType,
-      processing_status: verify.ok ? "pending" : "invalid",
-      processing_attempts: 1,
-      request_headers: Object.fromEntries(input.headers.entries()),
-      raw_payload_json: rawPayload,
-      normalized_payload_json: normalized as unknown as Record<string, unknown>,
-      error_message: verify.ok ? null : verify.reason,
-      idempotency_key: normalized.idempotencyKey,
-      received_at: new Date().toISOString(),
-      processed_at: verify.ok ? null : new Date().toISOString()
-    })
-    .select("id, processing_status, created_transaction_id")
-    .maybeSingle();
-
-  if (eventInsert.error) {
-    const code = (eventInsert.error as { code?: string }).code;
-    if (code === "23505") {
-      const { data: existing, error: existingError } = await supabase
-        .from("integration_webhook_events")
-        .select("id, processing_status, created_transaction_id")
-        .eq("organization_id", connection.organization_id)
-        .eq("integration_connection_id", connection.id)
-        .eq("idempotency_key", normalized.idempotencyKey)
-        .maybeSingle();
-      if (existingError) throw existingError;
-      return {
-        statusCode: 200,
-        body: {
-          message: "Duplicate delivery ignored.",
-          duplicate: true,
-          eventId: toText(existing?.id) || null,
-          processingStatus: toText(existing?.processing_status) || "duplicate",
-          createdTransactionId: toText(existing?.created_transaction_id) || null
-        }
-      };
-    }
-    throw eventInsert.error;
-  }
-
-  const eventId = toText(eventInsert.data?.id);
   if (!verify.ok) {
+    await supabase
+      .from("integration_webhook_events")
+      .update({
+        validation_status: "invalid",
+        processing_status: "failed",
+        processed_at: new Date().toISOString(),
+        response_status_code: 401,
+        error_message: verify.reason
+      })
+      .eq("id", eventId);
+    console.warn("GivingFuel webhook auth failed", { eventId, reason: verify.reason });
     return {
       statusCode: 401,
+      body: { message: verify.reason, eventId }
+    };
+  }
+
+  await supabase
+    .from("integration_webhook_events")
+    .update({
+      validation_status: "valid",
+      processing_status: "pending",
+      error_message: null
+    })
+    .eq("id", eventId);
+
+  const duplicateResult = await supabase
+    .from("integration_webhook_events")
+    .select("id, processing_status, created_transaction_id")
+    .eq("organization_id", connection.organization_id)
+    .eq("integration_connection_id", connection.id)
+    .eq("idempotency_key", normalized.idempotencyKey)
+    .neq("id", eventId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (duplicateResult.error) throw duplicateResult.error;
+  if (duplicateResult.data) {
+    await supabase
+      .from("integration_webhook_events")
+      .update({
+        processing_status: "ignored",
+        processed_at: new Date().toISOString(),
+        response_status_code: 200,
+        error_message: "Duplicate delivery ignored."
+      })
+      .eq("id", eventId);
+    console.info("GivingFuel webhook duplicate ignored", { eventId, duplicateOf: duplicateResult.data.id });
+    return {
+      statusCode: 200,
       body: {
-        message: verify.reason,
-        eventId
+        message: "Duplicate delivery ignored.",
+        duplicate: true,
+        eventId,
+        duplicateOfEventId: toText(duplicateResult.data.id) || null,
+        processingStatus: toText(duplicateResult.data.processing_status) || "ignored",
+        createdTransactionId: toText(duplicateResult.data.created_transaction_id) || null
       }
     };
   }
@@ -820,9 +901,11 @@ export async function processGivingFuelWebhookRequest(input: {
       .update({
         processing_status: "ignored",
         processed_at: new Date().toISOString(),
+        response_status_code: 202,
         error_message: "Integration is disabled. Event stored but not processed."
       })
       .eq("id", eventId);
+    console.info("GivingFuel webhook ignored (integration disabled)", { eventId });
     return {
       statusCode: 202,
       body: {
@@ -856,6 +939,14 @@ export async function processGivingFuelWebhookRequest(input: {
       },
       donorCandidates
     );
+    await supabase
+      .from("integration_webhook_events")
+      .update({
+        matched_integration_id: connection.id,
+        matched_campaign_id: mappingResult.matchedCampaignId,
+        matched_donor_id: donorMatch.matchedDonorId
+      })
+      .eq("id", eventId);
 
     const settings = {
       autoAcceptDonorConfidence: Number(config.autoAcceptDonorConfidence ?? 95),
@@ -901,25 +992,49 @@ export async function processGivingFuelWebhookRequest(input: {
       })
       .select("id")
       .single();
-    if (importInsert.error) throw importInsert.error;
+    if (importInsert.error) {
+      const code = (importInsert.error as { code?: string }).code;
+      if (code === "23505") {
+        await supabase
+          .from("integration_webhook_events")
+          .update({
+            processing_status: "ignored",
+            processed_at: new Date().toISOString(),
+            response_status_code: 200,
+            error_message: "Duplicate transaction import ignored."
+          })
+          .eq("id", eventId);
+        return {
+          statusCode: 200,
+          body: {
+            message: "Duplicate transaction import ignored.",
+            eventId,
+            processingStatus: "ignored"
+          }
+        };
+      }
+      throw importInsert.error;
+    }
     transactionImportId = toText(importInsert.data.id);
 
     if (!decision.shouldAutoAccept) {
       await supabase
         .from("integration_webhook_events")
         .update({
-          processing_status: "needs_review",
+          processing_status: "processed",
           processed_at: new Date().toISOString(),
-          error_message: decision.reviewReason
+          response_status_code: 202,
+          error_message: null
         })
         .eq("id", eventId);
+      console.info("GivingFuel webhook queued for review", { eventId, transactionImportId });
       return {
         statusCode: 202,
         body: {
           message: "Event accepted and queued for review.",
           eventId,
           transactionImportId,
-          processingStatus: "needs_review"
+          processingStatus: "processed"
         }
       };
     }
@@ -944,9 +1059,10 @@ export async function processGivingFuelWebhookRequest(input: {
       await supabase
         .from("integration_webhook_events")
         .update({
-          processing_status: "needs_review",
+          processing_status: "processed",
           processed_at: new Date().toISOString(),
-          error_message: "Donor could not be resolved automatically."
+          response_status_code: 202,
+          error_message: null
         })
         .eq("id", eventId);
       return {
@@ -955,7 +1071,7 @@ export async function processGivingFuelWebhookRequest(input: {
           message: "Event accepted but queued for review due to donor resolution.",
           eventId,
           transactionImportId,
-          processingStatus: "needs_review"
+          processingStatus: "processed"
         }
       };
     }
@@ -985,11 +1101,13 @@ export async function processGivingFuelWebhookRequest(input: {
       .update({
         processing_status: "processed",
         processed_at: new Date().toISOString(),
+        response_status_code: 200,
         created_transaction_id: donationId,
         error_message: null
       })
       .eq("id", eventId);
 
+    console.info("GivingFuel webhook processed", { eventId, transactionImportId, donationId });
     return {
       statusCode: 200,
       body: {
@@ -1018,9 +1136,14 @@ export async function processGivingFuelWebhookRequest(input: {
       .update({
         processing_status: "failed",
         processed_at: new Date().toISOString(),
+        response_status_code: 500,
         error_message: message
       })
       .eq("id", eventId);
+    console.error("GivingFuel webhook processing failed", {
+      eventId,
+      message
+    });
     return {
       statusCode: 500,
       body: {
@@ -1155,6 +1278,124 @@ export async function getGivingFuelOperationalDashboard() {
     },
     recentEvents: recentResult.data ?? []
   };
+}
+
+export async function listGivingFuelWebhookInbox(filters?: {
+  processingStatus?: string;
+  validationStatus?: string;
+  webhookId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+}) {
+  const context = await requireGivingFuelOperationalAccess();
+  const state = context.moduleState;
+  if (!state.connectionId) {
+    return { moduleState: state, rows: [] as Array<Record<string, unknown>> };
+  }
+  const supabase = await createIntegrationClient();
+  const boundedLimit = Math.min(Math.max(Math.trunc(filters?.limit ?? 50), 1), 250);
+  let query = supabase
+    .from("integration_webhook_events")
+    .select(
+      "id, webhook_route_id, request_method, request_url, source_system, provider_event_id, event_type, validation_status, processing_status, response_status_code, is_test_event, matched_integration_id, matched_campaign_id, matched_donor_id, created_transaction_id, error_message, received_at, processed_at, created_at"
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", state.connectionId)
+    .order("created_at", { ascending: false })
+    .limit(boundedLimit);
+  if (filters?.processingStatus) query = query.eq("processing_status", filters.processingStatus);
+  if (filters?.validationStatus) query = query.eq("validation_status", filters.validationStatus);
+  if (filters?.webhookId) query = query.eq("webhook_route_id", filters.webhookId);
+  if (filters?.dateFrom) query = query.gte("created_at", `${filters.dateFrom}T00:00:00.000Z`);
+  if (filters?.dateTo) query = query.lte("created_at", `${filters.dateTo}T23:59:59.999Z`);
+  const { data, error } = await query;
+  if (error) throw error;
+  return { moduleState: state, rows: data ?? [] };
+}
+
+export async function getGivingFuelWebhookInboxDetail(eventId: string) {
+  const context = await requireGivingFuelOperationalAccess();
+  const state = context.moduleState;
+  if (!state.connectionId) throw new Error("GivingFuel module is not configured.");
+  const supabase = await createIntegrationClient();
+  const [eventResult, importResult] = await Promise.all([
+    supabase
+      .from("integration_webhook_events")
+      .select("*")
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", state.connectionId)
+      .eq("id", eventId)
+      .maybeSingle(),
+    supabase
+      .from("integration_transaction_imports")
+      .select("id, review_status, import_status, matched_campaign_id, matched_donor_id, created_crm_transaction_id")
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", state.connectionId)
+      .eq("webhook_event_id", eventId)
+      .maybeSingle()
+  ]);
+  if (eventResult.error) throw eventResult.error;
+  if (importResult.error) throw importResult.error;
+  if (!eventResult.data) throw new Error("Webhook inbox event not found.");
+  return {
+    moduleState: state,
+    event: eventResult.data,
+    import: importResult.data ?? null
+  };
+}
+
+export async function replayGivingFuelWebhookInboxEvent(eventId: string) {
+  const context = await requireStaffPermission("can_edit_donations");
+  const moduleState = await getGivingFuelModuleStateForCurrentUser();
+  if (!moduleState.allowModuleAccess || !moduleState.connectionId) {
+    throw new Error("GivingFuel module is not available.");
+  }
+  const supabase = await createIntegrationClient();
+  const { data: event, error: eventError } = await supabase
+    .from("integration_webhook_events")
+    .select(
+      "id, integration_connection_id, webhook_route_id, request_method, request_url, request_headers, raw_body_text, raw_payload_json, is_test_event"
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", moduleState.connectionId)
+    .eq("id", eventId)
+    .maybeSingle();
+  if (eventError) throw eventError;
+  if (!event) throw new Error("Webhook event not found.");
+
+  const connection = await getWebhookConnectionForOrganization(context.organizationId);
+  if (!connection) throw new Error("GivingFuel webhook connection is not configured.");
+  const connectionConfig = connection.configuration ?? {};
+  const secretHeaderName = toText(connectionConfig.secretHeaderName) || "x-webconnex-token";
+  const secret = toText(connectionConfig.encryptedWebhookSecret)
+    ? decryptIntegrationSecret(toText(connectionConfig.encryptedWebhookSecret))
+    : "";
+
+  const storedHeaders = pickObject(event.request_headers) ?? {};
+  const replayHeaders = new Headers();
+  for (const [key, value] of Object.entries(storedHeaders)) {
+    const text = toText(value);
+    if (text) replayHeaders.set(key, text);
+  }
+  if (secret) replayHeaders.set(secretHeaderName, secret);
+
+  const body =
+    toText(event.raw_body_text) ||
+    JSON.stringify((event.raw_payload_json as Record<string, unknown> | null | undefined) ?? {});
+  const webhookId = toText(event.webhook_route_id) || toText(event.integration_connection_id);
+  const result = await processGivingFuelWebhookRequest({
+    webhookId,
+    requestMethod: toText(event.request_method) || "POST",
+    requestUrl:
+      toText(event.request_url) || `/api/integrations/givingfuel/webhook/${encodeURIComponent(webhookId)}`,
+    headers: replayHeaders,
+    rawBody: body,
+    replayOfEventId: eventId,
+    forceTestEvent: Boolean(event.is_test_event),
+    sourceSystem: "GivingFuel-Replay"
+  });
+  return { ok: true, result: result.body, statusCode: result.statusCode };
 }
 
 export async function getGivingFuelPageCampaignConfiguration(): Promise<{
@@ -1673,9 +1914,12 @@ export async function reprocessGivingFuelReviewItem(input: { importId: string })
     : "";
   const body = JSON.stringify(event.raw_payload_json ?? {});
   const result = await processGivingFuelWebhookRequest({
-    connectionId: toText(event.integration_connection_id),
+    webhookId: toText(event.integration_connection_id),
+    requestMethod: "POST",
+    requestUrl: `/api/integrations/givingfuel/webhook/${toText(event.integration_connection_id)}`,
     headers: new Headers(secret ? { [secretHeaderName]: secret } : {}),
-    rawBody: body
+    rawBody: body,
+    sourceSystem: "GivingFuel-Replay"
   });
 
   await writeReviewAction({
@@ -1730,7 +1974,7 @@ export async function getGivingFuelAdminWebhookLog(limit = 10) {
   const { data, error } = await supabase
     .from("integration_webhook_events")
     .select(
-      "id, received_at, processed_at, provider_event_id, event_type, processing_status, error_message, created_transaction_id"
+      "id, created_at, webhook_route_id, request_method, request_url, source_system, provider_event_id, event_type, validation_status, processing_status, response_status_code, is_test_event, matched_integration_id, matched_campaign_id, matched_donor_id, received_at, processed_at, error_message, created_transaction_id"
     )
     .eq("organization_id", context.organizationId)
     .eq("integration_connection_id", connection.id)
