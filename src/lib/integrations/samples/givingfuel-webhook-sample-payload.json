@@ -1,0 +1,39 @@
+{
+  "id": "evt_9b2f8f11",
+  "event_type": "donation.created",
+  "created_at": "2026-03-13T15:42:11Z",
+  "transaction": {
+    "id": "txn_GF_10004421",
+    "dateCreated": "2026-03-13T15:41:49Z",
+    "status": "posted",
+    "amount": 125.5,
+    "grossAmount": 130.0,
+    "netAmount": 125.5,
+    "fees": 4.5,
+    "paymentMethod": "Credit Card",
+    "isRecurring": false,
+    "formId": "gf_page_annual_fund_2026",
+    "formAccRef": "ANNUAL_FUND",
+    "formName": "2026 Annual Fund",
+    "campaignCode": "AF-2026",
+    "customer": {
+      "id": "cust_GF_92177",
+      "firstName": "Joan",
+      "lastName": "Ackerman",
+      "email": "joan.ackerman@example.org",
+      "phone": "+1 (510) 555-0139",
+      "postalCode": "94541",
+      "address1": "100 Main St",
+      "city": "Hayward",
+      "state": "CA"
+    },
+    "tribute": {
+      "type": "in_memory_of",
+      "name": "Sarah Ackerman"
+    },
+    "recurring": {
+      "enabled": false,
+      "planId": null
+    }
+  }
+}

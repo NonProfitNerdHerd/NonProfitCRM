@@ -4,7 +4,11 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { getIntegrationDetailForAdmin } from "@/lib/data/integrations";
 import { GivingFuelContactsSetup } from "@/components/admin/integrations/givingfuel-contacts-setup";
 import { GivingFuelDonationsSetup } from "@/components/admin/integrations/givingfuel-donations-setup";
-import { GIVINGFUEL_DONATIONS_INTEGRATION_KEY } from "@/lib/integrations/givingfuel-contacts-config";
+import {
+  GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+  GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+} from "@/lib/integrations/givingfuel-contacts-config";
+import { GivingFuelWebhookSetup } from "@/components/admin/integrations/givingfuel-webhook-setup";
 
 type RouteProps = {
   params: Promise<{ integrationKey: string }>;
@@ -14,7 +18,9 @@ type RouteProps = {
 export default async function IntegrationDetailPage({ params, searchParams }: RouteProps) {
   const { integrationKey } = await params;
   const supportedIntegration =
-    integrationKey === "webconnex" || integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY;
+    integrationKey === "webconnex" ||
+    integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY ||
+    integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY;
   if (searchParams) {
     await searchParams;
   }
@@ -56,6 +62,8 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
             ? "GivingFuel Contacts"
             : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? "GivingFuel Donations"
+              : integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+                ? "GivingFuel Webhook"
               : integrationKey,
         provider_key: integrationKey,
         description: "Fallback integration detail due environment configuration mismatch.",
@@ -76,6 +84,8 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
             ? "GivingFuel Contacts"
             : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? "GivingFuel Donations"
+              : integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+                ? "GivingFuel Webhook"
               : integrationKey,
         base_url: "",
         auth_type: "api_key_header",
@@ -103,6 +113,8 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
             ? "GivingFuel Contacts"
             : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? "GivingFuel Donations"
+              : integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+                ? "GivingFuel Webhook"
               : integrationKey,
         description: "Integration framework fallback detail",
         currentStatus: "Disabled",
@@ -132,6 +144,8 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         subtitle={
           integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
             ? "GivingFuel donations API key setup, page mapping, and transaction synchronization"
+            : integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+              ? "Configure GivingFuel webhook security, module visibility, campaign mapping, and review automation"
             : "GivingFuel contacts API key setup and contacts synchronization"
         }
       />
@@ -146,6 +160,18 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         </p>
       ) : integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY ? (
         <GivingFuelDonationsSetup
+          integrationKey={integrationKey}
+          initialData={detail as {
+            definition: Record<string, unknown>;
+            connection: Record<string, unknown>;
+            jobs: Array<Record<string, unknown>>;
+            errors: Array<Record<string, unknown>>;
+            overview: Record<string, unknown>;
+            apiPaused?: boolean;
+          }}
+        />
+      ) : integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY ? (
+        <GivingFuelWebhookSetup
           integrationKey={integrationKey}
           initialData={detail as {
             definition: Record<string, unknown>;

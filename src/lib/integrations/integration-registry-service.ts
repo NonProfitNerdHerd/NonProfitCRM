@@ -2,12 +2,14 @@ import { createIntegrationClient } from "@/lib/integrations/db";
 import { type IntegrationDefinition } from "@/lib/integrations/types";
 import {
   GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
-  GIVINGFUEL_INTEGRATION_KEY
+  GIVINGFUEL_INTEGRATION_KEY,
+  GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
 } from "@/lib/integrations/givingfuel-contacts-config";
 
 const SUPPORTED_PROVIDER_KEYS = new Set([
   GIVINGFUEL_INTEGRATION_KEY,
-  GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+  GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+  GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
 ]);
 
 export class IntegrationRegistryService {

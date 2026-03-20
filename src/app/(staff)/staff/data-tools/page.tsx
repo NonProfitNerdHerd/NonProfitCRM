@@ -1,12 +1,16 @@
 import Link from "next/link";
 import { Card, CardHeader } from "@/components/ui/card";
 import { requireRoleKeys } from "@/lib/auth/guards";
+import { getGivingFuelModuleStateForCurrentUser } from "@/lib/data/givingfuel-webhook";
 
 const LINK_CARD_CLASSES =
   "block rounded-md border border-slate-200 bg-white p-4 transition hover:border-brand-300 hover:bg-brand-50";
 
 export default async function DataToolsPage() {
   await requireRoleKeys(["administrator", "data_steward"]);
+  const givingFuelState = await getGivingFuelModuleStateForCurrentUser().catch(() => ({
+    allowModuleAccess: false
+  }));
 
   return (
     <Card>
@@ -35,6 +39,14 @@ export default async function DataToolsPage() {
           <p className="text-sm font-semibold text-slate-900">Contact Merge</p>
           <p className="text-xs text-slate-600">Merge duplicate contacts with audit traceability.</p>
         </Link>
+        {givingFuelState.allowModuleAccess ? (
+          <Link href="/staff/data-tools/giving-fuel" className={LINK_CARD_CLASSES}>
+            <p className="text-sm font-semibold text-slate-900">Giving Fuel</p>
+            <p className="text-xs text-slate-600">
+              Review and approve webhook-intake donation transactions from GivingFuel.
+            </p>
+          </Link>
+        ) : null}
       </div>
     </Card>
   );

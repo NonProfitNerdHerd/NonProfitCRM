@@ -123,6 +123,33 @@ export default async function IntegrationsPage() {
         errorSummary: "Migration required",
         completedSuccessfully: false,
         canManageIntegration: false
+      },
+      {
+        integrationKey: "givingfuel_webhook",
+        name: "GivingFuel Webhook",
+        description: "Webhook-based GivingFuel donation intake with review workflow.",
+        connectionStatus: "Not Tested",
+        enabledStatus: "Disabled",
+        isEnabled: false,
+        syncStatus: "Could Not Complete",
+        syncStatusColor: "red",
+        statusDetail: "Integrations schema is unavailable in this environment.",
+        runId: null,
+        lastSyncStartTime: null,
+        lastSyncEndTime: null,
+        lastSuccessfulSyncTime: null,
+        recordsRetrieved: 0,
+        recordsProcessed: 0,
+        recordsInserted: 0,
+        recordsUpdated: 0,
+        recordsSkipped: 0,
+        recordsFailed: 0,
+        totalRecordsExpected: null,
+        currentPage: null,
+        currentCursor: null,
+        errorSummary: "Migration required",
+        completedSuccessfully: false,
+        canManageIntegration: false
       }
     ];
     apiPaused = true;

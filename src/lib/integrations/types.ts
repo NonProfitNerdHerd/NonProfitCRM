@@ -21,6 +21,7 @@ export type IntegrationConnection = {
   auth_type: string;
   api_key_reference: string | null;
   is_enabled: boolean;
+  allow_module_access?: boolean;
   connection_status: string;
   last_connection_test_date: string | null;
   last_connection_test_result: string | null;

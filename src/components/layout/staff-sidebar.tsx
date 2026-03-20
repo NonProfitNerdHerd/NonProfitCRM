@@ -80,12 +80,14 @@ const BASE_MENU: MenuItem[] = [
 
 export function StaffSidebar({
   canAccessDataTools,
+  canAccessGivingFuelModule,
   canAccessVolunteerCoordination,
   organizationName,
   organizationSlug,
   organizationLogoUrl
 }: {
   canAccessDataTools?: boolean;
+  canAccessGivingFuelModule?: boolean;
   canAccessVolunteerCoordination?: boolean;
   organizationName?: string;
   organizationSlug?: string;
@@ -144,6 +146,12 @@ export function StaffSidebar({
               { href: "/staff/import-center", label: "Import Center" },
               { href: "/staff/import-center/contacts", label: "Contacts Import" },
               { href: "/staff/import-center/transactions", label: "Transactions Import" },
+              ...(canAccessGivingFuelModule
+                ? ([{ href: "/staff/data-tools/giving-fuel", label: "Giving Fuel" }] as Array<{
+                    href: string;
+                    label: string;
+                  }>)
+                : []),
               { href: "/staff/data-tools/bulk-tag-contacts", label: "Bulk Tag Contacts" },
               { href: "/staff/admin/roles", label: "Roles" },
               { href: "/staff/admin/tags", label: "Tags" },

@@ -33,13 +33,19 @@ export function MyTasksSideRail({
   defaultProjectId,
   projects,
   currentUserId,
-  assignableUsers
+  assignableUsers,
+  givingFuelModuleVisible = false,
+  givingFuelPendingCount = 0,
+  givingFuelFailedCount = 0
 }: {
   tasks: MyTasksSideRailItem[];
   defaultProjectId?: string | null;
   projects: Array<{ id: string; name: string }>;
   currentUserId: string;
   assignableUsers: Array<{ id: string; name: string }>;
+  givingFuelModuleVisible?: boolean;
+  givingFuelPendingCount?: number;
+  givingFuelFailedCount?: number;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const pathname = usePathname();
@@ -347,6 +353,19 @@ export function MyTasksSideRail({
           <p className="text-[10px] uppercase tracking-wide text-red-600">Overdue</p>
           <p className="text-lg font-semibold text-red-700">{overdueCount}</p>
         </div>
+        {givingFuelModuleVisible ? (
+          <Link
+            href={withTenantPrefix("/staff/data-tools/giving-fuel")}
+            className="mt-3 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-2 text-center text-indigo-700 hover:bg-indigo-100"
+            onClick={(event) => event.stopPropagation()}
+            aria-label="Open Giving Fuel review queue"
+          >
+            <p className="text-[10px] uppercase tracking-wide">GF Review</p>
+            <p className="text-base font-semibold">
+              {Number(givingFuelPendingCount) + Number(givingFuelFailedCount)}
+            </p>
+          </Link>
+        ) : null}
         <Link
           href={withTenantPrefix("/staff/tasks/call-sheet")}
           className="mt-3 inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-2 py-2 text-slate-700 hover:bg-slate-50"
@@ -405,6 +424,28 @@ export function MyTasksSideRail({
                 Open My Tasks Dashboard
               </Link>
             </div>
+
+            {givingFuelModuleVisible ? (
+              <div className="mb-3 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                      Giving Fuel Reviews
+                    </p>
+                    <p className="text-xs text-indigo-900">
+                      Pending: {Number(givingFuelPendingCount)} • Failed: {Number(givingFuelFailedCount)}
+                    </p>
+                  </div>
+                  <Link
+                    href={withTenantPrefix("/staff/data-tools/giving-fuel")}
+                    className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Open Queue
+                  </Link>
+                </div>
+              </div>
+            ) : null}
 
             {showCreateTask ? (
               <form className="space-y-3 rounded-md border border-slate-200 p-3" onSubmit={createTaskFromRail}>

@@ -15,13 +15,15 @@ const configurationSchema = z.object({
   authType: z.string().optional(),
   apiKeyReference: z.string().optional(),
   isEnabled: z.boolean().optional(),
+  allowModuleAccess: z.boolean().optional(),
   timeoutMs: z.number().int().positive().optional(),
   retrySettings: z.record(z.string(), z.unknown()).optional(),
   debugLoggingEnabled: z.boolean().optional(),
   configuration: z.record(z.string(), z.unknown()).optional(),
   syncSettings: z.record(z.string(), z.unknown()).optional(),
   fieldMapping: z.record(z.string(), z.unknown()).optional(),
-  apiKey: z.string().optional()
+  apiKey: z.string().optional(),
+  webhookSecret: z.string().optional()
 });
 
 export async function GET(_request: Request, { params }: RouteProps) {

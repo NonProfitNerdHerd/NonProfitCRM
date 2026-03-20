@@ -11,7 +11,9 @@ import {
   GIVINGFUEL_INTEGRATION_NAME,
   GIVINGFUEL_PRODUCT_VALUE,
   GIVINGFUEL_TRANSACTIONS_PATH,
-  isGivingFuelIntegrationKey
+  GIVINGFUEL_WEBHOOK_INTEGRATION_KEY,
+  GIVINGFUEL_WEBHOOK_INTEGRATION_NAME,
+  isGivingFuelSyncIntegrationKey
 } from "@/lib/integrations/givingfuel-contacts-config";
 import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 
@@ -70,10 +72,33 @@ const DEFAULT_DONATIONS_SYNC_SETTINGS = {
   donationsCursor: null
 };
 
+const DEFAULT_WEBHOOK_SETTINGS = {
+  signatureHeaderName: "x-givingfuel-signature",
+  secretHeaderName: "x-givingfuel-secret",
+  autoAcceptDonorConfidence: 95,
+  autoAcceptCampaignConfidence: 100,
+  autoCreateUnmatchedDonor: false,
+  blockLowConfidenceCampaign: true,
+  holdAmbiguousDonorMatches: true,
+  bulkApprovalDonorConfidenceThreshold: 98,
+  bulkApprovalCampaignConfidenceThreshold: 100,
+  lowConfidenceDonorThreshold: 80,
+  lowConfidenceCampaignThreshold: 100
+};
+
+const DEFAULT_WEBHOOK_SYNC_SETTINGS = {
+  webhookProcessingEnabled: false,
+  maxAutoProcessingAttempts: 3,
+  webhookReplayProtectionMinutes: 7200
+};
+
 function defaultConnectionName(definition: IntegrationDefinition) {
   if (definition.provider_key === GIVINGFUEL_INTEGRATION_KEY) return GIVINGFUEL_INTEGRATION_NAME;
   if (definition.provider_key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) {
     return GIVINGFUEL_DONATIONS_INTEGRATION_NAME;
+  }
+  if (definition.provider_key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) {
+    return GIVINGFUEL_WEBHOOK_INTEGRATION_NAME;
   }
   return definition.name;
 }
@@ -109,16 +134,22 @@ export class IntegrationConfigurationService {
         organization_id: organizationId,
         integration_definition_id: definition.id,
         name: defaultConnectionName(definition),
-        base_url: isGivingFuelIntegrationKey(definition.provider_key) ? GIVINGFUEL_BASE_URL : null,
+        base_url: isGivingFuelSyncIntegrationKey(definition.provider_key) ? GIVINGFUEL_BASE_URL : null,
         auth_type: "api_key_header",
         api_key_reference: null,
         is_enabled: false,
+        allow_module_access: definition.provider_key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY,
         connection_status: "not_tested",
         timeout_ms: 30000,
         retry_settings: { maxRetries: 3, backoffMs: 1000 },
         debug_logging_enabled: false,
         configuration_json:
-          isGivingFuelIntegrationKey(definition.provider_key)
+          definition.provider_key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+            ? {
+                ...DEFAULT_WEBHOOK_SETTINGS,
+                webhookSecretConfigured: false
+              }
+            : isGivingFuelSyncIntegrationKey(definition.provider_key)
             ? {
                 contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
                 transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
@@ -134,9 +165,11 @@ export class IntegrationConfigurationService {
             ? DEFAULT_CONTACTS_SYNC_SETTINGS
             : definition.provider_key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
               ? DEFAULT_DONATIONS_SYNC_SETTINGS
+              : definition.provider_key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+                ? DEFAULT_WEBHOOK_SYNC_SETTINGS
             : {},
         field_mapping_json:
-          isGivingFuelIntegrationKey(definition.provider_key)
+          isGivingFuelSyncIntegrationKey(definition.provider_key)
             ? DEFAULT_WEBCONNEX_FIELD_MAPPING
             : {},
         created_by: userId,
@@ -158,6 +191,7 @@ export class IntegrationConfigurationService {
       authType?: string;
       apiKeyReference?: string | null;
       isEnabled?: boolean;
+      allowModuleAccess?: boolean;
       timeoutMs?: number;
       retrySettings?: Record<string, unknown>;
       debugLoggingEnabled?: boolean;
@@ -202,6 +236,7 @@ export class IntegrationConfigurationService {
         auth_type: input.payload.authType ?? current.auth_type,
         api_key_reference: nextApiKeyReference,
         is_enabled: input.payload.isEnabled ?? current.is_enabled,
+        allow_module_access: input.payload.allowModuleAccess ?? current.allow_module_access ?? false,
         timeout_ms: input.payload.timeoutMs ?? current.timeout_ms,
         retry_settings: input.payload.retrySettings ?? current.retry_settings,
         debug_logging_enabled:

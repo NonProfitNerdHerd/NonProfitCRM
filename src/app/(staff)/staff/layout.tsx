@@ -8,6 +8,7 @@ import { listTasks } from "@/lib/data/tasks";
 import { ensureConstituentOutreachProject, listProjects } from "@/lib/data/projects";
 import { MyTasksSideRail, type MyTasksSideRailItem } from "@/components/tasks/my-tasks-side-rail";
 import { listOrganizationUsers } from "@/lib/data/users";
+import { getGivingFuelModuleStateForCurrentUser } from "@/lib/data/givingfuel-webhook";
 
 export default async function StaffLayout({ children }: { children: ReactNode }) {
   const context = await requireStaffPermission("can_view_dashboard");
@@ -36,10 +37,15 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     .select("name,slug,logo_url")
     .eq("id", context.organizationId)
     .maybeSingle();
-  const [myTasks, projects, orgUsers] = await Promise.all([
+  const [myTasks, projects, orgUsers, givingFuelState] = await Promise.all([
     listTasks({ assignedTo: context.userId }),
     listProjects({ status: "all" }),
-    listOrganizationUsers().catch(() => [])
+    listOrganizationUsers().catch(() => []),
+    getGivingFuelModuleStateForCurrentUser().catch(() => ({
+      allowModuleAccess: false,
+      pendingReviewCount: 0,
+      failedEventsCount: 0
+    }))
   ]);
   let constituentOutreachProjectId: string | null = null;
   try {
@@ -69,6 +75,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
       <div className="print:hidden">
         <StaffSidebar
           canAccessDataTools={canAccessDataTools}
+          canAccessGivingFuelModule={canAccessDataTools && Boolean(givingFuelState.allowModuleAccess)}
           canAccessVolunteerCoordination={canAccessVolunteerCoordination}
           organizationName={String(organization?.name ?? "")}
           organizationSlug={String(organization?.slug ?? "")}
@@ -99,6 +106,9 @@ export default async function StaffLayout({ children }: { children: ReactNode })
           id: String(project.id ?? ""),
           name: String(project.name ?? "-")
         }))}
+        givingFuelModuleVisible={Boolean(givingFuelState.allowModuleAccess)}
+        givingFuelPendingCount={Number(givingFuelState.pendingReviewCount ?? 0)}
+        givingFuelFailedCount={Number(givingFuelState.failedEventsCount ?? 0)}
       />
     </div>
   );

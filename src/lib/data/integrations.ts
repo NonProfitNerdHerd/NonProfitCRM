@@ -18,6 +18,7 @@ import { IntegrationRetryService } from "@/lib/integrations/integration-retry-se
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
 import { ContactSyncService } from "@/lib/integrations/contact-sync-service";
 import { createIntegrationClient } from "@/lib/integrations/db";
+import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 import { logAuditEvent } from "@/lib/data/audit";
 import {
   GIVINGFUEL_API_HEADER_NAME,
@@ -30,7 +31,10 @@ import {
   GIVINGFUEL_INTEGRATION_NAME,
   GIVINGFUEL_PRODUCT_VALUE,
   GIVINGFUEL_TRANSACTIONS_PATH,
-  isGivingFuelIntegrationKey
+  GIVINGFUEL_WEBHOOK_INTEGRATION_KEY,
+  GIVINGFUEL_WEBHOOK_INTEGRATION_NAME,
+  isGivingFuelIntegrationKey,
+  isGivingFuelSyncIntegrationKey
 } from "@/lib/integrations/givingfuel-contacts-config";
 
 const registryService = new IntegrationRegistryService();
@@ -42,7 +46,8 @@ const webconnexSyncService = new WebconnexSyncService();
 const contactSyncService = new ContactSyncService();
 const SUPPORTED_PROVIDER_KEYS = new Set([
   GIVINGFUEL_INTEGRATION_KEY,
-  GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+  GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+  GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
 ]);
 const INTEGRATIONS_API_PAUSED = process.env.INTEGRATIONS_API_PAUSED === "true";
 const INTEGRATIONS_API_PAUSED_MESSAGE =
@@ -79,12 +84,14 @@ export type DonationPageMappingRow = {
 function integrationDisplayName(key: string) {
   if (key === GIVINGFUEL_INTEGRATION_KEY) return GIVINGFUEL_INTEGRATION_NAME;
   if (key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) return GIVINGFUEL_DONATIONS_INTEGRATION_NAME;
+  if (key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) return GIVINGFUEL_WEBHOOK_INTEGRATION_NAME;
   return key;
 }
 
 function integrationTileType(key: string) {
   if (key === GIVINGFUEL_INTEGRATION_KEY) return "Contacts";
   if (key === GIVINGFUEL_DONATIONS_INTEGRATION_KEY) return "Donations";
+  if (key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) return "Webhook";
   return "General";
 }
 
@@ -115,6 +122,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
   const name = integrationDisplayName(integrationKey);
   const isGivingFuel = isGivingFuelIntegrationKey(integrationKey);
   const isDonations = integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY;
+  const isWebhook = integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY;
   const fallbackBaseUrl = GIVINGFUEL_BASE_URL;
   return {
     definition: {
@@ -123,11 +131,13 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       provider_key: integrationKey,
       description:
         isGivingFuel
-          ? isDonations
+          ? isWebhook
+            ? "GivingFuel webhook intake for donation transactions with review workflow."
+            : isDonations
             ? "GivingFuel Donations API sync from Webconnex v2 public transactions endpoint."
             : "GivingFuel Contacts API sync from Webconnex v2 public customers endpoint."
           : "Integration metadata unavailable until migrations are applied.",
-      category: isDonations ? "donations" : "contacts",
+      category: isWebhook || isDonations ? "donations" : "contacts",
       is_active: true,
       supports_manual_sync: true,
       supports_scheduled_sync: true,
@@ -151,22 +161,31 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       retry_settings: { maxRetries: 3, backoffMs: 1000 },
       debug_logging_enabled: false,
       configuration_json: {
-        contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
-        transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
-        formsPath: GIVINGFUEL_FORMS_PATH,
-        testPath: GIVINGFUEL_CUSTOMERS_PATH,
-        authHeaderName: GIVINGFUEL_API_HEADER_NAME,
-        staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
-        apiKeyConfigured: false
+        ...(isWebhook
+          ? {
+              webhookSecretConfigured: false,
+              autoAcceptDonorConfidence: 95,
+              autoAcceptCampaignConfidence: 100
+            }
+          : {
+              contactsPath: GIVINGFUEL_CUSTOMERS_PATH,
+              transactionsPath: GIVINGFUEL_TRANSACTIONS_PATH,
+              formsPath: GIVINGFUEL_FORMS_PATH,
+              testPath: GIVINGFUEL_CUSTOMERS_PATH,
+              authHeaderName: GIVINGFUEL_API_HEADER_NAME,
+              staticQueryParams: { product: GIVINGFUEL_PRODUCT_VALUE },
+              apiKeyConfigured: false
+            })
       },
       sync_settings_json: {
         syncMode: "manual_and_scheduled",
         scheduleFrequency: "daily",
-        contactSyncEnabled: !isDonations,
-        donationSyncEnabled: isDonations,
+        contactSyncEnabled: !isDonations && !isWebhook,
+        donationSyncEnabled: isDonations || isWebhook,
         fullSyncEnabled: false,
         incrementalSyncEnabled: true,
         fallbackContactMatch: "external_id_only",
+        webhookProcessingEnabled: isWebhook ? false : undefined,
         initialImportStartDate: null,
         lastSuccessfulSyncDate: null
       },
@@ -253,8 +272,12 @@ function buildSchemaFreeWebconnexConnection(
 function sanitizeConnectionForUi(connection: IntegrationConnection): IntegrationConnection {
   const config = { ...(connection.configuration_json ?? {}) } as Record<string, unknown>;
   const hasApiKey = Boolean(config.encryptedApiKey) || Boolean(config.apiKeyConfigured);
+  const hasWebhookSecret =
+    Boolean(config.encryptedWebhookSecret) || Boolean(config.webhookSecretConfigured);
   delete config.encryptedApiKey;
+  delete config.encryptedWebhookSecret;
   config.apiKeyConfigured = hasApiKey;
+  config.webhookSecretConfigured = hasWebhookSecret;
   return {
     ...connection,
     configuration_json: config
@@ -406,7 +429,7 @@ async function countUniqueLinkedContacts(input: {
   integrationKey: string;
 }) {
   const supabase = await createIntegrationClient();
-  const sourceSystems = isGivingFuelIntegrationKey(input.integrationKey)
+  const sourceSystems = isGivingFuelSyncIntegrationKey(input.integrationKey)
     ? ["givingfuel", "webconnex"]
     : [input.integrationKey];
   const uniqueContactIds = new Set<string>();
@@ -503,6 +526,27 @@ export async function listIntegrationsForAdmin() {
           supports_manual_sync: true,
           supports_scheduled_sync: true,
           supports_test_connection: true,
+          created_at: now,
+          updated_at: now
+        },
+        connection: null,
+        lastJob: null,
+        jobs: []
+      });
+    }
+    if (!existingKeys.has(GIVINGFUEL_WEBHOOK_INTEGRATION_KEY)) {
+      rows.push({
+        definition: {
+          id: `fallback-${GIVINGFUEL_WEBHOOK_INTEGRATION_KEY}`,
+          name: GIVINGFUEL_WEBHOOK_INTEGRATION_NAME,
+          provider_key: GIVINGFUEL_WEBHOOK_INTEGRATION_KEY,
+          description:
+            "Webhook-based GivingFuel transaction intake with idempotent processing and review workflow.",
+          category: "donations",
+          is_active: true,
+          supports_manual_sync: false,
+          supports_scheduled_sync: false,
+          supports_test_connection: false,
           created_at: now,
           updated_at: now
         },
@@ -631,9 +675,38 @@ export async function listIntegrationsForAdmin() {
           completedSuccessfully: false,
           canManageIntegration
         },
+        {
+          integrationKey: GIVINGFUEL_WEBHOOK_INTEGRATION_KEY,
+          name: GIVINGFUEL_WEBHOOK_INTEGRATION_NAME,
+          providerType: "Webhook",
+          description:
+            "GivingFuel webhook intake is available after migration 202603230100 is applied.",
+          enabledStatus: "Disabled",
+          connectionStatus: "Not Tested",
+          isEnabled: false,
+          syncStatus: "Could Not Complete",
+          syncStatusColor: "red",
+          statusDetail: "Migration required",
+          runId: null,
+          lastSyncStartTime: null,
+          lastSyncEndTime: null,
+          lastSuccessfulSyncTime: null,
+          recordsRetrieved: 0,
+          recordsProcessed: 0,
+          recordsInserted: 0,
+          recordsUpdated: 0,
+          recordsSkipped: 0,
+          recordsFailed: 0,
+          totalRecordsExpected: null,
+          currentPage: null,
+          currentCursor: null,
+          errorSummary: "Migration required",
+          completedSuccessfully: false,
+          canManageIntegration
+        },
       ],
       summary: {
-        totalIntegrations: 2,
+        totalIntegrations: 3,
         enabledIntegrations: 0,
         failedJobs: 0,
         last24hSyncActivity: 0
@@ -756,13 +829,15 @@ export async function updateIntegrationConfiguration(
     syncSettings?: Record<string, unknown>;
     fieldMapping?: Record<string, unknown>;
     apiKey?: string;
+    webhookSecret?: string;
+    allowModuleAccess?: boolean;
   }
 ) {
   const context = await requireIntegrationsManager();
   try {
     const definition = await registryService.getDefinition(integrationKey);
     if (!definition) throw new Error("Integration not found.");
-    if (isGivingFuelIntegrationKey(integrationKey)) {
+    if (isGivingFuelSyncIntegrationKey(integrationKey)) {
       const existing = await configurationService.getConnection(context.organizationId, definition);
       const existingConfig = (existing?.configuration_json ?? {}) as Record<string, unknown>;
       const existingHasApiKey =
@@ -775,7 +850,17 @@ export async function updateIntegrationConfiguration(
         );
       }
     }
-    const normalizedPayload = isGivingFuelIntegrationKey(integrationKey)
+    if (integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) {
+      const existing = await configurationService.getConnection(context.organizationId, definition);
+      const existingConfig = (existing?.configuration_json ?? {}) as Record<string, unknown>;
+      const existingHasSecret =
+        Boolean(existingConfig.encryptedWebhookSecret) || Boolean(existingConfig.webhookSecretConfigured);
+      const providedSecret = payload.webhookSecret?.trim();
+      if (!providedSecret && !existingHasSecret && payload.isEnabled !== false) {
+        throw new Error("Webhook secret is required before enabling GivingFuel Webhook integration.");
+      }
+    }
+    const normalizedPayload = isGivingFuelSyncIntegrationKey(integrationKey)
       ? {
           ...payload,
           name: payload.name ?? integrationDisplayName(integrationKey),
@@ -800,6 +885,36 @@ export async function updateIntegrationConfiguration(
             fallbackContactMatch: "external_id_only"
           }
         }
+      : integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+        ? {
+            ...payload,
+            name: payload.name ?? integrationDisplayName(integrationKey),
+            baseUrl: undefined,
+            authType: "webhook_secret",
+            apiKeyReference: null,
+            configuration: {
+              ...(payload.configuration ?? {}),
+              signatureHeaderName: "x-givingfuel-signature",
+              secretHeaderName: "x-givingfuel-secret",
+              ...(typeof payload.webhookSecret === "string"
+                ? payload.webhookSecret.trim()
+                  ? {
+                      encryptedWebhookSecret: encryptIntegrationSecret(payload.webhookSecret.trim()),
+                      webhookSecretConfigured: true
+                    }
+                  : {
+                      encryptedWebhookSecret: null,
+                      webhookSecretConfigured: false
+                    }
+                : {})
+            },
+            syncSettings: {
+              ...(payload.syncSettings ?? {}),
+              ...(payload.isEnabled !== undefined
+                ? { webhookProcessingEnabled: payload.isEnabled }
+                : {})
+            }
+          }
       : payload;
     const connection = await configurationService.upsertConfiguration({
       organizationId: context.organizationId,
@@ -838,7 +953,7 @@ export async function testIntegrationConnection(
       context.userId,
       integrationKey
     );
-    const result = isGivingFuelIntegrationKey(integrationKey)
+    const result = isGivingFuelSyncIntegrationKey(integrationKey)
       ? await webconnexSyncService.testConnection(connection, {
           apiKeyOverride: apiKeyOverride?.trim() || undefined,
           probeTransactions: integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
@@ -858,7 +973,7 @@ export async function testIntegrationConnection(
     return result;
   } catch (error) {
     if (isMissingIntegrationsSchemaError(error)) {
-      if (!isGivingFuelIntegrationKey(integrationKey)) {
+      if (!isGivingFuelSyncIntegrationKey(integrationKey)) {
         throw new Error(INTEGRATIONS_SCHEMA_ERROR_MESSAGE);
       }
       const schemaFreeConnection = buildSchemaFreeWebconnexConnection(context.organizationId, integrationKey);
@@ -887,6 +1002,9 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
   }
   if (integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY && scope !== "donations") {
     throw new Error("GivingFuel Donations integration currently supports donations sync only.");
+  }
+  if (integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) {
+    throw new Error("GivingFuel Webhook is webhook-driven and does not support manual sync runs.");
   }
   try {
     const { definition, connection } = await getDefinitionAndConnection(
@@ -1196,13 +1314,16 @@ export async function listRecentSyncedContactsForIntegration(
       .eq("organization_id", context.organizationId)
       .in(
         "source_system",
-        isGivingFuelIntegrationKey(integrationKey) ? ["givingfuel", "webconnex"] : [integrationKey]
+        isGivingFuelSyncIntegrationKey(integrationKey) ? ["givingfuel", "webconnex"] : [integrationKey]
       )
       .order("last_synced_date", { ascending: false })
       .limit(boundedLimit);
     if (error) {
       // Backward compatibility: older rows may have webconnex source_system.
-      if (isGivingFuelIntegrationKey(integrationKey) && (error.code === "PGRST116" || error.code === "PGRST205")) {
+      if (
+        isGivingFuelSyncIntegrationKey(integrationKey) &&
+        (error.code === "PGRST116" || error.code === "PGRST205")
+      ) {
         return [];
       }
       throw error;
