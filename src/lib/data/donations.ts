@@ -121,7 +121,7 @@ async function resolveCampaignTagLineageIds(input: {
     const visited = new Set<string>();
     while (currentTagId && depth < 15 && !visited.has(currentTagId)) {
       visited.add(currentTagId);
-      const tag = tagCache.get(currentTagId) ?? null;
+      const tag: TagLookupRow | null = tagCache.get(currentTagId) ?? null;
       if (!tag) {
         throw new Error("One or more campaign tags no longer exist.");
       }
