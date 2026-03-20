@@ -1,8 +1,5 @@
-import { notFound } from "next/navigation";
-import { getCampaign } from "@/lib/data/campaigns";
+import { redirect } from "next/navigation";
 import { requireStaffPermission } from "@/lib/auth/guards";
-import { CampaignDetailPanel } from "@/components/campaigns/campaign-detail-panel";
-import { type CampaignDetailPayload } from "@/components/campaigns/campaign-detail-panel";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -11,11 +8,5 @@ type PageProps = {
 export default async function FinancialCampaignDetailPage({ params }: PageProps) {
   await requireStaffPermission("can_view_donations");
   const { id } = await params;
-  const result = (await getCampaign(id)) as CampaignDetailPayload;
-  const { campaign } = result;
-  if (!campaign) notFound();
-
-  return (
-    <CampaignDetailPanel campaignId={id} initialData={result} />
-  );
+  redirect(`/staff/campaigns/${encodeURIComponent(id)}`);
 }
