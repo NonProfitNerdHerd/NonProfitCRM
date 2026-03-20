@@ -68,6 +68,7 @@ export async function POST(request: Request) {
 
     const id = await createDonationForStaff({
       contactId: parsed.data.contactId,
+      crmOrganizationId: parsed.data.crmOrganizationId ?? parsed.data.organizationId,
       organizationId: parsed.data.organizationId,
       date: parsed.data.date,
       totalAmount,

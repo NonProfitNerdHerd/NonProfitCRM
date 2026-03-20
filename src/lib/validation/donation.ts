@@ -3,6 +3,7 @@ import { z } from "zod";
 export const donationSchema = z
   .object({
     contactId: z.string().uuid(),
+    crmOrganizationId: z.string().uuid().optional(),
     organizationId: z.string().uuid().optional(),
     date: z.string().min(1),
     totalAmount: z.coerce.number().positive().optional(),
@@ -25,6 +26,18 @@ export const donationSchema = z
     recurring: z.boolean().optional()
   })
   .superRefine((value, ctx) => {
+    if (
+      value.crmOrganizationId &&
+      value.organizationId &&
+      value.crmOrganizationId !== value.organizationId
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["crmOrganizationId"],
+        message: "CRM Organization ID and Organization ID must match when both are provided."
+      });
+    }
+
     const totalAmount = value.totalAmount ?? value.amount;
     if (totalAmount === undefined || !Number.isFinite(totalAmount) || totalAmount <= 0) {
       ctx.addIssue({

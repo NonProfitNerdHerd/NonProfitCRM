@@ -77,23 +77,41 @@ async function resolveCampaignTagLineageIds(input: {
     throw new Error("Each selected campaign must have a Campaign Tag before saving donations.");
   }
 
-  async function loadTag(tagId: string) {
-    if (tagCache.has(tagId)) return tagCache.get(tagId) ?? null;
+  let pending = Array.from(new Set(campaignTagIds));
+  while (pending.length > 0) {
+    const batchIds = pending;
+    pending = [];
     const { data, error } = await input.supabase
       .from("tags")
       .select("id,parent_tag_id,is_active")
       .eq("organization_id", input.organizationId)
-      .eq("id", tagId)
-      .maybeSingle();
+      .in("id", batchIds);
     if (error) throw error;
-    if (!data) return null;
-    const normalized: TagLookupRow = {
-      id: toText(data.id),
-      parent_tag_id: toText(data.parent_tag_id) || null,
-      is_active: Boolean(data.is_active)
-    };
-    tagCache.set(normalized.id, normalized);
-    return normalized;
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const normalized: TagLookupRow = {
+        id: toText(row.id),
+        parent_tag_id: toText(row.parent_tag_id) || null,
+        is_active: Boolean(row.is_active)
+      };
+      tagCache.set(normalized.id, normalized);
+    }
+    if (rows.length !== batchIds.length) {
+      const returnedIds = new Set(rows.map((row) => toText(row.id)));
+      const missing = batchIds.find((id) => !returnedIds.has(id));
+      if (missing) {
+        throw new Error("One or more campaign tags no longer exist.");
+      }
+    }
+
+    const nextParents = new Set<string>();
+    for (const row of rows) {
+      const parentId = toText(row.parent_tag_id);
+      if (parentId && !tagCache.has(parentId)) {
+        nextParents.add(parentId);
+      }
+    }
+    pending = Array.from(nextParents);
   }
 
   const tagIdsToApply = new Set<string>();
@@ -103,7 +121,7 @@ async function resolveCampaignTagLineageIds(input: {
     const visited = new Set<string>();
     while (currentTagId && depth < 15 && !visited.has(currentTagId)) {
       visited.add(currentTagId);
-      const tag = await loadTag(currentTagId);
+      const tag = tagCache.get(currentTagId) ?? null;
       if (!tag) {
         throw new Error("One or more campaign tags no longer exist.");
       }
@@ -145,6 +163,39 @@ async function applyDonationCampaignTags(input: {
     ignoreDuplicates: true
   });
   if (error) throw error;
+}
+
+async function validateDonationAssociations(input: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  organizationId: string;
+  contactId: string;
+  crmOrganizationId?: string | null;
+}) {
+  const { data: contact, error: contactError } = await input.supabase
+    .from("contacts")
+    .select("id")
+    .eq("organization_id", input.organizationId)
+    .eq("id", input.contactId)
+    .maybeSingle();
+  if (contactError) throw contactError;
+  if (!contact) {
+    throw new Error("Selected contact is invalid for this organization.");
+  }
+
+  const crmOrganizationId = toText(input.crmOrganizationId);
+  if (!crmOrganizationId) return null;
+
+  const { data: crmOrganization, error: crmError } = await input.supabase
+    .from("crm_organizations")
+    .select("id")
+    .eq("organization_id", input.organizationId)
+    .eq("id", crmOrganizationId)
+    .maybeSingle();
+  if (crmError) throw crmError;
+  if (!crmOrganization) {
+    throw new Error("Selected CRM organization is invalid for this organization.");
+  }
+  return crmOrganizationId;
 }
 
 export async function listDonationsForStaff(filters?: {
@@ -334,6 +385,7 @@ export async function getDonationById(id: string): Promise<DonationRecord | null
 export async function updateDonationForStaff(input: {
   donationId: string;
   contactId: string;
+  crmOrganizationId?: string;
   organizationId?: string;
   date: string;
   totalAmount: number;
@@ -390,13 +442,19 @@ export async function updateDonationForStaff(input: {
     organizationId: context.organizationId,
     campaignRows: (campaigns ?? []) as CampaignTagLookupRow[]
   });
+  const resolvedCrmOrganizationId = await validateDonationAssociations({
+    supabase,
+    organizationId: context.organizationId,
+    contactId: input.contactId,
+    crmOrganizationId: input.crmOrganizationId ?? input.organizationId ?? null
+  });
 
   const primaryCampaignId = input.allocations[0].campaignId;
   const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
 
   const updatePayload = {
       contact_id: input.contactId,
-      crm_organization_id: input.organizationId ?? null,
+      crm_organization_id: resolvedCrmOrganizationId,
       campaign_id: primaryCampaignId,
       amount: input.totalAmount,
       donation_date: input.date,
@@ -481,6 +539,7 @@ export async function updateDonationForStaff(input: {
 
 export async function createDonationForStaff(input: {
   contactId: string;
+  crmOrganizationId?: string;
   organizationId?: string;
   date: string;
   totalAmount: number;
@@ -528,6 +587,12 @@ export async function createDonationForStaff(input: {
     organizationId: context.organizationId,
     campaignRows: (campaigns ?? []) as CampaignTagLookupRow[]
   });
+  const resolvedCrmOrganizationId = await validateDonationAssociations({
+    supabase,
+    organizationId: context.organizationId,
+    contactId: input.contactId,
+    crmOrganizationId: input.crmOrganizationId ?? input.organizationId ?? null
+  });
 
   const primaryCampaignId = input.allocations[0]?.campaignId;
   const primaryCampaign = campaigns.find((campaign) => campaign.id === primaryCampaignId);
@@ -535,7 +600,7 @@ export async function createDonationForStaff(input: {
   const insertPayload = {
       organization_id: context.organizationId,
       contact_id: input.contactId,
-      crm_organization_id: input.organizationId ?? null,
+      crm_organization_id: resolvedCrmOrganizationId,
       campaign_id: primaryCampaignId,
       amount: input.totalAmount,
       currency: "USD",
