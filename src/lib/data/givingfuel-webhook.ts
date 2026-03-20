@@ -1080,6 +1080,64 @@ export async function getGivingFuelOperationalDashboard() {
   };
 }
 
+export async function getGivingFuelPageCampaignConfiguration(): Promise<{
+  campaigns: Array<{ id: string; name: string; status: string }>;
+  mappings: Array<{
+    id: string;
+    external_page_id: string;
+    external_page_key: string | null;
+    external_page_name: string | null;
+    crm_campaign_id: string;
+    is_active: boolean;
+    notes: string | null;
+  }>;
+}> {
+  const context = await requireGivingFuelOperationalAccess();
+  const state = context.moduleState;
+  if (!state.connectionId) {
+    return {
+      campaigns: [],
+      mappings: []
+    };
+  }
+
+  const supabase = await createIntegrationClient();
+  const [campaignsResult, mappingsResult] = await Promise.all([
+    supabase
+      .from("campaigns")
+      .select("id, name, status")
+      .eq("organization_id", context.organizationId)
+      .order("name", { ascending: true }),
+    supabase
+      .from("givingfuel_campaign_mappings")
+      .select(
+        "id, external_page_id, external_page_key, external_page_name, crm_campaign_id, is_active, notes, created_at, updated_at"
+      )
+      .eq("organization_id", context.organizationId)
+      .eq("integration_connection_id", state.connectionId)
+      .order("updated_at", { ascending: false })
+  ]);
+  if (campaignsResult.error) throw campaignsResult.error;
+  if (mappingsResult.error) throw mappingsResult.error;
+
+  return {
+    campaigns: (campaignsResult.data ?? []).map((row) => ({
+      id: toText(row.id),
+      name: toText(row.name),
+      status: toText(row.status)
+    })),
+    mappings: (mappingsResult.data ?? []).map((row) => ({
+      id: toText(row.id),
+      external_page_id: toText(row.external_page_id),
+      external_page_key: toText(row.external_page_key) || null,
+      external_page_name: toText(row.external_page_name) || null,
+      crm_campaign_id: toText(row.crm_campaign_id),
+      is_active: parseBoolean(row.is_active),
+      notes: toText(row.notes) || null
+    }))
+  };
+}
+
 export async function listGivingFuelReviewQueue(filters?: {
   status?: string;
   dateFrom?: string;

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,16 +22,6 @@ type AdminConfigurationPayload = {
     configuration: Record<string, unknown>;
     syncSettings: Record<string, unknown>;
   } | null;
-  campaigns: Array<{ id: string; name: string; status: string }>;
-  mappings: Array<{
-    id: string;
-    external_page_id: string;
-    external_page_key: string | null;
-    external_page_name: string | null;
-    crm_campaign_id: string;
-    is_active: boolean;
-    notes: string | null;
-  }>;
 };
 
 export function GivingFuelWebhookSetup({
@@ -45,14 +36,6 @@ export function GivingFuelWebhookSetup({
   const [message, setMessage] = useState<string | null>(null);
   const [configuration, setConfiguration] = useState<AdminConfigurationPayload | null>(null);
   const [webhookSecret, setWebhookSecret] = useState("");
-  const [mappingDraft, setMappingDraft] = useState({
-    externalPageId: "",
-    externalPageKey: "",
-    externalPageName: "",
-    crmCampaignId: "",
-    isActive: true,
-    notes: ""
-  });
 
   const connection = configuration?.connection ?? null;
   const config = connection?.configuration ?? {};
@@ -130,69 +113,6 @@ export function GivingFuelWebhookSetup({
     }
   }
 
-  async function saveMapping() {
-    if (!mappingDraft.externalPageId.trim() || !mappingDraft.crmCampaignId.trim()) {
-      setError("External Page ID and CRM Campaign are required.");
-      return;
-    }
-    setSaving(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/admin/integrations/${encodeURIComponent(integrationKey)}/webhook/mappings`,
-        {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            externalPageId: mappingDraft.externalPageId.trim(),
-            externalPageKey: mappingDraft.externalPageKey.trim() || null,
-            externalPageName: mappingDraft.externalPageName.trim() || null,
-            crmCampaignId: mappingDraft.crmCampaignId,
-            isActive: mappingDraft.isActive,
-            notes: mappingDraft.notes.trim() || null
-          })
-        }
-      );
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.message ?? "Failed to save campaign mapping.");
-      setMappingDraft({
-        externalPageId: "",
-        externalPageKey: "",
-        externalPageName: "",
-        crmCampaignId: "",
-        isActive: true,
-        notes: ""
-      });
-      setMessage("Campaign mapping saved.");
-      await loadConfiguration();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Failed to save mapping.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deleteMapping(mappingId: string) {
-    setSaving(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/admin/integrations/${encodeURIComponent(integrationKey)}/webhook/mappings/${encodeURIComponent(mappingId)}`,
-        { method: "DELETE" }
-      );
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.message ?? "Failed to delete mapping.");
-      setMessage("Campaign mapping deleted.");
-      await loadConfiguration();
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete mapping.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   if (loading) {
     return <p className="text-sm text-slate-600">Loading GivingFuel webhook configuration...</p>;
   }
@@ -204,8 +124,6 @@ export function GivingFuelWebhookSetup({
       </p>
     );
   }
-  const safeConfiguration = configuration as AdminConfigurationPayload;
-
   return (
     <div className="space-y-4">
       <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
@@ -403,114 +321,14 @@ export function GivingFuelWebhookSetup({
       </section>
 
       <section className="space-y-3 rounded-md border border-slate-200 p-4">
-        <h4 className="text-sm font-semibold text-slate-900">GivingFuel Page → CRM Campaign Mapping</h4>
-        <div className="grid gap-2 md:grid-cols-2">
-          <Input
-            value={mappingDraft.externalPageId}
-            onChange={(event) =>
-              setMappingDraft((prev) => ({ ...prev, externalPageId: event.target.value }))
-            }
-            placeholder="External Page ID *"
-          />
-          <select
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            value={mappingDraft.crmCampaignId}
-            onChange={(event) =>
-              setMappingDraft((prev) => ({ ...prev, crmCampaignId: event.target.value }))
-            }
-          >
-            <option value="">Select CRM Campaign *</option>
-            {safeConfiguration.campaigns.map((campaign) => (
-              <option key={campaign.id} value={campaign.id}>
-                {campaign.name}
-              </option>
-            ))}
-          </select>
-          <Input
-            value={mappingDraft.externalPageKey}
-            onChange={(event) =>
-              setMappingDraft((prev) => ({ ...prev, externalPageKey: event.target.value }))
-            }
-            placeholder="External Page Key (optional)"
-          />
-          <Input
-            value={mappingDraft.externalPageName}
-            onChange={(event) =>
-              setMappingDraft((prev) => ({ ...prev, externalPageName: event.target.value }))
-            }
-            placeholder="External Page Name (optional)"
-          />
-          <Input
-            value={mappingDraft.notes}
-            onChange={(event) =>
-              setMappingDraft((prev) => ({ ...prev, notes: event.target.value }))
-            }
-            placeholder="Notes (optional)"
-          />
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={mappingDraft.isActive}
-              onChange={(event) =>
-                setMappingDraft((prev) => ({ ...prev, isActive: event.target.checked }))
-              }
-            />
-            Mapping Active
-          </label>
-        </div>
-        <div className="flex gap-2">
-          <Button type="button" onClick={() => void saveMapping()} disabled={saving}>
-            Save Mapping
-          </Button>
-          <Button type="button" variant="secondary" onClick={() => void loadConfiguration()} disabled={saving}>
-            Refresh
-          </Button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-600">
-                <th className="py-2">External Page ID</th>
-                <th className="py-2">Page Key</th>
-                <th className="py-2">Page Name</th>
-                <th className="py-2">Campaign</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {safeConfiguration.mappings.map((mapping) => (
-                <tr key={mapping.id} className="border-b border-slate-100">
-                  <td className="py-2">{mapping.external_page_id}</td>
-                  <td className="py-2">{mapping.external_page_key || "-"}</td>
-                  <td className="py-2">{mapping.external_page_name || "-"}</td>
-                  <td className="py-2">
-                    {safeConfiguration.campaigns.find((campaign) => campaign.id === mapping.crm_campaign_id)?.name ||
-                      mapping.crm_campaign_id}
-                  </td>
-                  <td className="py-2">{mapping.is_active ? "Active" : "Inactive"}</td>
-                  <td className="py-2">
-                    <Button
-                      type="button"
-                      variant="danger"
-                      onClick={() => void deleteMapping(mapping.id)}
-                      disabled={saving}
-                    >
-                      Delete
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {safeConfiguration.mappings.length === 0 ? (
-                <tr>
-                  <td className="py-3 text-slate-500" colSpan={6}>
-                    No mappings configured yet.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        <h4 className="text-sm font-semibold text-slate-900">Campaign Mapping Location</h4>
+        <p className="text-sm text-slate-700">
+          Page-to-campaign mapping is managed in{" "}
+          <Link className="text-blue-700 underline" href="/staff/data-tools/giving-fuel">
+            Data Tools → Giving Fuel
+          </Link>{" "}
+          under the <strong>Campaign Configuration</strong> tab.
+        </p>
       </section>
 
       <div className="flex gap-2">
