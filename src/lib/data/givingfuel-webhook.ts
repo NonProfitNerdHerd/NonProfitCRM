@@ -253,8 +253,17 @@ function verifyWebhookAuthenticity(input: {
   signatureHeaderName: string;
   secretHeaderName: string;
 }) {
-  const signatureHeader = input.headers.get(input.signatureHeaderName) ?? "";
-  const tokenHeader = input.headers.get(input.secretHeaderName) ?? "";
+  const signatureHeader = readHeaderValue(input.headers, [
+    input.signatureHeaderName,
+    "x-webconnex-signature",
+    "x-givingfuel-signature",
+    "x-hub-signature"
+  ]);
+  const tokenHeader = readHeaderValue(input.headers, [
+    input.secretHeaderName,
+    "x-webconnex-token",
+    "x-givingfuel-secret"
+  ]);
   if (!input.secret) {
     return { ok: false, reason: "Webhook secret is not configured for this connection." };
   }
@@ -275,6 +284,14 @@ function verifyWebhookAuthenticity(input: {
   }
 
   return { ok: false, reason: "Missing webhook signature/token." };
+}
+
+function readHeaderValue(headers: Headers, names: string[]) {
+  for (const name of names) {
+    const value = headers.get(name);
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
 }
 
 function paymentTypeFromMethod(method: string | null) {
@@ -667,8 +684,8 @@ export async function processGivingFuelWebhookRequest(input: {
 
   const normalized = normalizeGivingFuelPayload(rawPayload, input.rawBody);
   const config = (connection.configuration_json ?? {}) as Record<string, unknown>;
-  const signatureHeaderName = toText(config.signatureHeaderName) || "x-givingfuel-signature";
-  const secretHeaderName = toText(config.secretHeaderName) || "x-givingfuel-secret";
+  const signatureHeaderName = toText(config.signatureHeaderName) || "x-webconnex-signature";
+  const secretHeaderName = toText(config.secretHeaderName) || "x-webconnex-token";
   const encryptedSecret = toText(config.encryptedWebhookSecret);
   const webhookSecret = encryptedSecret ? decryptIntegrationSecret(encryptedSecret) : "";
 
@@ -1590,7 +1607,7 @@ export async function reprocessGivingFuelReviewItem(input: { importId: string })
   const connection = await getWebhookConnectionForOrganization(context.organizationId);
   if (!connection) throw new Error("GivingFuel webhook connection is not configured.");
   const connectionConfig = connection.configuration ?? {};
-  const secretHeaderName = toText(connectionConfig.secretHeaderName) || "x-givingfuel-secret";
+  const secretHeaderName = toText(connectionConfig.secretHeaderName) || "x-webconnex-token";
   const secret = toText(connectionConfig.encryptedWebhookSecret)
     ? decryptIntegrationSecret(toText(connectionConfig.encryptedWebhookSecret))
     : "";

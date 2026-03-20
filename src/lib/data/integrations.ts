@@ -209,6 +209,7 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       lastSuccessfulSync: null,
       lastFailedSync: null,
       lastSyncDurationMs: null,
+        lastRecordProcessedAt: null,
       totalContactsSynced: 0,
       totalContactsProcessed: 0,
       totalContactUpsertsSuccessful: 0,
@@ -458,6 +459,30 @@ async function countUniqueLinkedContacts(input: {
   return uniqueContactIds.size;
 }
 
+async function getWebhookLastProcessedAt(input: {
+  organizationId: string;
+  connectionId: string;
+}) {
+  const supabase = await createIntegrationClient();
+  const { data, error } = await supabase
+    .from("integration_webhook_events")
+    .select("processed_at, received_at")
+    .eq("organization_id", input.organizationId)
+    .eq("integration_connection_id", input.connectionId)
+    .order("processed_at", { ascending: false, nullsFirst: false })
+    .order("received_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  const processedAt =
+    typeof data?.processed_at === "string" && data.processed_at.trim()
+      ? data.processed_at
+      : typeof data?.received_at === "string" && data.received_at.trim()
+        ? data.received_at
+        : null;
+  return processedAt;
+}
+
 export async function listIntegrationsForAdmin() {
   const context = await requireIntegrationsViewer();
   const supabase = await createClient();
@@ -570,12 +595,36 @@ export async function listIntegrationsForAdmin() {
       return new Date(started).getTime() > Date.now() - 24 * 60 * 60 * 1000 ? acc + 1 : acc;
     }, 0);
 
+    const webhookLastProcessedByConnection = new Map<string, string | null>();
+    for (const row of rows) {
+      if (
+        row.definition.provider_key !== GIVINGFUEL_WEBHOOK_INTEGRATION_KEY ||
+        !row.connection?.id
+      ) {
+        continue;
+      }
+      const processedAt = await getWebhookLastProcessedAt({
+        organizationId: context.organizationId,
+        connectionId: row.connection.id
+      });
+      webhookLastProcessedByConnection.set(row.connection.id, processedAt);
+    }
+
     return {
       integrations: rows.map((row) => {
         const syncStatus = deriveIntegrationSyncStatus({
           jobs: row.jobs,
           isEnabled: Boolean(row.connection?.is_enabled)
         });
+        const lastRecordProcessedAt =
+          row.definition.provider_key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+            ? row.connection?.id
+              ? webhookLastProcessedByConnection.get(row.connection.id) ?? null
+              : null
+            : syncStatus.lastSyncEndTime ??
+              syncStatus.lastSuccessfulSyncTime ??
+              syncStatus.lastSyncStartTime ??
+              null;
         return {
           integrationKey: row.definition.provider_key,
           name: row.connection?.name || row.definition.name,
@@ -602,6 +651,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: syncStatus.currentCursor,
           errorSummary: syncStatus.errorSummary,
           completedSuccessfully: syncStatus.completedSuccessfully,
+          lastRecordProcessedAt,
           canManageIntegration
         };
       }),
@@ -644,6 +694,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: null,
           errorSummary: "Migration required",
           completedSuccessfully: false,
+          lastRecordProcessedAt: null,
           canManageIntegration
         },
         {
@@ -673,6 +724,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: null,
           errorSummary: "Migration required",
           completedSuccessfully: false,
+          lastRecordProcessedAt: null,
           canManageIntegration
         },
         {
@@ -702,6 +754,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: null,
           errorSummary: "Migration required",
           completedSuccessfully: false,
+          lastRecordProcessedAt: null,
           canManageIntegration
         },
       ],
@@ -747,6 +800,13 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
           .or("organization_name.is.null,organization_name.eq.")
       )
     ]);
+    const webhookLastProcessedAt =
+      integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+        ? await getWebhookLastProcessedAt({
+            organizationId: context.organizationId,
+            connectionId: connection.id
+          })
+        : null;
 
     if (crmContactsCountResult.error) throw crmContactsCountResult.error;
     if (crmPersonalContactsCountResult.error) throw crmPersonalContactsCountResult.error;
@@ -799,7 +859,12 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
         failedRecordsCount: jobs.reduce(
           (sum, job) => sum + Number(job.records_failed ?? 0),
           0
-        )
+        ),
+        lastRecordProcessedAt:
+          webhookLastProcessedAt ??
+          jobs[0]?.completed_date ??
+          jobs[0]?.started_date ??
+          null
       },
       apiPaused: INTEGRATIONS_API_PAUSED
     };
@@ -894,8 +959,8 @@ export async function updateIntegrationConfiguration(
             apiKeyReference: null,
             configuration: {
               ...(payload.configuration ?? {}),
-              signatureHeaderName: "x-givingfuel-signature",
-              secretHeaderName: "x-givingfuel-secret",
+              signatureHeaderName: "x-webconnex-signature",
+              secretHeaderName: "x-webconnex-token",
               ...(typeof payload.webhookSecret === "string"
                 ? payload.webhookSecret.trim()
                   ? {

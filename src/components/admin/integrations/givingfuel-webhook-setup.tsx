@@ -203,25 +203,6 @@ export function GivingFuelWebhookSetup({
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input
                 type="checkbox"
-                checked={Boolean(connection.isEnabled)}
-                onChange={(event) =>
-                  setConfiguration((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          connection: prev.connection
-                            ? { ...prev.connection, isEnabled: event.target.checked }
-                            : null
-                        }
-                      : prev
-                  )
-                }
-              />
-              Enable Integration (process webhook deliveries)
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
                 checked={Boolean(connection.allowModuleAccess)}
                 onChange={(event) =>
                   setConfiguration((prev) =>
@@ -256,6 +237,11 @@ export function GivingFuelWebhookSetup({
                   : "Enter webhook secret"
               }
             />
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => void saveConfiguration()} disabled={saving}>
+              {saving ? "Saving..." : "Save Configuration"}
+            </Button>
           </div>
         </section>
       ) : null}
@@ -398,12 +384,6 @@ export function GivingFuelWebhookSetup({
           </p>
         </section>
       ) : null}
-
-      <div className="flex gap-2">
-        <Button type="button" onClick={() => void saveConfiguration()} disabled={saving}>
-          {saving ? "Saving..." : "Save Configuration"}
-        </Button>
-      </div>
 
       <section className="space-y-3 rounded-md border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">

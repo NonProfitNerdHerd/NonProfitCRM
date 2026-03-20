@@ -15,21 +15,7 @@ type IntegrationRow = {
   syncStatus?: "Fully Synced" | "Currently Working" | "Could Not Complete";
   syncStatusColor?: "green" | "yellow" | "red";
   statusDetail?: string;
-  runId?: string | null;
-  connectionStatus?: string;
-  lastSyncStartTime?: string | null;
-  lastSyncEndTime?: string | null;
-  lastSuccessfulSyncTime?: string | null;
-  recordsRetrieved?: number;
-  recordsProcessed?: number;
-  recordsInserted?: number;
-  recordsUpdated?: number;
-  recordsSkipped?: number;
-  recordsFailed?: number;
-  totalRecordsExpected?: number | null;
-  currentPage?: number | null;
-  currentCursor?: string | null;
-  errorSummary?: string | null;
+  lastRecordProcessedAt?: string | null;
   canManageIntegration?: boolean;
 };
 
@@ -42,9 +28,6 @@ export function IntegrationsDashboard({
 }) {
   const [integrations, setIntegrations] = useState(initialIntegrations);
   const [search, setSearch] = useState("");
-  const [togglingByKey, setTogglingByKey] = useState<Record<string, boolean>>({});
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   async function refreshIntegrations() {
     const response = await fetch("/api/admin/integrations", { cache: "no-store" });
@@ -70,29 +53,6 @@ export function IntegrationsDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function toggleIntegration(integrationKey: string, isEnabled: boolean) {
-    setMessage(null);
-    setError(null);
-    setTogglingByKey((prev) => ({ ...prev, [integrationKey]: true }));
-    try {
-      const response = await fetch(`/api/admin/integrations/${encodeURIComponent(integrationKey)}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ isEnabled })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(payload?.message ?? "Unable to update integration state.");
-      }
-      await refreshIntegrations();
-      setMessage(`${isEnabled ? "Enabled" : "Disabled"} integration successfully.`);
-    } catch (toggleError) {
-      setError(toggleError instanceof Error ? toggleError.message : "Unable to update integration state.");
-    } finally {
-      setTogglingByKey((prev) => ({ ...prev, [integrationKey]: false }));
-    }
-  }
-
   const rows = useMemo(() => {
     const normalized = search.trim().toLowerCase();
     if (!normalized) return integrations;
@@ -105,16 +65,6 @@ export function IntegrationsDashboard({
         <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           Integrations API is temporarily disabled while this integration implementation is being
           restarted from scratch.
-        </p>
-      ) : null}
-      {message ? (
-        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {error}
         </p>
       ) : null}
       <div className="max-w-md">
@@ -132,7 +82,6 @@ export function IntegrationsDashboard({
           >
             <div className="space-y-2">
               <p className="text-sm font-semibold text-slate-900">{row.name}</p>
-              <p className="text-xs text-slate-500">{row.description || "No description provided."}</p>
               <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1">
                 <p className="uppercase tracking-wide text-slate-500">Sync Status</p>
                 <p
@@ -156,35 +105,10 @@ export function IntegrationsDashboard({
                   {row.syncStatus ?? "Could Not Complete"}
                 </p>
                 <p className="mt-1 text-xs text-slate-600">{row.statusDetail ?? "No status detail available."}</p>
-              </div>
-              <div className="grid gap-2 text-xs">
-                <TileLabel label="Enabled" value={row.enabledStatus || "Disabled"} />
-                <TileLabel label="Connection Status" value={row.connectionStatus || "Not Tested"} />
-                <TileLabel label="Run ID" value={row.runId || "-"} />
-                <TileLabel label="Last Sync Start" value={formatDateTime(row.lastSyncStartTime ?? null)} />
-                <TileLabel label="Last Sync End" value={formatDateTime(row.lastSyncEndTime ?? null)} />
-                <TileLabel
-                  label="Last Successful Sync"
-                  value={formatDateTime(row.lastSuccessfulSyncTime ?? null)}
-                />
-                <TileLabel
-                  label="Progress"
-                  value={
-                    row.totalRecordsExpected && row.totalRecordsExpected > 0
-                      ? `${Number(row.recordsProcessed ?? 0).toLocaleString()} of ${Number(row.totalRecordsExpected).toLocaleString()}`
-                      : `${Number(row.recordsProcessed ?? 0).toLocaleString()} processed`
-                  }
-                />
-                <TileLabel label="Retrieved" value={Number(row.recordsRetrieved ?? 0).toLocaleString()} />
-                <TileLabel label="Inserted" value={Number(row.recordsInserted ?? 0).toLocaleString()} />
-                <TileLabel label="Updated" value={Number(row.recordsUpdated ?? 0).toLocaleString()} />
-                <TileLabel label="Skipped" value={Number(row.recordsSkipped ?? 0).toLocaleString()} />
-                <TileLabel label="Failed" value={Number(row.recordsFailed ?? 0).toLocaleString()} />
-                <TileLabel
-                  label="Current Page / Cursor"
-                  value={`${row.currentPage ?? "-"} / ${row.currentCursor ?? "-"}`}
-                />
-                {row.errorSummary ? <TileLabel label="Error Summary" value={row.errorSummary} /> : null}
+                <p className="mt-2 text-xs text-slate-700">
+                  Last Record Processed:{" "}
+                  <span className="font-medium">{formatDateTime(row.lastRecordProcessedAt ?? null)}</span>
+                </p>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -194,22 +118,6 @@ export function IntegrationsDashboard({
                     Open
                   </Button>
                 </Link>
-              ) : null}
-              {row.canManageIntegration ? (
-                <Button
-                  type="button"
-                  variant={row.isEnabled ? "danger" : "primary"}
-                  onClick={() => void toggleIntegration(row.integrationKey, !row.isEnabled)}
-                  disabled={Boolean(togglingByKey[row.integrationKey])}
-                >
-                  {togglingByKey[row.integrationKey]
-                    ? row.isEnabled
-                      ? "Disabling..."
-                      : "Enabling..."
-                    : row.isEnabled
-                      ? "Disable Integration"
-                      : "Enable Integration"}
-                </Button>
               ) : (
                 <span className="text-xs text-slate-500">
                   Read-only: integration configuration is restricted.
@@ -223,15 +131,6 @@ export function IntegrationsDashboard({
         ) : null}
       </div>
     </section>
-  );
-}
-
-function TileLabel({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1">
-      <p className="uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-slate-800">{value}</p>
-    </div>
   );
 }
 

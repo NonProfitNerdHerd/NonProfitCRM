@@ -73,8 +73,8 @@ const DEFAULT_DONATIONS_SYNC_SETTINGS = {
 };
 
 const DEFAULT_WEBHOOK_SETTINGS = {
-  signatureHeaderName: "x-givingfuel-signature",
-  secretHeaderName: "x-givingfuel-secret",
+  signatureHeaderName: "x-webconnex-signature",
+  secretHeaderName: "x-webconnex-token",
   autoAcceptDonorConfidence: 95,
   autoAcceptCampaignConfidence: 100,
   autoCreateUnmatchedDonor: false,

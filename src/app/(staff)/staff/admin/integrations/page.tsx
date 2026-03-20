@@ -28,6 +28,7 @@ export default async function IntegrationsPage() {
     currentCursor?: string | null;
     errorSummary?: string | null;
     completedSuccessfully?: boolean;
+    lastRecordProcessedAt?: string | null;
     canManageIntegration?: boolean;
   }> = [];
   let apiPaused = false;
@@ -60,6 +61,7 @@ export default async function IntegrationsPage() {
       currentCursor: item.currentCursor,
       errorSummary: item.errorSummary,
       completedSuccessfully: item.completedSuccessfully,
+      lastRecordProcessedAt: item.lastRecordProcessedAt,
       canManageIntegration: item.canManageIntegration
     }));
     apiPaused = Boolean((result as { apiPaused?: boolean }).apiPaused);
