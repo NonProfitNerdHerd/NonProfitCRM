@@ -741,7 +741,11 @@ export async function processGivingFuelWebhookRequest(input: {
   const connection = await loadWebhookConnectionById(input.webhookId);
   const now = new Date().toISOString();
   const requestHeaders = Object.fromEntries(input.headers.entries());
-  const initialIdempotencyKey = sha256Hex(`${input.webhookId}:${input.rawBody || now}`);
+  // Keep initial event insert idempotency key unique per request so repeated
+  // payload deliveries never block "log first" behavior.
+  const initialIdempotencyKey = sha256Hex(
+    `${input.webhookId}:${now}:${crypto.randomUUID()}:${input.rawBody || ""}`
+  );
   const initialInsert = await supabase
     .from("integration_webhook_events")
     .insert({
@@ -822,7 +826,6 @@ export async function processGivingFuelWebhookRequest(input: {
       normalized_payload_json: normalized as unknown as Record<string, unknown>,
       event_type: normalized.eventType,
       provider_event_id: normalized.providerEventId,
-      idempotency_key: normalized.idempotencyKey || initialIdempotencyKey,
       is_test_event: isTestEvent
     })
     .eq("id", eventId);
