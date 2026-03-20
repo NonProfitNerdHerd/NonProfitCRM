@@ -1641,6 +1641,28 @@ export async function getGivingFuelAdminConfiguration() {
   };
 }
 
+export async function getGivingFuelAdminWebhookLog(limit = 10) {
+  const context = await requireIntegrationManagerRole();
+  const connection = await getWebhookConnectionForOrganization(context.organizationId);
+  if (!connection?.id) {
+    return { rows: [] as Array<Record<string, unknown>> };
+  }
+
+  const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 250);
+  const supabase = await createIntegrationClient();
+  const { data, error } = await supabase
+    .from("integration_webhook_events")
+    .select(
+      "id, received_at, processed_at, provider_event_id, event_type, processing_status, error_message, created_transaction_id"
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("integration_connection_id", connection.id)
+    .order("received_at", { ascending: false })
+    .limit(boundedLimit);
+  if (error) throw error;
+  return { rows: data ?? [] };
+}
+
 export async function updateGivingFuelAdminConfiguration(input: {
   isEnabled?: boolean;
   allowModuleAccess?: boolean;
