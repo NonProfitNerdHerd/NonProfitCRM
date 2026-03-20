@@ -563,6 +563,7 @@ export function GivingFuelOperationsDashboard({
                   <tr className="border-b border-slate-200 text-slate-600">
                     <th className="py-2">Received</th>
                     <th className="py-2">Webhook ID</th>
+                    <th className="py-2">Form ID</th>
                     <th className="py-2">Event Type</th>
                     <th className="py-2">Provider Event</th>
                     <th className="py-2">Validation</th>
@@ -578,6 +579,7 @@ export function GivingFuelOperationsDashboard({
                     <tr key={String(row.id)} className="border-b border-slate-100">
                       <td className="py-2">{formatDateTime(String(row.received_at ?? ""))}</td>
                       <td className="py-2">{String(row.webhook_route_id ?? "-")}</td>
+                      <td className="py-2">{String(row.form_id ?? "-")}</td>
                       <td className="py-2">{String(row.event_type ?? "-")}</td>
                       <td className="py-2">{String(row.provider_event_id ?? "-")}</td>
                       <td className="py-2">{String(row.validation_status ?? "-")}</td>
@@ -607,7 +609,7 @@ export function GivingFuelOperationsDashboard({
                   ))}
                   {inbox.rows.length === 0 ? (
                     <tr>
-                      <td className="py-3 text-slate-500" colSpan={10}>
+                      <td className="py-3 text-slate-500" colSpan={11}>
                         No webhook inbox records found.
                       </td>
                     </tr>

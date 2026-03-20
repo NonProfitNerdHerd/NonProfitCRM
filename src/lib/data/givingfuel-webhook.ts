@@ -306,6 +306,22 @@ function normalizeGivingFuelPayload(rawPayload: Record<string, unknown>, rawBody
   } satisfies GivingFuelNormalizedPayload;
 }
 
+function extractFormIdFromWebhookEventRow(row: Record<string, unknown>) {
+  const normalized = pickObject(row.normalized_payload_json) ?? {};
+  const parsed = pickObject(row.parsed_body_json) ?? {};
+  return (
+    toText(valueByPath(normalized, "externalPageId")) ||
+    toText(valueByPath(normalized, "external_page_id")) ||
+    toText(valueByPath(parsed, "event.formId")) ||
+    toText(valueByPath(parsed, "event.form_id")) ||
+    toText(valueByPath(parsed, "data.formId")) ||
+    toText(valueByPath(parsed, "data.form_id")) ||
+    toText(valueByPath(parsed, "transaction.formId")) ||
+    toText(valueByPath(parsed, "transaction.form_id")) ||
+    null
+  );
+}
+
 function verifyWebhookAuthenticity(input: {
   headers: Headers;
   rawBody: string;
@@ -610,16 +626,6 @@ async function createDonationFromImport(input: {
   if (!externalTransactionId) {
     throw new Error("External transaction ID is required for donation creation.");
   }
-  const { data: existing, error: existingError } = await input.supabase
-    .from("donations")
-    .select("id")
-    .eq("organization_id", input.organizationId)
-    .eq("source_platform", "givingfuel_webhook")
-    .eq("external_transaction_id", externalTransactionId)
-    .maybeSingle();
-  if (existingError) throw existingError;
-  if (existing?.id) return toText(existing.id);
-
   const amount = input.normalized.transaction.amount;
   if (!Number.isFinite(amount) || Number(amount) <= 0) {
     throw new Error("Transaction amount is missing or invalid.");
@@ -635,41 +641,75 @@ async function createDonationFromImport(input: {
 
   const donationDate =
     input.normalized.transaction.donationDate ?? new Date().toISOString().slice(0, 10);
-  const { data: created, error: insertError } = await input.supabase
+  const memo = JSON.stringify({
+    sourcePageId: input.normalized.externalPageId,
+    sourcePageKey: input.normalized.externalPageKey,
+    sourcePageName: input.normalized.externalPageName,
+    sourceCampaignReference: input.normalized.externalCampaignReference,
+    grossAmount: input.normalized.transaction.grossAmount,
+    netAmount: input.normalized.transaction.netAmount,
+    fees: input.normalized.transaction.fees,
+    recurringMetadata: input.normalized.transaction.recurringMetadata,
+    tributeMetadata: input.normalized.transaction.tributeMetadata
+  });
+  const donationPayload = {
+    organization_id: input.organizationId,
+    contact_id: input.donorId,
+    campaign_id: input.campaignId,
+    amount,
+    currency: "USD",
+    donation_date: donationDate,
+    status: donationStatusFromPaymentStatus(input.normalized.transaction.paymentStatus),
+    payment_method: input.normalized.transaction.paymentMethod,
+    payment_type: paymentTypeFromMethod(input.normalized.transaction.paymentMethod),
+    source: "integration_webhook",
+    source_platform: "givingfuel_webhook",
+    external_transaction_id: externalTransactionId,
+    transaction_id: externalTransactionId,
+    campaign: toText(campaign?.name) || toText(input.normalized.externalPageName) || null,
+    memo,
+    is_recurring: input.normalized.transaction.isRecurring
+  };
+  const { data: existing, error: existingError } = await input.supabase
     .from("donations")
-    .insert({
-      organization_id: input.organizationId,
-      contact_id: input.donorId,
-      campaign_id: input.campaignId,
-      amount,
-      currency: "USD",
-      donation_date: donationDate,
-      status: donationStatusFromPaymentStatus(input.normalized.transaction.paymentStatus),
-      payment_method: input.normalized.transaction.paymentMethod,
-      payment_type: paymentTypeFromMethod(input.normalized.transaction.paymentMethod),
-      source: "integration_webhook",
-      source_platform: "givingfuel_webhook",
-      external_transaction_id: externalTransactionId,
-      transaction_id: externalTransactionId,
-      campaign: toText(campaign?.name) || toText(input.normalized.externalPageName) || null,
-      memo: JSON.stringify({
-        sourcePageId: input.normalized.externalPageId,
-        sourcePageKey: input.normalized.externalPageKey,
-        sourcePageName: input.normalized.externalPageName,
-        sourceCampaignReference: input.normalized.externalCampaignReference,
-        grossAmount: input.normalized.transaction.grossAmount,
-        netAmount: input.normalized.transaction.netAmount,
-        fees: input.normalized.transaction.fees,
-        recurringMetadata: input.normalized.transaction.recurringMetadata,
-        tributeMetadata: input.normalized.transaction.tributeMetadata
-      }),
-      is_recurring: input.normalized.transaction.isRecurring
-    })
     .select("id")
-    .single();
-  if (insertError) throw insertError;
+    .eq("organization_id", input.organizationId)
+    .eq("source_platform", "givingfuel_webhook")
+    .eq("external_transaction_id", externalTransactionId)
+    .maybeSingle();
+  if (existingError) throw existingError;
 
-  const donationId = toText(created.id);
+  let donationId = "";
+  if (existing?.id) {
+    donationId = toText(existing.id);
+    const { error: updateError } = await input.supabase
+      .from("donations")
+      .update({
+        contact_id: donationPayload.contact_id,
+        campaign_id: donationPayload.campaign_id,
+        amount: donationPayload.amount,
+        donation_date: donationPayload.donation_date,
+        status: donationPayload.status,
+        payment_method: donationPayload.payment_method,
+        payment_type: donationPayload.payment_type,
+        campaign: donationPayload.campaign,
+        memo: donationPayload.memo,
+        is_recurring: donationPayload.is_recurring,
+        transaction_id: donationPayload.transaction_id
+      })
+      .eq("organization_id", input.organizationId)
+      .eq("id", donationId);
+    if (updateError) throw updateError;
+  } else {
+    const { data: created, error: insertError } = await input.supabase
+      .from("donations")
+      .insert(donationPayload)
+      .select("id")
+      .single();
+    if (insertError) throw insertError;
+    donationId = toText(created.id);
+  }
+
   const { error: refError } = await input.supabase.from("donation_external_references").upsert(
     {
       organization_id: input.organizationId,
@@ -779,6 +819,7 @@ export async function processGivingFuelWebhookRequest(input: {
     .update({
       parsed_body_json: rawPayload,
       raw_payload_json: rawPayload,
+      normalized_payload_json: normalized as unknown as Record<string, unknown>,
       event_type: normalized.eventType,
       provider_event_id: normalized.providerEventId,
       idempotency_key: normalized.idempotencyKey || initialIdempotencyKey,
@@ -860,41 +901,6 @@ export async function processGivingFuelWebhookRequest(input: {
     })
     .eq("id", eventId);
 
-  const duplicateResult = await supabase
-    .from("integration_webhook_events")
-    .select("id, processing_status, created_transaction_id")
-    .eq("organization_id", connection.organization_id)
-    .eq("integration_connection_id", connection.id)
-    .eq("idempotency_key", normalized.idempotencyKey)
-    .neq("id", eventId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (duplicateResult.error) throw duplicateResult.error;
-  if (duplicateResult.data) {
-    await supabase
-      .from("integration_webhook_events")
-      .update({
-        processing_status: "ignored",
-        processed_at: new Date().toISOString(),
-        response_status_code: 200,
-        error_message: "Duplicate delivery ignored."
-      })
-      .eq("id", eventId);
-    console.info("GivingFuel webhook duplicate ignored", { eventId, duplicateOf: duplicateResult.data.id });
-    return {
-      statusCode: 200,
-      body: {
-        message: "Duplicate delivery ignored.",
-        duplicate: true,
-        eventId,
-        duplicateOfEventId: toText(duplicateResult.data.id) || null,
-        processingStatus: toText(duplicateResult.data.processing_status) || "ignored",
-        createdTransactionId: toText(duplicateResult.data.created_transaction_id) || null
-      }
-    };
-  }
-
   if (!connection.is_enabled) {
     await supabase
       .from("integration_webhook_events")
@@ -961,61 +967,69 @@ export async function processGivingFuelWebhookRequest(input: {
       settings
     });
 
+    const importPayload = {
+      organization_id: connection.organization_id,
+      integration_connection_id: connection.id,
+      webhook_event_id: eventId,
+      provider_key: connection.provider_key,
+      external_transaction_id: normalized.externalTransactionId,
+      external_page_id: normalized.externalPageId,
+      external_campaign_reference:
+        normalized.externalCampaignReference ?? normalized.externalPageName,
+      external_donor_reference: normalized.donor.externalDonorReference,
+      matched_campaign_id: mappingResult.matchedCampaignId,
+      matched_donor_id: donorMatch.matchedDonorId,
+      donor_match_confidence: donorMatch.confidence,
+      campaign_match_confidence: mappingResult.confidence,
+      donor_match_rule: donorMatch.rule,
+      campaign_match_rule: mappingResult.rule,
+      review_status: decision.shouldAutoAccept ? "auto_accepted" : "pending_review",
+      review_notes: decision.reviewReason,
+      import_status: decision.shouldAutoAccept ? "ready_to_import" : "pending",
+      normalized_donor_json: normalized.donor as unknown as Record<string, unknown>,
+      normalized_transaction_json: normalized.transaction as unknown as Record<string, unknown>,
+      matching_details_json: {
+        campaignMatch: mappingResult,
+        donorMatch,
+        decision
+      }
+    };
     const importInsert = await supabase
       .from("integration_transaction_imports")
-      .insert({
-        organization_id: connection.organization_id,
-        integration_connection_id: connection.id,
-        webhook_event_id: eventId,
-        provider_key: connection.provider_key,
-        external_transaction_id: normalized.externalTransactionId,
-        external_page_id: normalized.externalPageId,
-        external_campaign_reference:
-          normalized.externalCampaignReference ?? normalized.externalPageName,
-        external_donor_reference: normalized.donor.externalDonorReference,
-        matched_campaign_id: mappingResult.matchedCampaignId,
-        matched_donor_id: donorMatch.matchedDonorId,
-        donor_match_confidence: donorMatch.confidence,
-        campaign_match_confidence: mappingResult.confidence,
-        donor_match_rule: donorMatch.rule,
-        campaign_match_rule: mappingResult.rule,
-        review_status: decision.shouldAutoAccept ? "auto_accepted" : "pending_review",
-        review_notes: decision.reviewReason,
-        import_status: decision.shouldAutoAccept ? "ready_to_import" : "pending",
-        normalized_donor_json: normalized.donor as unknown as Record<string, unknown>,
-        normalized_transaction_json: normalized.transaction as unknown as Record<string, unknown>,
-        matching_details_json: {
-          campaignMatch: mappingResult,
-          donorMatch,
-          decision
-        }
-      })
+      .insert(importPayload)
       .select("id")
       .single();
     if (importInsert.error) {
       const code = (importInsert.error as { code?: string }).code;
-      if (code === "23505") {
-        await supabase
-          .from("integration_webhook_events")
+      if (code === "23505" && normalized.externalTransactionId) {
+        const existingImportResult = await supabase
+          .from("integration_transaction_imports")
+          .select("id")
+          .eq("organization_id", connection.organization_id)
+          .eq("integration_connection_id", connection.id)
+          .eq("external_transaction_id", normalized.externalTransactionId)
+          .maybeSingle();
+        if (existingImportResult.error) throw existingImportResult.error;
+        const existingImportId = toText(existingImportResult.data?.id);
+        if (!existingImportId) throw importInsert.error;
+
+        const { error: updateImportError } = await supabase
+          .from("integration_transaction_imports")
           .update({
-            processing_status: "ignored",
-            processed_at: new Date().toISOString(),
-            response_status_code: 200,
-            error_message: "Duplicate transaction import ignored."
+            ...importPayload,
+            webhook_event_id: eventId
           })
-          .eq("id", eventId);
-        return {
-          statusCode: 200,
-          body: {
-            message: "Duplicate transaction import ignored.",
-            eventId,
-            processingStatus: "ignored"
-          }
-        };
+          .eq("organization_id", connection.organization_id)
+          .eq("integration_connection_id", connection.id)
+          .eq("id", existingImportId);
+        if (updateImportError) throw updateImportError;
+        transactionImportId = existingImportId;
+      } else {
+        throw importInsert.error;
       }
-      throw importInsert.error;
+    } else {
+      transactionImportId = toText(importInsert.data.id);
     }
-    transactionImportId = toText(importInsert.data.id);
 
     if (!decision.shouldAutoAccept) {
       await supabase
@@ -1298,7 +1312,7 @@ export async function listGivingFuelWebhookInbox(filters?: {
   let query = supabase
     .from("integration_webhook_events")
     .select(
-      "id, webhook_route_id, request_method, request_url, source_system, provider_event_id, event_type, validation_status, processing_status, response_status_code, is_test_event, matched_integration_id, matched_campaign_id, matched_donor_id, created_transaction_id, error_message, received_at, processed_at, created_at"
+      "id, webhook_route_id, request_method, request_url, source_system, provider_event_id, event_type, validation_status, processing_status, response_status_code, is_test_event, matched_integration_id, matched_campaign_id, matched_donor_id, created_transaction_id, error_message, received_at, processed_at, created_at, parsed_body_json, normalized_payload_json"
     )
     .eq("organization_id", context.organizationId)
     .eq("integration_connection_id", state.connectionId)
@@ -1311,7 +1325,14 @@ export async function listGivingFuelWebhookInbox(filters?: {
   if (filters?.dateTo) query = query.lte("created_at", `${filters.dateTo}T23:59:59.999Z`);
   const { data, error } = await query;
   if (error) throw error;
-  return { moduleState: state, rows: data ?? [] };
+  const rows = (data ?? []).map((row) => {
+    const shaped = row as Record<string, unknown>;
+    return {
+      ...shaped,
+      form_id: extractFormIdFromWebhookEventRow(shaped)
+    };
+  });
+  return { moduleState: state, rows };
 }
 
 export async function getGivingFuelWebhookInboxDetail(eventId: string) {
@@ -1513,6 +1534,7 @@ export async function getGivingFuelReviewDetail(importId: string) {
   const state = context.moduleState;
   if (!state.connectionId) throw new Error("GivingFuel module is not configured.");
   const supabase = await createIntegrationClient();
+  const adminSupabase = createAdminClient();
 
   const importResult = await supabase
     .from("integration_transaction_imports")
@@ -1524,7 +1546,23 @@ export async function getGivingFuelReviewDetail(importId: string) {
   if (importResult.error) throw importResult.error;
   if (!importResult.data) throw new Error("Review item not found.");
 
-  const [eventResult, actionsResult] = await Promise.all([
+  const normalizedDonor =
+    (pickObject(importResult.data.normalized_donor_json) as Record<string, unknown> | null) ?? {};
+  const donorInput: GivingFuelNormalizedPayload["donor"] = {
+    externalDonorReference: toText(normalizedDonor.externalDonorReference) || null,
+    firstName: toText(normalizedDonor.firstName) || null,
+    lastName: toText(normalizedDonor.lastName) || null,
+    organizationName: toText(normalizedDonor.organizationName) || null,
+    email: toText(normalizedDonor.email) || null,
+    phone: toText(normalizedDonor.phone) || null,
+    postalCode: toText(normalizedDonor.postalCode) || null,
+    addressLine1: toText(normalizedDonor.addressLine1) || null,
+    city: toText(normalizedDonor.city) || null,
+    state: toText(normalizedDonor.state) || null
+  };
+
+  const [eventResult, actionsResult, campaignsResult, contactsResult, donorCandidates] =
+    await Promise.all([
     supabase
       .from("integration_webhook_events")
       .select("*")
@@ -1538,16 +1576,69 @@ export async function getGivingFuelReviewDetail(importId: string) {
       .eq("organization_id", context.organizationId)
       .eq("integration_connection_id", state.connectionId)
       .eq("transaction_import_id", importId)
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: false }),
+    adminSupabase
+      .from("campaigns")
+      .select("id, name, status")
+      .eq("organization_id", context.organizationId)
+      .order("name", { ascending: true })
+      .limit(500),
+    adminSupabase
+      .from("contacts")
+      .select("id, first_name, last_name, organization_name, email, entity_type")
+      .eq("organization_id", context.organizationId)
+      .order("first_name", { ascending: true })
+      .order("last_name", { ascending: true })
+      .limit(250),
+    collectDonorCandidates({
+      supabase: adminSupabase,
+      organizationId: context.organizationId,
+      donor: donorInput
+    })
   ]);
   if (eventResult.error) throw eventResult.error;
   if (actionsResult.error) throw actionsResult.error;
+  if (campaignsResult.error) throw campaignsResult.error;
+  if (contactsResult.error) throw contactsResult.error;
+
+  const campaignOptions = (campaignsResult.data ?? []).map((row) => ({
+    id: toText(row.id),
+    label: `${toText(row.name)}${toText(row.status) ? ` (${toText(row.status)})` : ""}`.trim()
+  }));
+  const candidateOptions = donorCandidates.map((candidate) => {
+    const name = `${toText(candidate.firstName)} ${toText(candidate.lastName)}`.trim();
+    const labelBase = name || toText(candidate.email) || "Candidate Contact";
+    const meta = [toText(candidate.email), toText(candidate.phone)].filter(Boolean).join(" | ");
+    return {
+      id: toText(candidate.id),
+      label: meta ? `${labelBase} (${meta})` : labelBase
+    };
+  });
+  const contactOptions = (contactsResult.data ?? []).map((row) => {
+    const personName = `${toText(row.first_name)} ${toText(row.last_name)}`.trim();
+    const displayName = toText(row.organization_name) || personName || "Contact";
+    const email = toText(row.email);
+    const entityType = toText(row.entity_type);
+    const extra = [entityType, email].filter(Boolean).join(" | ");
+    return {
+      id: toText(row.id),
+      label: extra ? `${displayName} (${extra})` : displayName
+    };
+  });
+  const donorOptionsById = new Map<string, { id: string; label: string }>();
+  for (const option of [...candidateOptions, ...contactOptions]) {
+    if (option.id && !donorOptionsById.has(option.id)) {
+      donorOptionsById.set(option.id, option);
+    }
+  }
 
   return {
     moduleState: state,
     item: importResult.data,
     event: eventResult.data ?? null,
-    actions: actionsResult.data ?? []
+    actions: actionsResult.data ?? [],
+    campaignOptions,
+    donorOptions: Array.from(donorOptionsById.values())
   };
 }
 
@@ -1974,14 +2065,21 @@ export async function getGivingFuelAdminWebhookLog(limit = 10) {
   const { data, error } = await supabase
     .from("integration_webhook_events")
     .select(
-      "id, created_at, webhook_route_id, request_method, request_url, source_system, provider_event_id, event_type, validation_status, processing_status, response_status_code, is_test_event, matched_integration_id, matched_campaign_id, matched_donor_id, received_at, processed_at, error_message, created_transaction_id"
+      "id, created_at, webhook_route_id, request_method, request_url, source_system, provider_event_id, event_type, validation_status, processing_status, response_status_code, is_test_event, matched_integration_id, matched_campaign_id, matched_donor_id, received_at, processed_at, error_message, created_transaction_id, parsed_body_json, normalized_payload_json"
     )
     .eq("organization_id", context.organizationId)
     .eq("integration_connection_id", connection.id)
     .order("received_at", { ascending: false })
     .limit(boundedLimit);
   if (error) throw error;
-  return { rows: data ?? [] };
+  const rows = (data ?? []).map((row) => {
+    const shaped = row as Record<string, unknown>;
+    return {
+      ...shaped,
+      form_id: extractFormIdFromWebhookEventRow(shaped)
+    };
+  });
+  return { rows };
 }
 
 export async function updateGivingFuelAdminConfiguration(input: {

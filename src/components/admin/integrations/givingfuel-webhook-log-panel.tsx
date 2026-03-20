@@ -9,6 +9,7 @@ type WebhookLogPayload = {
     received_at: string | null;
     processed_at: string | null;
     provider_event_id: string | null;
+    form_id?: string | null;
     event_type: string | null;
     processing_status: string | null;
     error_message: string | null;
@@ -83,6 +84,7 @@ export function GivingFuelWebhookLogPanel({ integrationKey }: { integrationKey: 
             <tr className="border-b border-slate-200 text-slate-600">
               <th className="py-2">Received</th>
               <th className="py-2">Provider Event ID</th>
+              <th className="py-2">Form ID</th>
               <th className="py-2">Event Type</th>
               <th className="py-2">Status</th>
               <th className="py-2">Processed</th>
@@ -95,6 +97,7 @@ export function GivingFuelWebhookLogPanel({ integrationKey }: { integrationKey: 
               <tr key={row.id} className="border-b border-slate-100">
                 <td className="py-2">{formatDateTime(row.received_at)}</td>
                 <td className="py-2">{row.provider_event_id || "-"}</td>
+                <td className="py-2">{row.form_id || "-"}</td>
                 <td className="py-2">{row.event_type || "-"}</td>
                 <td className="py-2">{row.processing_status || "-"}</td>
                 <td className="py-2">{formatDateTime(row.processed_at)}</td>
@@ -104,7 +107,7 @@ export function GivingFuelWebhookLogPanel({ integrationKey }: { integrationKey: 
             ))}
             {webhookLog.rows.length === 0 ? (
               <tr>
-                <td className="py-3 text-slate-500" colSpan={7}>
+                <td className="py-3 text-slate-500" colSpan={8}>
                   No webhook attempts logged yet.
                 </td>
               </tr>

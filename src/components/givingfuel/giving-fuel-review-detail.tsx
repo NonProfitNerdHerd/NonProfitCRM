@@ -14,6 +14,8 @@ export function GivingFuelReviewDetail({ importId }: { importId: string }) {
     item: Record<string, unknown>;
     event: Record<string, unknown> | null;
     actions: Array<Record<string, unknown>>;
+    campaignOptions?: Array<{ id: string; label: string }>;
+    donorOptions?: Array<{ id: string; label: string }>;
   } | null>(null);
   const [campaignId, setCampaignId] = useState("");
   const [donorId, setDonorId] = useState("");
@@ -94,6 +96,10 @@ export function GivingFuelReviewDetail({ importId }: { importId: string }) {
   const item = payload.item;
   const donor = (item.normalized_donor_json as Record<string, unknown> | null | undefined) ?? {};
   const tx = (item.normalized_transaction_json as Record<string, unknown> | null | undefined) ?? {};
+  const campaignOptions = payload.campaignOptions ?? [];
+  const donorOptions = payload.donorOptions ?? [];
+  const selectedCampaignInList = campaignOptions.some((option) => option.id === campaignId);
+  const selectedDonorInList = donorOptions.some((option) => option.id === donorId);
 
   return (
     <div className="space-y-4">
@@ -129,23 +135,59 @@ export function GivingFuelReviewDetail({ importId }: { importId: string }) {
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1">
             <label className="block text-xs font-medium uppercase tracking-wide text-slate-600">
-              Campaign ID
+              Assign Campaign
             </label>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={campaignId}
+              onChange={(event) => setCampaignId(event.target.value)}
+            >
+              <option value="">Select campaign...</option>
+              {!selectedCampaignInList && campaignId ? (
+                <option value={campaignId}>{campaignId}</option>
+              ) : null}
+              {campaignOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <input
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               value={campaignId}
               onChange={(event) => setCampaignId(event.target.value)}
+              placeholder="Or paste campaign ID"
             />
+            <p className="text-xs text-slate-500">Choose the campaign to attach this transaction to.</p>
           </div>
           <div className="space-y-1">
             <label className="block text-xs font-medium uppercase tracking-wide text-slate-600">
-              Donor ID
+              Connect to Contact
             </label>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={donorId}
+              onChange={(event) => setDonorId(event.target.value)}
+            >
+              <option value="">Select contact...</option>
+              {!selectedDonorInList && donorId ? (
+                <option value={donorId}>{donorId}</option>
+              ) : null}
+              {donorOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <input
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               value={donorId}
               onChange={(event) => setDonorId(event.target.value)}
+              placeholder="Or paste contact ID"
             />
+            <p className="text-xs text-slate-500">
+              Select the contact or donor this transaction should be connected to.
+            </p>
           </div>
           <div className="space-y-1 md:col-span-2">
             <label className="block text-xs font-medium uppercase tracking-wide text-slate-600">
