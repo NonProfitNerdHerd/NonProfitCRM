@@ -21,6 +21,113 @@ function splitCsv(value: string) {
   );
 }
 
+export type PlatformDashboardCountRow = {
+  key: string;
+  count: number;
+};
+
+export type PlatformDashboardRollup = {
+  tenantStats: {
+    donors: number;
+    contacts: number;
+    donorOrganizations: number;
+    organizations: number;
+    activeCampaigns: number;
+    totalUsers: number;
+    roleCounts: PlatformDashboardCountRow[];
+    donationTrend: Array<{ label: string; amount: number }>;
+  };
+  tenantConfiguration: {
+    totalTenants: number;
+    backupTierAssignedCount: number;
+    backupTierUnassignedCount: number;
+    statusCounts: PlatformDashboardCountRow[];
+    planCounts: PlatformDashboardCountRow[];
+    onboardingStageCounts: PlatformDashboardCountRow[];
+    configuredModuleCounts: PlatformDashboardCountRow[];
+  };
+  backupStatus: {
+    tenantsWithBackupMetadata: number;
+    tenantsWithoutBackupMetadata: number;
+    staleBackups: number;
+    backupDueSoon: number;
+    statusCounts: PlatformDashboardCountRow[];
+  };
+  restoreRequestWorkflow: {
+    totalRequests: number;
+    statusCounts: PlatformDashboardCountRow[];
+  };
+  snapshotHistory: {
+    totalSnapshots: number;
+    expiringSnapshots7d: number;
+    statusCounts: PlatformDashboardCountRow[];
+    typeCounts: PlatformDashboardCountRow[];
+  };
+  restoreHistory: {
+    totalRestores: number;
+    outcomeCounts: PlatformDashboardCountRow[];
+    targetCounts: PlatformDashboardCountRow[];
+  };
+  provisioningAndEntitlements: {
+    totalProvisioningRuns: number;
+    provisioningStatusCounts: PlatformDashboardCountRow[];
+    enabledEntitlementCount: number;
+    tenantsWithEnabledEntitlements: number;
+    moduleCounts: PlatformDashboardCountRow[];
+  };
+};
+
+const EMPTY_PLATFORM_DASHBOARD_ROLLUP: PlatformDashboardRollup = {
+  tenantStats: {
+    donors: 0,
+    contacts: 0,
+    donorOrganizations: 0,
+    organizations: 0,
+    activeCampaigns: 0,
+    totalUsers: 0,
+    roleCounts: [],
+    donationTrend: []
+  },
+  tenantConfiguration: {
+    totalTenants: 0,
+    backupTierAssignedCount: 0,
+    backupTierUnassignedCount: 0,
+    statusCounts: [],
+    planCounts: [],
+    onboardingStageCounts: [],
+    configuredModuleCounts: []
+  },
+  backupStatus: {
+    tenantsWithBackupMetadata: 0,
+    tenantsWithoutBackupMetadata: 0,
+    staleBackups: 0,
+    backupDueSoon: 0,
+    statusCounts: []
+  },
+  restoreRequestWorkflow: {
+    totalRequests: 0,
+    statusCounts: []
+  },
+  snapshotHistory: {
+    totalSnapshots: 0,
+    expiringSnapshots7d: 0,
+    statusCounts: [],
+    typeCounts: []
+  },
+  restoreHistory: {
+    totalRestores: 0,
+    outcomeCounts: [],
+    targetCounts: []
+  },
+  provisioningAndEntitlements: {
+    totalProvisioningRuns: 0,
+    provisioningStatusCounts: [],
+    enabledEntitlementCount: 0,
+    tenantsWithEnabledEntitlements: 0,
+    moduleCounts: []
+  }
+};
+
 function generateTemporaryPassword() {
   return `Tmp!${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
@@ -201,12 +308,12 @@ export async function getPlatformSummary() {
   };
 }
 
-export async function getPlatformDashboardRollup(): Promise<any> {
+export async function getPlatformDashboardRollup(): Promise<PlatformDashboardRollup> {
   await requirePlatformAccess();
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("platform_get_dashboard_rollup");
   if (error) throw new Error(error.message);
-  return (data ?? {}) as Record<string, unknown>;
+  return ((data as PlatformDashboardRollup | null) ?? EMPTY_PLATFORM_DASHBOARD_ROLLUP);
 }
 
 export async function createTenantProvisioning(input: {

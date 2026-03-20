@@ -4,63 +4,11 @@ import { requirePlatformAdminAccess } from "@/lib/auth/guards";
 import {
   getPlatformDashboardRollup,
   getPlatformSummary,
-  listTenants
+  listTenants,
+  type PlatformDashboardRollup
 } from "@/lib/data/platform-admin";
 import { LineChart } from "@/components/analytics/line-chart";
 import { formatCurrency } from "@/lib/utils";
-
-type CountRow = { key: string; count: number };
-
-type PlatformDashboardRollup = {
-  tenantStats: {
-    donors: number;
-    contacts: number;
-    donorOrganizations: number;
-    organizations: number;
-    activeCampaigns: number;
-    totalUsers: number;
-    roleCounts: CountRow[];
-    donationTrend: Array<{ label: string; amount: number }>;
-  };
-  tenantConfiguration: {
-    totalTenants: number;
-    backupTierAssignedCount: number;
-    backupTierUnassignedCount: number;
-    statusCounts: CountRow[];
-    planCounts: CountRow[];
-    onboardingStageCounts: CountRow[];
-    configuredModuleCounts: CountRow[];
-  };
-  backupStatus: {
-    tenantsWithBackupMetadata: number;
-    tenantsWithoutBackupMetadata: number;
-    staleBackups: number;
-    backupDueSoon: number;
-    statusCounts: CountRow[];
-  };
-  restoreRequestWorkflow: {
-    totalRequests: number;
-    statusCounts: CountRow[];
-  };
-  snapshotHistory: {
-    totalSnapshots: number;
-    expiringSnapshots7d: number;
-    statusCounts: CountRow[];
-    typeCounts: CountRow[];
-  };
-  restoreHistory: {
-    totalRestores: number;
-    outcomeCounts: CountRow[];
-    targetCounts: CountRow[];
-  };
-  provisioningAndEntitlements: {
-    totalProvisioningRuns: number;
-    provisioningStatusCounts: CountRow[];
-    enabledEntitlementCount: number;
-    tenantsWithEnabledEntitlements: number;
-    moduleCounts: CountRow[];
-  };
-};
 
 function titleCase(value: string) {
   return value
