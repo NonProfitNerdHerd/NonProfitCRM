@@ -10,6 +10,7 @@ import {
 } from "@/lib/integrations/givingfuel-contacts-config";
 import { GivingFuelWebhookSetup } from "@/components/admin/integrations/givingfuel-webhook-setup";
 import { IntegrationEnableToggleButton } from "@/components/admin/integrations/integration-enable-toggle-button";
+import { GivingFuelWebhookLogPanel } from "@/components/admin/integrations/givingfuel-webhook-log-panel";
 
 type RouteProps = {
   params: Promise<{ integrationKey: string }>;
@@ -23,7 +24,15 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
     integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY ||
     integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const activeTab = resolvedSearchParams?.tab === "status" ? "status" : "configuration";
+  const requestedTab = resolvedSearchParams?.tab;
+  const activeTab: "log" | "configuration" | "status" =
+    integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
+      ? requestedTab === "configuration" || requestedTab === "status" || requestedTab === "log"
+        ? requestedTab
+        : "log"
+      : requestedTab === "status"
+        ? "status"
+        : "configuration";
   let detail:
     | {
         definition: Record<string, unknown>;
@@ -170,6 +179,13 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
       ) : (
         <>
           <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+            {integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY ? (
+              <Link href={`/staff/admin/integrations/${encodeURIComponent(integrationKey)}?tab=log`}>
+                <Button type="button" variant={activeTab === "log" ? "primary" : "secondary"}>
+                  Webhook Log
+                </Button>
+              </Link>
+            ) : null}
             <Link href={`/staff/admin/integrations/${encodeURIComponent(integrationKey)}?tab=configuration`}>
               <Button type="button" variant={activeTab === "configuration" ? "primary" : "secondary"}>
                 Configuration
@@ -181,7 +197,9 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
               </Button>
             </Link>
           </div>
-          {activeTab === "status" ? (
+          {integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY && activeTab === "log" ? (
+            <GivingFuelWebhookLogPanel integrationKey={integrationKey} />
+          ) : activeTab === "status" ? (
             <IntegrationStatusPanel
               detail={detail as {
                 connection: Record<string, unknown>;

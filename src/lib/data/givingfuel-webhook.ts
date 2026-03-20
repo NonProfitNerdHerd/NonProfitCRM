@@ -140,25 +140,35 @@ function equalsSecure(left: string, right: string) {
 function normalizeGivingFuelPayload(rawPayload: Record<string, unknown>, rawBody: string) {
   const event = pickObject(rawPayload.event) ?? rawPayload;
   const data = pickObject(event.data) ?? event;
+  const subscription =
+    pickObject(valueByPath(data, "subscription")) ??
+    pickObject(valueByPath(event, "subscription")) ??
+    {};
+  const billing =
+    pickObject(valueByPath(data, "billing")) ??
+    pickObject(valueByPath(event, "billing")) ??
+    {};
   const transaction =
     pickObject(data.transaction) ??
     pickObject(data.donation) ??
     pickObject(rawPayload.transaction) ??
     pickObject(rawPayload.donation) ??
     data;
-  const donor =
+  const donorSource =
     pickObject(transaction?.customer) ??
     pickObject(transaction?.donor) ??
     pickObject(data.customer) ??
     pickObject(data.donor) ??
     pickObject(rawPayload.customer) ??
     pickObject(rawPayload.donor) ??
-    {};
+    data;
 
   const externalTransactionId = readString(transaction ?? {}, [
     "id",
     "transactionId",
     "transaction_id",
+    "transactionReference",
+    "orderNumber",
     "displayId",
     "orderId",
     "externalTransactionId",
@@ -174,12 +184,21 @@ function normalizeGivingFuelPayload(rawPayload: Record<string, unknown>, rawBody
   const eventType =
     readString(event, ["event_type", "eventType", "type", "action", "name"]) || "donation.received";
   const idempotencyKey =
-    readString(event, ["idempotency_key", "idempotencyKey", "delivery_id"]) ||
+    readString(event, [
+      "idempotency_key",
+      "idempotencyKey",
+      "delivery_id",
+      "deliveryId",
+      "eventId"
+    ]) ||
     providerEventId ||
     externalTransactionId ||
     sha256Hex(rawBody);
 
-  const recurringMetadata = pickObject(valueByPath(transaction ?? {}, "recurring")) ?? {};
+  const recurringMetadata =
+    pickObject(valueByPath(transaction ?? {}, "recurring")) ??
+    pickObject(valueByPath(transaction ?? {}, "subscription")) ??
+    subscription;
   const tributeMetadata = pickObject(valueByPath(transaction ?? {}, "tribute")) ?? {};
 
   return {
@@ -187,36 +206,72 @@ function normalizeGivingFuelPayload(rawPayload: Record<string, unknown>, rawBody
     eventType,
     idempotencyKey,
     externalTransactionId: externalTransactionId || null,
-    externalPageId:
-      readString(transaction ?? {}, ["formId", "pageId", "page_id", "externalPageId"]) || null,
+    externalPageId: readString(event, ["formId", "form_id"]) || readString(transaction ?? {}, ["formId", "pageId", "page_id", "externalPageId"]) || null,
     externalPageKey:
       readString(transaction ?? {}, ["formAccRef", "pageKey", "page_key", "campaignCode"]) || null,
-    externalPageName:
-      readString(transaction ?? {}, ["formName", "pageName", "page_name", "Page Name"]) || null,
+    externalPageName: readString(event, ["formName", "form_name"]) || readString(transaction ?? {}, ["formName", "pageName", "page_name", "Page Name"]) || null,
     externalCampaignReference:
-      readString(transaction ?? {}, ["campaignCode", "designation", "fund", "formAccRef"]) || null,
+      readString(transaction ?? {}, ["campaignCode", "designation", "fund", "formAccRef", "subscription.category"]) || null,
     donor: {
       externalDonorReference:
-        readString(donor, ["id", "customerId", "customer_id", "donorId", "donor_id"]) || null,
-      firstName: readString(donor, ["firstName", "first_name", "billing.firstName"]) || null,
-      lastName: readString(donor, ["lastName", "last_name", "billing.lastName"]) || null,
+        readString(event, ["customerId", "customer_id"]) ||
+        readString(donorSource, ["id", "customerId", "customer_id", "donorId", "donor_id"]) ||
+        null,
+      firstName:
+        readString(donorSource, [
+          "firstName",
+          "first_name",
+          "name.first",
+          "billing.name.first"
+        ]) ||
+        readString(billing, ["name.first"]) ||
+        null,
+      lastName:
+        readString(donorSource, [
+          "lastName",
+          "last_name",
+          "name.last",
+          "billing.name.last"
+        ]) ||
+        readString(billing, ["name.last"]) ||
+        null,
       organizationName:
-        readString(donor, ["organizationName", "organization_name", "company"]) || null,
-      email: readString(donor, ["email", "primaryEmail", "primary_email"]) || null,
+        readString(donorSource, ["organizationName", "organization_name", "company"]) || null,
+      email:
+        readString(donorSource, ["email", "primaryEmail", "primary_email", "billing.email"]) ||
+        readString(billing, ["email"]) ||
+        readString(subscription, ["email"]) ||
+        null,
       phone:
-        readString(donor, ["phone", "mobile", "mobilePhone", "mobile_phone", "billing.phone"]) ||
+        readString(donorSource, ["phone", "mobile", "mobilePhone", "mobile_phone", "billing.phone"]) ||
+        readString(billing, ["phone"]) ||
         null,
       postalCode:
-        readString(donor, ["postalCode", "postal_code", "zip", "zipCode", "billing.address.postalCode"]) ||
+        readString(donorSource, [
+          "postalCode",
+          "postal_code",
+          "zip",
+          "zipCode",
+          "billing.address.postalCode"
+        ]) ||
+        readString(billing, ["address.postalCode"]) ||
         null,
       addressLine1:
-        readString(donor, ["address1", "address_line_1", "billing.address.street1"]) || null,
-      city: readString(donor, ["city", "billing.address.city"]) || null,
-      state: readString(donor, ["state", "billing.address.state"]) || null
+        readString(donorSource, ["address1", "address_line_1", "billing.address.street1"]) ||
+        readString(billing, ["address.street1"]) ||
+        null,
+      city:
+        readString(donorSource, ["city", "billing.address.city"]) ||
+        readString(billing, ["address.city"]) ||
+        null,
+      state:
+        readString(donorSource, ["state", "billing.address.state"]) ||
+        readString(billing, ["address.state"]) ||
+        null
     },
     transaction: {
-      amount: readNumber(transaction ?? {}, ["amount", "total", "value"]),
-      grossAmount: readNumber(transaction ?? {}, ["grossAmount", "gross_amount"]),
+      amount: readNumber(transaction ?? {}, ["amount", "total", "value", "deductibleTotal", "subscription.amount"]),
+      grossAmount: readNumber(transaction ?? {}, ["grossAmount", "gross_amount", "total"]),
       netAmount: readNumber(transaction ?? {}, ["netAmount", "net_amount"]),
       fees: readNumber(transaction ?? {}, ["fees", "feeAmount", "fee_amount"]),
       donationDate:
@@ -226,21 +281,26 @@ function normalizeGivingFuelPayload(rawPayload: Record<string, unknown>, rawBody
             "date",
             "donationDate",
             "donation_date",
-            "created_at"
+            "created_at",
+            "subscription.dateLast",
+            "subscription.dateCreated"
           ])
         ) ?? null,
       paymentStatus:
-        readString(transaction ?? {}, ["paymentStatus", "payment_status", "status"]) || null,
+        readString(transaction ?? {}, ["paymentStatus", "payment_status", "status", "orderStatus"]) || null,
       paymentMethod:
-        readString(transaction ?? {}, ["paymentMethod", "payment_method", "method", "paymentType"]) ||
+        readString(transaction ?? {}, ["paymentMethod", "payment_method", "method", "paymentType", "billing.paymentMethod"]) ||
+        readString(billing, ["paymentMethod"]) ||
         null,
       isRecurring:
+        eventType.toLowerCase().includes("subscription") ||
         parseBoolean(valueByPath(transaction ?? {}, "isRecurring")) ||
         parseBoolean(valueByPath(transaction ?? {}, "is_recurring")) ||
-        parseBoolean(valueByPath(transaction ?? {}, "recurring.enabled")),
+        parseBoolean(valueByPath(transaction ?? {}, "recurring.enabled")) ||
+        parseBoolean(valueByPath(subscription, "status")),
       recurringMetadata,
       tributeMetadata,
-      status: readString(transaction ?? {}, ["status", "transactionStatus"]) || null
+      status: readString(transaction ?? {}, ["status", "transactionStatus", "orderStatus", "subscription.status"]) || null
     },
     rawPayload
   } satisfies GivingFuelNormalizedPayload;
