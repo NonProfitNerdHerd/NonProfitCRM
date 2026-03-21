@@ -837,13 +837,24 @@ export async function processContactsImportChunk(input: {
     transform: ResolvedImportCenterMappingTransform;
     sourceHeader: string;
     rowIndex: number;
+    diagnostics?: {
+      log: (message: string) => void;
+      setStage: (stage: string) => void;
+    };
   }) {
+    input.diagnostics?.setStage("tag_lookup");
     const lookupValue = input.transform.relatedRecord.normalizeTrim
       ? input.value.trim()
       : input.value;
+    input.diagnostics?.log(
+      `tag_lookup_start source=${input.sourceHeader} raw_value=${input.value} normalized=${lookupValue}`
+    );
     if (!lookupValue) return null;
     const cacheKey = relationCacheKey(lookupValue, input.transform);
     if (tagLookupCache.has(cacheKey)) {
+      input.diagnostics?.log(
+        `tag_lookup_cache_hit value=${lookupValue} tag_id=${toText(tagLookupCache.get(cacheKey)) || "null"}`
+      );
       return tagLookupCache.get(cacheKey) ?? null;
     }
 
@@ -860,6 +871,7 @@ export async function processContactsImportChunk(input: {
     if (existing?.id) {
       const id = String(existing.id);
       tagLookupCache.set(cacheKey, id);
+      input.diagnostics?.log(`tag_lookup_existing value=${lookupValue} tag_id=${id}`);
       return id;
     }
 
@@ -870,6 +882,7 @@ export async function processContactsImportChunk(input: {
 
     if (onMissing === "skip_value") {
       tagLookupCache.set(cacheKey, null);
+      input.diagnostics?.log(`tag_lookup_missing_skip value=${lookupValue}`);
       return null;
     }
     if (onMissing === "fail_row") {
@@ -899,6 +912,7 @@ export async function processContactsImportChunk(input: {
       createdTagTracker.add(createdId);
       newTagsCreated += 1;
     }
+    input.diagnostics?.log(`tag_created value=${lookupValue} tag_id=${createdId}`);
     return createdId;
   }
 
@@ -909,13 +923,19 @@ export async function processContactsImportChunk(input: {
       rawValue: unknown;
       transform: ResolvedImportCenterMappingTransform;
     }>,
-    rowIndex: number
+    rowIndex: number,
+    diagnostics?: {
+      log: (message: string) => void;
+      setStage: (stage: string) => void;
+    }
   ) {
+    diagnostics?.setStage("apply_tags");
     if (tagMappings.length === 0) return;
     let replaceExisting = false;
     const tagIds = new Set<string>();
 
     for (const mappedTag of tagMappings) {
+      diagnostics?.log(`groups_raw source=${mappedTag.sourceHeader} value=${toText(mappedTag.rawValue)}`);
       const transform = resolveMappingTransform({
         mapping: {
           sourceHeader: mappedTag.sourceHeader,
@@ -934,12 +954,14 @@ export async function processContactsImportChunk(input: {
         transform,
         fallbackDelimiter: tagDelimiter
       });
+      diagnostics?.log(`groups_split source=${mappedTag.sourceHeader} values=${JSON.stringify(values)}`);
       for (const value of values) {
         const tagId = await resolveTagIdByValue({
           value,
           transform,
           sourceHeader: mappedTag.sourceHeader,
-          rowIndex
+          rowIndex,
+          diagnostics
         });
         if (tagId) {
           tagIds.add(tagId);
@@ -948,15 +970,18 @@ export async function processContactsImportChunk(input: {
     }
 
     if (replaceExisting) {
+      diagnostics?.setStage("replace_contact_tags");
       const { error: deleteError } = await supabase
         .from("contact_tags")
         .delete()
         .eq("organization_id", context.organizationId)
         .eq("contact_id", contactId);
       if (deleteError) throw deleteError;
+      diagnostics?.log(`contact_tags_replaced contact_id=${contactId}`);
     }
 
     if (tagIds.size === 0) return;
+    diagnostics?.setStage("link_contact_tags");
     const tagRows = Array.from(tagIds).map((tagId) => ({
       organization_id: context.organizationId,
       contact_id: contactId,
@@ -969,12 +994,24 @@ export async function processContactsImportChunk(input: {
       ignoreDuplicates: true
     });
     if (tagAssignError) throw tagAssignError;
+    diagnostics?.log(`contact_tag_link_success contact_id=${contactId} linked_tags=${tagIds.size}`);
   }
 
   for (const [index, row] of input.rows.entries()) {
     const rowIndex = input.rowOffset + index + 1;
+    let stage = "row_start";
+    const rowTrace: string[] = [];
+    const logRow = (message: string) => {
+      rowTrace.push(`${new Date().toISOString()} ${message}`);
+    };
+    logRow(`row_start row=${rowIndex}`);
     try {
+      stage = "map_row_to_targets";
       const mapped = mapRowToTargets(row, mappings);
+      logRow(
+        `map_targets standard_keys=${Object.keys(mapped.standard).length} custom_keys=${Object.keys(mapped.custom).length} tags_mapped=${mapped.tags.length}`
+      );
+      stage = "resolve_contact_identity";
       const identity = resolveContactIdentityFields({
         classification,
         standard: mapped.standard
@@ -1021,8 +1058,12 @@ export async function processContactsImportChunk(input: {
         created_by: context.userId,
         updated_by: context.userId
       };
+      logRow(
+        `contact_payload_built email=${toText(incomingPayload.email)} first_name=${toText(incomingPayload.first_name)} last_name=${toText(incomingPayload.last_name)}`
+      );
 
       let matchedContactId: string | null = null;
+      stage = "rerun_matching";
       if (rerun.enabled) {
         const sourceColumn = toText(rerun.sourceMatchColumn);
         const destinationField = toText(rerun.destinationMatchField);
@@ -1073,6 +1114,7 @@ export async function processContactsImportChunk(input: {
       }
 
       if (matchedContactId) {
+        stage = "contact_update_existing";
         if (rerun.onMatchBehavior === "skip_existing") {
           skippedRows += 1;
           skippedExistingCount += 1;
@@ -1107,7 +1149,13 @@ export async function processContactsImportChunk(input: {
           mappedCustom: mapped.custom,
           mode: rerun.onMatchBehavior === "update_blank_only" ? "update_blank_only" : "overwrite_existing"
         });
-        await applyMappedTags(matchedContactId, mapped.tags, rowIndex);
+        await applyMappedTags(matchedContactId, mapped.tags, rowIndex, {
+          log: logRow,
+          setStage: (value) => {
+            stage = value;
+          }
+        });
+        logRow(`contact_upsert_success mode=update contact_id=${matchedContactId}`);
 
         if (rerun.onMatchBehavior === "overwrite_existing") overwrittenRecordCount += 1;
         if (rerun.onMatchBehavior === "update_blank_only") blankOnlyUpdateCount += 1;
@@ -1127,6 +1175,7 @@ export async function processContactsImportChunk(input: {
         continue;
       }
 
+      stage = "duplicate_resolution";
       const duplicate = await resolveContactDuplicate({
         organizationId: context.organizationId,
         row,
@@ -1150,6 +1199,7 @@ export async function processContactsImportChunk(input: {
 
       let contactId = duplicate.existingId;
       if (contactId && duplicate.byExternalId) {
+        stage = "contact_update_by_external_source_id";
         const { data: existing, error: existingError } = await supabase
           .from("contacts")
           .select("*")
@@ -1176,12 +1226,19 @@ export async function processContactsImportChunk(input: {
           mappedCustom: mapped.custom,
           mode: "overwrite_existing"
         });
-        await applyMappedTags(contactId, mapped.tags, rowIndex);
+        await applyMappedTags(contactId, mapped.tags, rowIndex, {
+          log: logRow,
+          setStage: (value) => {
+            stage = value;
+          }
+        });
+        logRow(`contact_upsert_success mode=external_id_update contact_id=${contactId}`);
         overwrittenRecordCount += 1;
         matchedRecordCount += 1;
         successfulRows += 1;
         continue;
       } else {
+        stage = "contact_insert";
         const { data: created, error: insertError } = await supabase
           .from("contacts")
           .insert(incomingPayload)
@@ -1189,6 +1246,7 @@ export async function processContactsImportChunk(input: {
           .single();
         if (insertError) throw insertError;
         contactId = String(created.id);
+        logRow(`contact_insert_success contact_id=${contactId}`);
       }
 
       await applyMappedCustomValues({
@@ -1196,20 +1254,49 @@ export async function processContactsImportChunk(input: {
         mappedCustom: mapped.custom,
         mode: "overwrite_existing"
       });
-      await applyMappedTags(contactId, mapped.tags, rowIndex);
+      await applyMappedTags(contactId, mapped.tags, rowIndex, {
+        log: logRow,
+        setStage: (value) => {
+          stage = value;
+        }
+      });
+      logRow(`contact_upsert_success mode=create contact_id=${contactId}`);
       newRecordCount += 1;
       successfulRows += 1;
     } catch (error) {
       failedRows += 1;
+      const finalMessage = formatImportErrorMessage(
+        error,
+        "Unexpected error while importing contact row."
+      );
+      const stackSnippet =
+        error instanceof Error && error.stack
+          ? error.stack
+              .split("\n")
+              .slice(0, 6)
+              .map((entry) => entry.trim())
+              .join(" <- ")
+          : "";
+      const traceText = rowTrace.join(" || ");
+      const enrichedMessage = [
+        `stage=${stage}`,
+        finalMessage,
+        stackSnippet ? `stack=${stackSnippet}` : "",
+        traceText ? `trace=${traceText}` : ""
+      ]
+        .filter(Boolean)
+        .join(" | ");
       await appendImportCenterRowError({
         organizationId: context.organizationId,
         jobId: input.jobId,
         rowIndex,
-        errorMessage: formatImportErrorMessage(
-          error,
-          "Unexpected error while importing contact row."
-        ),
-        rawRow: row
+        errorMessage: enrichedMessage,
+        rawRow: {
+          ...row,
+          __processor_stage: stage,
+          __processor_trace: rowTrace,
+          __processor_error: finalMessage
+        }
       });
     }
   }

@@ -476,16 +476,20 @@ export async function buildFailureReportCsv(jobId: string) {
   const typedRows = rows as Array<Record<string, unknown>>;
   const rawRows = typedRows.map((row) => (row.raw_row ?? {}) as Record<string, unknown>);
   const rawHeaders = Array.from(new Set(rawRows.flatMap((raw) => Object.keys(raw ?? {}))));
+  const sourceHeaders = rawHeaders.filter((header) => !header.startsWith("__processor_"));
   const headers = [
     "row_number",
     "error_message",
     "diagnostic_category",
     "likely_cause",
     "suggested_fix",
+    "processor_stage",
+    "processor_error",
+    "processor_trace",
     "job_status",
     "job_last_error",
     "raw_row_json",
-    ...rawHeaders
+    ...sourceHeaders
   ];
   const lines = [headers.map((header) => escapeCsv(header)).join(",")];
   for (const row of typedRows) {
@@ -497,10 +501,13 @@ export async function buildFailureReportCsv(jobId: string) {
       escapeCsv(diagnostics.category),
       escapeCsv(diagnostics.likelyCause),
       escapeCsv(diagnostics.suggestedFix),
+      escapeCsv(toText(raw.__processor_stage) || "-"),
+      escapeCsv(toText(raw.__processor_error) || "-"),
+      escapeCsv(JSON.stringify(raw.__processor_trace ?? [])),
       escapeCsv(toText(job?.status) || "-"),
       escapeCsv(toText(job?.last_error_message) || toText(job?.processor_error) || "-"),
       escapeCsv(JSON.stringify(raw)),
-      ...rawHeaders.map((header) => escapeCsv(raw[header]))
+      ...sourceHeaders.map((header) => escapeCsv(raw[header]))
     ];
     lines.push(values.join(","));
   }

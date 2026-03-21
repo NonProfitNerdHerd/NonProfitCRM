@@ -732,13 +732,22 @@ async function processContactsImport(input: {
   for (let index = 0; index < input.rows.length; index += 1) {
     const row = input.rows[index];
     const rowIndex = rowOffset + index + 1;
+    let stage = "row_start";
+    const rowTrace: string[] = [];
+    const logRow = (message: string) => {
+      rowTrace.push(`${new Date().toISOString()} ${message}`);
+    };
+    logRow(`row_start row=${rowIndex}`);
     try {
+      stage = "map_row_to_targets";
       const mapped = mapContactRowToTargets(row, mappings);
+      logRow(`map_targets standard_keys=${Object.keys(mapped.standard).length} custom_keys=${Object.keys(mapped.custom).length} tags_mapped=${Array.isArray(mapped.tags) ? mapped.tags.length : 0}`);
       const mappedOrgName = toText(mapped.standard.organization_name);
       let firstName = "";
       let lastName = "";
       let organizationName: string | null = null;
 
+      stage = "resolve_contact_identity";
       if (contactType === "organization") {
         if (!mappedOrgName) {
           skippedRows += 1;
@@ -803,6 +812,7 @@ async function processContactsImport(input: {
         created_by: userId,
         updated_by: userId
       };
+      logRow(`contact_payload_built email=${toText(incomingPayload.email)} first_name=${toText(incomingPayload.first_name)} last_name=${toText(incomingPayload.last_name)}`);
 
       const relationCacheKey = (value: string, transform: ReturnType<typeof resolveMappingTransform>) => {
         const normalized = transform.relatedRecord.normalizeTrim ? value.trim() : value;
@@ -818,12 +828,15 @@ async function processContactsImport(input: {
         sourceHeader: string;
         rowIndex: number;
       }) => {
+        stage = "tag_lookup";
         const lookupValue = params.transform.relatedRecord.normalizeTrim
           ? params.value.trim()
           : params.value;
+        logRow(`tag_lookup_start source=${params.sourceHeader} raw_value=${params.value} normalized=${lookupValue}`);
         if (!lookupValue) return null;
         const cacheKey = relationCacheKey(lookupValue, params.transform);
         if (tagLookupCache.has(cacheKey)) {
+          logRow(`tag_lookup_cache_hit value=${lookupValue} tag_id=${toText(tagLookupCache.get(cacheKey)) || "null"}`);
           return tagLookupCache.get(cacheKey) ?? null;
         }
 
@@ -842,6 +855,7 @@ async function processContactsImport(input: {
         if (existing?.id) {
           const id = toText(existing.id);
           tagLookupCache.set(cacheKey, id);
+          logRow(`tag_lookup_existing value=${lookupValue} tag_id=${id}`);
           return id;
         }
 
@@ -851,6 +865,7 @@ async function processContactsImport(input: {
         }
         if (onMissing === "skip_value") {
           tagLookupCache.set(cacheKey, null);
+          logRow(`tag_lookup_missing_skip value=${lookupValue}`);
           return null;
         }
         if (onMissing === "fail_row") {
@@ -880,15 +895,18 @@ async function processContactsImport(input: {
           createdTagTracker.add(createdId);
           newTagsCreated += 1;
         }
+        logRow(`tag_created value=${lookupValue} tag_id=${createdId}`);
         return createdId;
       };
 
       const applyMappedTags = async (contactId: string) => {
+        stage = "apply_tags";
         if (!Array.isArray(mapped.tags) || mapped.tags.length === 0) return;
         let replaceExisting = false;
         const tagIds = new Set<string>();
 
         for (const mappedTag of mapped.tags) {
+          logRow(`groups_raw source=${mappedTag.sourceHeader} value=${toText(mappedTag.rawValue)}`);
           const transform = resolveMappingTransform(
             {
               targetType: "tags",
@@ -906,6 +924,7 @@ async function processContactsImport(input: {
             transform,
             fallbackDelimiter: tagDelimiter
           });
+          logRow(`groups_split source=${mappedTag.sourceHeader} values=${JSON.stringify(values)}`);
           for (const value of values) {
             const tagId = await resolveTagIdByValue({
               value,
@@ -920,15 +939,18 @@ async function processContactsImport(input: {
         }
 
         if (replaceExisting) {
+          stage = "replace_contact_tags";
           const { error: deleteError } = await input.supabase
             .from("contact_tags")
             .delete()
             .eq("organization_id", organizationId)
             .eq("contact_id", contactId);
           if (deleteError) throw deleteError;
+          logRow(`contact_tags_replaced contact_id=${contactId}`);
         }
 
         if (tagIds.size === 0) return;
+        stage = "link_contact_tags";
         const tagRows = Array.from(tagIds).map((tagId) => ({
           organization_id: organizationId,
           contact_id: contactId,
@@ -941,9 +963,11 @@ async function processContactsImport(input: {
           ignoreDuplicates: true
         });
         if (error) throw error;
+        logRow(`contact_tag_link_success contact_id=${contactId} linked_tags=${tagIds.size}`);
       };
 
       let matchedContactId: string | null = null;
+      stage = "rerun_matching";
       if (rerun.enabled) {
         const sourceColumn = toText(rerun.sourceMatchColumn);
         const destinationField = toText(rerun.destinationMatchField);
@@ -991,6 +1015,7 @@ async function processContactsImport(input: {
       }
 
       if (matchedContactId) {
+        stage = "contact_update_existing";
         if (rerun.onMatchBehavior === "skip_existing") {
           skippedRows += 1;
           skippedExistingCount += 1;
@@ -1027,6 +1052,7 @@ async function processContactsImport(input: {
           mode: rerun.onMatchBehavior === "update_blank_only" ? "update_blank_only" : "overwrite_existing"
         });
         await applyMappedTags(matchedContactId);
+        logRow(`contact_upsert_success mode=update contact_id=${matchedContactId}`);
         if (rerun.onMatchBehavior === "overwrite_existing") overwrittenRecordCount += 1;
         if (rerun.onMatchBehavior === "update_blank_only") blankOnlyUpdateCount += 1;
         successfulRows += 1;
@@ -1046,6 +1072,7 @@ async function processContactsImport(input: {
         continue;
       }
 
+      stage = "duplicate_resolution";
       const duplicate = await resolveContactDuplicate({
         supabase: input.supabase,
         organizationId,
@@ -1071,6 +1098,7 @@ async function processContactsImport(input: {
 
       let contactId = duplicate.existingId;
       if (contactId && duplicate.byExternalId) {
+        stage = "contact_update_by_external_source_id";
         const { data: existing, error: existingError } = await input.supabase
           .from("contacts")
           .select("*")
@@ -1102,12 +1130,14 @@ async function processContactsImport(input: {
           mode: "overwrite_existing"
         });
         await applyMappedTags(contactId);
+        logRow(`contact_upsert_success mode=external_id_update contact_id=${contactId}`);
         overwrittenRecordCount += 1;
         matchedRecordCount += 1;
         successfulRows += 1;
         continue;
       }
 
+      stage = "contact_insert";
       const { data: created, error: insertError } = await input.supabase
         .from("contacts")
         .insert(incomingPayload)
@@ -1115,6 +1145,7 @@ async function processContactsImport(input: {
         .single();
       if (insertError) throw insertError;
       contactId = toText(created.id);
+      logRow(`contact_insert_success contact_id=${contactId}`);
       await applyMappedCustomValues({
         supabase: input.supabase,
         organizationId,
@@ -1125,20 +1156,51 @@ async function processContactsImport(input: {
         mode: "overwrite_existing"
       });
       await applyMappedTags(contactId);
+      logRow(`contact_upsert_success mode=create contact_id=${contactId}`);
       newRecordCount += 1;
       successfulRows += 1;
     } catch (error) {
       failedRows += 1;
+      const finalMessage = formatImportErrorMessage(
+        error,
+        "Unexpected error while importing contact row."
+      );
+      const stackSnippet =
+        error instanceof Error && error.stack
+          ? error.stack
+              .split("\n")
+              .slice(0, 6)
+              .map((entry) => entry.trim())
+              .join(" <- ")
+          : "";
+      const traceText = rowTrace.join(" || ");
+      const enrichedMessage = [
+        `stage=${stage}`,
+        finalMessage,
+        stackSnippet ? `stack=${stackSnippet}` : "",
+        traceText ? `trace=${traceText}` : ""
+      ]
+        .filter(Boolean)
+        .join(" | ");
+      console.error("import_center_contact_row_failed", {
+        jobId: toText(input.job.id),
+        rowIndex,
+        stage,
+        message: finalMessage,
+        trace: rowTrace
+      });
       await appendImportCenterRowError({
         supabase: input.supabase,
         organizationId,
         jobId: toText(input.job.id),
         rowIndex,
-        errorMessage: formatImportErrorMessage(
-          error,
-          "Unexpected error while importing contact row."
-        ),
-        rawRow: row
+        errorMessage: enrichedMessage,
+        rawRow: {
+          ...row,
+          __processor_stage: stage,
+          __processor_trace: rowTrace,
+          __processor_error: finalMessage
+        }
       });
     }
 
