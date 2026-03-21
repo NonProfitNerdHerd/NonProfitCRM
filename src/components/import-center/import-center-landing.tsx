@@ -271,7 +271,17 @@ export function ImportCenterLanding({
 
       {activeTab === "importHistory" ? (
         <Card>
-          <CardHeader title="Import History" subtitle="Recent Import Center jobs and outcomes." />
+          <CardHeader
+            title="Import History"
+            subtitle="Recent Import Center jobs and outcomes. Use Import Jobs for persistent monitoring and controls."
+          />
+          <div className="mb-3">
+            <Link href="/staff/import-center/jobs">
+              <Button type="button" variant="secondary">
+                Open Import Jobs Dashboard
+              </Button>
+            </Link>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>

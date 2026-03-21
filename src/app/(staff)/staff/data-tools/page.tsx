@@ -23,6 +23,12 @@ export default async function DataToolsPage() {
           <p className="text-sm font-semibold text-slate-900">Import Center</p>
           <p className="text-xs text-slate-600">Run contacts and transactions import workflows.</p>
         </Link>
+        <Link href="/staff/import-center/jobs" className={LINK_CARD_CLASSES}>
+          <p className="text-sm font-semibold text-slate-900">Import Jobs</p>
+          <p className="text-xs text-slate-600">
+            Monitor running imports, review failures, stop jobs, and retry failed rows.
+          </p>
+        </Link>
         <Link href="/staff/data-tools/bulk-tag-contacts" className={LINK_CARD_CLASSES}>
           <p className="text-sm font-semibold text-slate-900">Bulk Tag Contacts</p>
           <p className="text-xs text-slate-600">Preview and execute bulk tag assignment/removal jobs.</p>

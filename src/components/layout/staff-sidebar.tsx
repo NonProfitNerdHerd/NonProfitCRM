@@ -144,6 +144,7 @@ export function StaffSidebar({
             children: [
               { href: "/staff/data-tools", label: "Overview" },
               { href: "/staff/import-center", label: "Import Center" },
+              { href: "/staff/import-center/jobs", label: "Import Jobs" },
               { href: "/staff/import-center/contacts", label: "Contacts Import" },
               { href: "/staff/import-center/transactions", label: "Transactions Import" },
               ...(canAccessGivingFuelModule
