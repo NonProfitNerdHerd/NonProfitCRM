@@ -64,6 +64,13 @@ function sanitizeBaseUrl(value: string) {
   return value.replace(/\/+$/, "");
 }
 
+function appendBypassToken(url: string, bypassToken: string | null) {
+  if (!bypassToken) return url;
+  const parsed = new URL(url);
+  parsed.searchParams.set("x-vercel-protection-bypass", bypassToken);
+  return parsed.toString();
+}
+
 async function markJobFailed(
   supabase: ReturnType<typeof createClient>,
   jobId: string,
@@ -102,6 +109,7 @@ Deno.serve(async (request) => {
     requestPayload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const jobId = toText(requestPayload.jobId);
     const callbackBaseUrl = sanitizeBaseUrl(toText(requestPayload.callbackBaseUrl));
+    const callbackBypassToken = toText(requestPayload.callbackBypassToken) || null;
     if (!jobId) return json({ message: "jobId is required." }, 400);
     if (!callbackBaseUrl) return json({ message: "callbackBaseUrl is required." }, 400);
 
@@ -184,10 +192,13 @@ Deno.serve(async (request) => {
       "content-type": "application/json",
       "x-import-center-runner-secret": callbackSecret
     };
+    if (callbackBypassToken) {
+      runnerHeaders["x-vercel-protection-bypass"] = callbackBypassToken;
+    }
 
     for (let rowOffset = 0; rowOffset < rows.length; rowOffset += chunkSize) {
       const chunk = rows.slice(rowOffset, rowOffset + chunkSize);
-      const chunkResponse = await fetch(`${callbackBaseUrl}${route}`, {
+      const chunkResponse = await fetch(appendBypassToken(`${callbackBaseUrl}${route}`, callbackBypassToken), {
         method: "POST",
         headers: runnerHeaders,
         body: JSON.stringify({
@@ -203,6 +214,11 @@ Deno.serve(async (request) => {
       });
       if (!chunkResponse.ok) {
         const details = await chunkResponse.text().catch(() => "");
+        if (details.toLowerCase().includes("authentication required")) {
+          throw new Error(
+            "Chunk processing was blocked by Vercel Authentication. Set IMPORT_CENTER_CALLBACK_BYPASS_TOKEN (or VERCEL_AUTOMATION_BYPASS_SECRET) in the app environment."
+          );
+        }
         throw new Error(
           `Chunk processing failed at row ${rowOffset + 1}. ${details.slice(0, 500)}`
         );
@@ -217,7 +233,9 @@ Deno.serve(async (request) => {
         .eq("id", job.id);
     }
 
-    const completeResponse = await fetch(`${callbackBaseUrl}${route}`, {
+    const completeResponse = await fetch(
+      appendBypassToken(`${callbackBaseUrl}${route}`, callbackBypassToken),
+      {
       method: "POST",
       headers: runnerHeaders,
       body: JSON.stringify({
@@ -228,9 +246,15 @@ Deno.serve(async (request) => {
           userId: job.uploaded_by
         }
       })
-    });
+    }
+    );
     if (!completeResponse.ok) {
       const details = await completeResponse.text().catch(() => "");
+      if (details.toLowerCase().includes("authentication required")) {
+        throw new Error(
+          "Import finalization was blocked by Vercel Authentication. Set IMPORT_CENTER_CALLBACK_BYPASS_TOKEN (or VERCEL_AUTOMATION_BYPASS_SECRET) in the app environment."
+        );
+      }
       throw new Error(`Unable to finalize import job. ${details.slice(0, 500)}`);
     }
 
