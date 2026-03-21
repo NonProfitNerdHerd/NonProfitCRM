@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { resolveImportCenterSupabaseClient } from "@/lib/import-center/execution-context";
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -31,7 +31,7 @@ export async function ensureContactTags(input: {
   cache?: Map<string, string>;
   createdTracker?: Set<string>;
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   const normalizedNames = Array.from(new Set(input.tagNames.map((name) => toText(name)).filter(Boolean)));
   if (normalizedNames.length === 0) {
     return { tagIds: [] as string[], createdCount: 0 };

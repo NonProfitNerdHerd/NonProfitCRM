@@ -1,5 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
-import { logAuditEvent } from "@/lib/data/audit";
+import { resolveImportCenterSupabaseClient } from "@/lib/import-center/execution-context";
 
 export async function appendImportCenterRowError(input: {
   organizationId: string;
@@ -8,7 +7,7 @@ export async function appendImportCenterRowError(input: {
   errorMessage: string;
   rawRow: Record<string, unknown>;
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   const { error } = await supabase.from("import_center_job_errors").insert({
     organization_id: input.organizationId,
     import_center_job_id: input.jobId,
@@ -33,12 +32,14 @@ export async function logImportCenterAudit(input: {
   targetEntityId: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  await logAuditEvent({
-    organizationId: input.organizationId,
-    actorUserId: input.userId,
-    actionType: input.actionType,
-    targetEntityType: input.targetEntityType,
-    targetEntityId: input.targetEntityId,
+  const supabase = await resolveImportCenterSupabaseClient();
+  const { error } = await supabase.from("audit_log").insert({
+    organization_id: input.organizationId,
+    actor_user_id: input.userId,
+    action_type: input.actionType,
+    target_entity_type: input.targetEntityType,
+    target_entity_id: input.targetEntityId,
     metadata: input.metadata ?? {}
   });
+  if (error) throw error;
 }

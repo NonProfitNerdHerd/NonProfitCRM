@@ -1,6 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
-import { requireImportCenterAccess } from "@/lib/auth/guards";
 import { sanitizeInternalKey } from "@/lib/import-center/field-mapping-engine";
+import { resolveImportCenterExecution } from "@/lib/import-center/execution-context";
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -9,8 +8,7 @@ function toText(value: unknown) {
 type CustomFieldDataType = "text" | "number" | "date" | "boolean" | "json";
 
 export async function listContactCustomFields() {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
 
   const { data, error } = await supabase
     .from("contact_custom_fields")
@@ -28,8 +26,7 @@ export async function createContactCustomField(input: {
   internalKey?: string;
   dataType?: CustomFieldDataType;
 }) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
 
   const dataType = input.dataType ?? "text";
   const label = toText(input.label) || "New Field";

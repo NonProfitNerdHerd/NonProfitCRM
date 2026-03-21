@@ -1,5 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
-import { requireImportCenterAccess } from "@/lib/auth/guards";
+import {
+  resolveImportCenterExecution,
+  resolveImportCenterSupabaseClient
+} from "@/lib/import-center/execution-context";
 import {
   mapRowToTargets,
   mappingSummary,
@@ -160,7 +162,7 @@ async function findContactMatchesByField(input: {
   keyValue: string;
   customFieldIdCache?: Map<string, string | null>;
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   const destinationField = toText(input.destinationField);
   const keyValue = normalizeMatchValue(destinationField, input.keyValue);
   if (!destinationField || !keyValue) return [];
@@ -264,7 +266,7 @@ async function buildRerunMatchPrefetch(input: {
     prefetch.set(normalizedKey, current);
   };
 
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   if (destinationField.startsWith("custom:")) {
     const internalKey = destinationField.replace("custom:", "");
     const { data: field, error: fieldError } = await supabase
@@ -345,7 +347,7 @@ async function getExistingCustomFieldValueMap(input: {
   contactId: string;
   customFieldIds: string[];
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   if (input.customFieldIds.length === 0) return new Map<string, string>();
   const { data, error } = await supabase
     .from("contact_custom_field_values")
@@ -367,7 +369,7 @@ async function resolveContactDuplicate(input: {
   standard: Record<string, unknown>;
   mappings: ImportCenterMapping[];
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   const externalId = toText(input.standard.external_source_id).toLowerCase();
   if (externalId) {
     const { data: externalExactMatch } = await supabase
@@ -493,8 +495,7 @@ async function ensureCustomFieldIdMap(mappings: ImportCenterMapping[]) {
 }
 
 export async function listImportCenterJobs(limit = 25) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
   const safeLimit = Math.min(Math.max(limit, 1), 200);
 
   const { data, error } = await supabase
@@ -505,6 +506,18 @@ export async function listImportCenterJobs(limit = 25) {
     .limit(safeLimit);
   if (error) throw error;
   return data ?? [];
+}
+
+export async function getImportCenterJob(jobId: string) {
+  const { context, supabase } = await resolveImportCenterExecution();
+  const { data, error } = await supabase
+    .from("import_center_jobs")
+    .select("*")
+    .eq("organization_id", context.organizationId)
+    .eq("id", jobId)
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 export async function getImportCenterMetadata() {
@@ -559,8 +572,7 @@ export async function getImportCenterMetadataByType(importType: ImportCenterType
 }
 
 async function listActiveCampaignOptions() {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
   const { data, error } = await supabase
     .from("campaigns")
     .select("id,name,status")
@@ -620,8 +632,7 @@ export async function startContactsImportJob(input: {
   duplicateHandling?: "skip" | "flag";
   rerunMatching?: ReimportMatchSettings;
 }) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
   const tagDelimiter = toText(input.tagDelimiter) || ";";
   const rerun = normalizeRerunMatchSettings(input.rerunMatching);
 
@@ -643,7 +654,7 @@ export async function startContactsImportJob(input: {
       template_used: input.templateId ?? null,
       uploaded_by: context.userId,
       started_at: new Date().toISOString(),
-      status: "running",
+      status: "queued",
       total_rows: input.totalRows,
       mapping_configuration_snapshot: {
         mappings: input.mappings,
@@ -671,7 +682,11 @@ export async function startContactsImportJob(input: {
     .single();
   if (error) throw error;
 
-  return { jobId: String(job.id) };
+  return {
+    jobId: String(job.id),
+    organizationId: context.organizationId,
+    userId: context.userId
+  };
 }
 
 export async function processContactsImportChunk(input: {
@@ -684,13 +699,12 @@ export async function processContactsImportChunk(input: {
   duplicateHandling?: "skip" | "flag";
   rerunMatching?: ReimportMatchSettings;
 }) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
 
   const { data: job, error: jobError } = await supabase
     .from("import_center_jobs")
     .select(
-      "id,status,successful_rows,failed_rows,skipped_rows,new_tags_created,total_rows,mapping_configuration_snapshot,classification_snapshot,tag_configuration,duplicate_handling,rerun_matching_enabled,source_match_column,destination_match_field,on_match_behavior,on_no_match_behavior,blank_overwrite_protection_enabled,missing_key_behavior,matched_record_count,overwritten_record_count,blank_only_update_count,new_record_count,skipped_existing_count,missing_key_skip_count,ambiguous_match_count"
+      "id,status,total_rows,successful_rows,failed_rows,skipped_rows,processed_rows,new_tags_created,mapping_configuration_snapshot,classification_snapshot,tag_configuration,duplicate_handling,rerun_matching_enabled,source_match_column,destination_match_field,on_match_behavior,on_no_match_behavior,blank_overwrite_protection_enabled,missing_key_behavior,matched_record_count,overwritten_record_count,blank_only_update_count,new_record_count,skipped_existing_count,missing_key_skip_count,ambiguous_match_count"
     )
     .eq("organization_id", context.organizationId)
     .eq("id", input.jobId)
@@ -1085,11 +1099,16 @@ export async function processContactsImportChunk(input: {
     missingKeySkipCount: Number(job.missing_key_skip_count ?? 0) + missingKeySkipCount,
     ambiguousMatchCount: Number(job.ambiguous_match_count ?? 0) + ambiguousMatchCount
   };
+  const processedRows = Math.min(
+    Number(job.total_rows ?? 0),
+    cumulative.successfulRows + cumulative.failedRows + cumulative.skippedRows
+  );
 
   const { error: updateError } = await supabase
     .from("import_center_jobs")
     .update({
-      status: "running",
+      status: "processing",
+      processed_rows: processedRows,
       successful_rows: cumulative.successfulRows,
       failed_rows: cumulative.failedRows,
       skipped_rows: cumulative.skippedRows,
@@ -1127,8 +1146,7 @@ export async function processContactsImportChunk(input: {
 }
 
 export async function completeContactsImportJob(input: { jobId: string }) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
 
   const { data: job, error: jobError } = await supabase
     .from("import_center_jobs")
@@ -1148,6 +1166,8 @@ export async function completeContactsImportJob(input: { jobId: string }) {
     .from("import_center_jobs")
     .update({
       status,
+      processed_rows:
+        Number(job.successful_rows ?? 0) + Number(job.failed_rows ?? 0) + Number(job.skipped_rows ?? 0),
       completed_at: new Date().toISOString(),
       error_log_location: failedRows + skippedRows > 0 ? `import_center_job_errors:${input.jobId}` : null
     })
@@ -1207,8 +1227,7 @@ export async function completeContactsImportJob(input: { jobId: string }) {
 }
 
 export async function listImportCenterJobErrors(jobId: string) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
 
   const { data, error } = await supabase
     .from("import_center_job_errors")

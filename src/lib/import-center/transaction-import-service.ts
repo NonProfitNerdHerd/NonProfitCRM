@@ -1,5 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
-import { requireImportCenterAccess } from "@/lib/auth/guards";
+import {
+  resolveImportCenterExecution,
+  resolveImportCenterSupabaseClient
+} from "@/lib/import-center/execution-context";
 import { mappingSummary, sanitizeInternalKey } from "@/lib/import-center/field-mapping-engine";
 import { appendImportCenterRowError, logImportCenterAudit } from "@/lib/import-center/logging-service";
 import { createContactCustomField, listContactCustomFields } from "@/lib/import-center/custom-fields-service";
@@ -241,7 +243,7 @@ async function findContactMatches(input: {
   matchField: TransactionImportConfig["contactMatchField"];
   value: string;
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   const matchField = toText(input.matchField);
 
   if (matchField.startsWith("custom:")) {
@@ -316,7 +318,7 @@ async function createContactForTransaction(input: {
   config: TransactionImportConfig;
   mappedContact: Record<string, unknown>;
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   const inferredEmail =
     input.matchField === "email" || input.matchField === "alternate_email"
       ? toText(input.matchValue).toLowerCase()
@@ -388,7 +390,7 @@ async function applyMappedCustomValues(input: {
   mappedCustom: Record<string, unknown>;
   customFieldIdMap: Map<string, string>;
 }) {
-  const supabase = await createClient();
+  const supabase = await resolveImportCenterSupabaseClient();
   for (const [internalKey, rawValue] of Object.entries(input.mappedCustom)) {
     const fieldId = input.customFieldIdMap.get(internalKey);
     if (!fieldId) continue;
@@ -416,8 +418,7 @@ export async function startTransactionsImportJob(input: {
   templateId?: string | null;
   config: TransactionImportConfig;
 }) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
   const config = normalizeTransactionConfig(input.config);
 
   const { data: job, error } = await supabase
@@ -429,7 +430,7 @@ export async function startTransactionsImportJob(input: {
       template_used: input.templateId ?? null,
       uploaded_by: context.userId,
       started_at: new Date().toISOString(),
-      status: "running",
+      status: "queued",
       total_rows: input.totalRows,
       mapping_configuration_snapshot: {
         mappings: input.mappings,
@@ -452,7 +453,11 @@ export async function startTransactionsImportJob(input: {
     .single();
   if (error) throw error;
 
-  return { jobId: String(job.id) };
+  return {
+    jobId: String(job.id),
+    organizationId: context.organizationId,
+    userId: context.userId
+  };
 }
 
 export async function processTransactionsImportChunk(input: {
@@ -462,13 +467,12 @@ export async function processTransactionsImportChunk(input: {
   mappings?: ImportCenterMapping[];
   config?: TransactionImportConfig;
 }) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
 
   const { data: job, error: jobError } = await supabase
     .from("import_center_jobs")
     .select(
-      "id,status,successful_rows,failed_rows,skipped_rows,total_rows,mapping_configuration_snapshot,classification_snapshot,matched_contact_count,created_contact_count,created_transaction_count,no_contact_match_skip_count,campaign_mapped_count,campaign_unmapped_skip_count,ambiguous_contact_match_count"
+      "id,status,total_rows,successful_rows,failed_rows,skipped_rows,processed_rows,mapping_configuration_snapshot,classification_snapshot,matched_contact_count,created_contact_count,created_transaction_count,no_contact_match_skip_count,campaign_mapped_count,campaign_unmapped_skip_count,ambiguous_contact_match_count"
     )
     .eq("organization_id", context.organizationId)
     .eq("id", input.jobId)
@@ -826,11 +830,16 @@ export async function processTransactionsImportChunk(input: {
     ambiguousContactMatchCount:
       Number(job.ambiguous_contact_match_count ?? 0) + ambiguousContactMatchCount
   };
+  const processedRows = Math.min(
+    Number(job.total_rows ?? 0),
+    cumulative.successfulRows + cumulative.failedRows + cumulative.skippedRows
+  );
 
   const { error: updateError } = await supabase
     .from("import_center_jobs")
     .update({
-      status: "running",
+      status: "processing",
+      processed_rows: processedRows,
       successful_rows: cumulative.successfulRows,
       failed_rows: cumulative.failedRows,
       skipped_rows: cumulative.skippedRows,
@@ -866,8 +875,7 @@ export async function processTransactionsImportChunk(input: {
 }
 
 export async function completeTransactionsImportJob(input: { jobId: string }) {
-  const context = await requireImportCenterAccess();
-  const supabase = await createClient();
+  const { context, supabase } = await resolveImportCenterExecution();
 
   const { data: job, error: jobError } = await supabase
     .from("import_center_jobs")
@@ -887,6 +895,8 @@ export async function completeTransactionsImportJob(input: { jobId: string }) {
     .from("import_center_jobs")
     .update({
       status,
+      processed_rows:
+        Number(job.successful_rows ?? 0) + Number(job.failed_rows ?? 0) + Number(job.skipped_rows ?? 0),
       completed_at: new Date().toISOString(),
       error_log_location: failedRows + skippedRows > 0 ? `import_center_job_errors:${input.jobId}` : null
     })
