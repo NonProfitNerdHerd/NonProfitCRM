@@ -372,7 +372,16 @@ export function ImportJobsDashboard({
           {jobs.map((job) => {
             const jobId = toText(job.id);
             const status = toText(job.status);
+            const failedRowsCount = toNumber(job.failed_rows, 0);
             const isStopAllowed = status === "queued" || status === "processing";
+            const showFailureReport =
+              !isStopAllowed &&
+              (failedRowsCount > 0 ||
+                status === "failed" ||
+                status === "completed_with_errors" ||
+                status === "stalled" ||
+                status === "cancelled");
+            const baseUrl = `/api/import-center/jobs/${encodeURIComponent(jobId)}`;
             return (
               <div key={jobId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -449,14 +458,23 @@ export function ImportJobsDashboard({
                   </div>
 
                   <div className="flex justify-end lg:pl-4">
-                    <Button
-                      type="button"
-                      variant="danger"
-                      disabled={!isStopAllowed || busyAction !== null}
-                      onClick={() => stopJob(jobId)}
-                    >
-                      Stop Job
-                    </Button>
+                    {isStopAllowed ? (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        disabled={busyAction !== null}
+                        onClick={() => stopJob(jobId)}
+                      >
+                        Stop Job
+                      </Button>
+                    ) : (
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {showFailureReport ? (
+                          <DownloadButton href={`${baseUrl}/errors`} label="Download Failure Report" />
+                        ) : null}
+                        <DownloadButton href={`${baseUrl}/report`} label="Download Job Summary" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

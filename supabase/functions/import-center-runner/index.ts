@@ -72,8 +72,22 @@ function appendLog(current: unknown, message: string, maxChars = 16000) {
 }
 
 function getBatchSize() {
-  const configured = toNumber(Deno.env.get("IMPORT_CENTER_BATCH_SIZE"), 50);
+  const configured = toNumber(Deno.env.get("IMPORT_CENTER_BATCH_SIZE"), 100);
   return Math.min(Math.max(configured, 10), 250);
+}
+
+function getScheduleTimeoutMs() {
+  const configured = toNumber(Deno.env.get("IMPORT_CENTER_SCHEDULE_TIMEOUT_MS"), 10000);
+  return Math.min(Math.max(configured, 1500), 60000);
+}
+
+function getScheduleRetries() {
+  const configured = toNumber(Deno.env.get("IMPORT_CENTER_SCHEDULE_RETRIES"), 3);
+  return Math.min(Math.max(configured, 1), 6);
+}
+
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizePhone(value: unknown) {
@@ -2135,26 +2149,48 @@ Deno.serve(async (request) => {
       const supabaseUrl = ensureEnv("SUPABASE_URL");
       const serviceRoleKey = ensureEnv("SUPABASE_SERVICE_ROLE_KEY");
       const runnerSecret = toText(Deno.env.get("IMPORT_CENTER_RUNNER_SECRET"));
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 1500);
-      try {
-        await fetch(`${supabaseUrl}/functions/v1/import-center-runner`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${serviceRoleKey}`,
-            apikey: serviceRoleKey,
-            ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
-          },
-          body: JSON.stringify({ jobId: toText(job.id) }),
-          signal: controller.signal
-        });
-      } catch (scheduleError) {
-        if (!(scheduleError instanceof Error && scheduleError.name === "AbortError")) {
-          throw scheduleError;
+      const scheduleTimeoutMs = getScheduleTimeoutMs();
+      const scheduleRetries = getScheduleRetries();
+      const scheduleErrors: string[] = [];
+      let scheduled = false;
+
+      for (let attempt = 1; attempt <= scheduleRetries; attempt += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), scheduleTimeoutMs);
+        try {
+          const response = await fetch(`${supabaseUrl}/functions/v1/import-center-runner`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${serviceRoleKey}`,
+              apikey: serviceRoleKey,
+              ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
+            },
+            body: JSON.stringify({ jobId: toText(job.id) }),
+            signal: controller.signal
+          });
+          if (!response.ok) {
+            const bodyText = (await response.text().catch(() => "")).slice(0, 280);
+            throw new Error(
+              `Scheduler response ${response.status} ${response.statusText}${bodyText ? ` | ${bodyText}` : ""}`
+            );
+          }
+          scheduled = true;
+          break;
+        } catch (scheduleError) {
+          scheduleErrors.push(`attempt ${attempt}: ${formatImportErrorMessage(scheduleError, "schedule failed")}`);
+          if (attempt < scheduleRetries) {
+            await sleep(400 * 2 ** (attempt - 1));
+          }
+        } finally {
+          clearTimeout(timer);
         }
-      } finally {
-        clearTimeout(timer);
+      }
+
+      if (!scheduled) {
+        throw new Error(
+          `Unable to schedule next import batch after ${scheduleRetries} attempts. ${scheduleErrors.join(" || ")}`
+        );
       }
     } else {
       await supabase.from("audit_log").insert({
