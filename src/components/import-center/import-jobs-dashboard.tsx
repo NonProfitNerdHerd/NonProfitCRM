@@ -366,89 +366,98 @@ export function ImportJobsDashboard({
       <Card>
         <CardHeader
           title="Job Queue and History"
-          subtitle="Each row includes status, progress, actions, and downloadable reports."
+          subtitle="Each job is shown as a clean row with status and progress. Open Job ID for full detail/actions."
         />
         <div className="space-y-3">
           {jobs.map((job) => {
             const jobId = toText(job.id);
             const status = toText(job.status);
-            const failedRowsCount = toNumber(job.failed_rows, 0);
             const isStopAllowed = status === "queued" || status === "processing";
-            const isRetryAllowed =
-              (status === "failed" ||
-                status === "completed_with_errors" ||
-                status === "stalled" ||
-                status === "cancelled") &&
-              failedRowsCount > 0;
-            const baseUrl = `/api/import-center/jobs/${encodeURIComponent(jobId)}`;
             return (
               <div key={jobId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="grid gap-3 lg:grid-cols-4 xl:grid-cols-6">
-                  <div className="rounded-md border border-slate-200 bg-brand-50 p-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-700">Job ID</p>
-                    <button
-                      type="button"
-                      onClick={() => openDetail(jobId)}
-                      className="text-left text-sm font-semibold text-brand-700 underline"
-                    >
-                      {jobId || "-"}
-                    </button>
-                  </div>
-                  <InfoField label="Import Type" value={toText(job.import_type) || "-"} />
-                  <InfoField label="Source File" value={toText(job.file_name) || "-"} />
-                  <InfoField label="Submitted By" value={toText(job.submitted_by_name) || "-"} />
-                  <InfoField label="Created" value={formatDate(job.created_at)} />
-                  <InfoField label="Started" value={formatDate(job.processing_started_at || job.started_at)} />
-                  <InfoField label="Completed" value={formatDate(job.completed_at)} />
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</p>
-                    <span
-                      className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
-                        STATUS_BADGE[status] ?? "bg-slate-100 text-slate-700"
-                      }`}
-                    >
-                      {prettyStatus(status)}
-                    </span>
-                  </div>
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Progress</p>
-                    <ProgressCell job={job} />
-                  </div>
-                  <InfoField
-                    label="Rows"
-                    value={`total ${toNumber(job.total_rows, 0)} | processed ${toNumber(
-                      job.processed_rows,
-                      0
-                    )} | ok ${toNumber(job.successful_rows, 0)} | failed ${toNumber(job.failed_rows, 0)}`}
-                  />
-                  <InfoField label="Last Activity" value={formatDate(job.last_activity_at)} />
-                  <InfoField
-                    label="Last Error"
-                    value={toText(job.last_error_message) || "-"}
-                    valueClassName="text-xs text-red-700"
-                  />
-                </div>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-800">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Job ID</span>
+                      <button
+                        type="button"
+                        onClick={() => openDetail(jobId)}
+                        className="text-left font-semibold text-brand-700 underline"
+                      >
+                        {jobId || "-"}
+                      </button>
+                      <span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Import Type</span>{" "}
+                        <span className="ml-1">{toText(job.import_type) || "-"}</span>
+                      </span>
+                      <span className="min-w-0 truncate">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Source File</span>{" "}
+                        <span className="ml-1">{toText(job.file_name) || "-"}</span>
+                      </span>
+                      <span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Submitted By</span>{" "}
+                        <span className="ml-1">{toText(job.submitted_by_name) || "-"}</span>
+                      </span>
+                    </div>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="danger"
-                    disabled={!isStopAllowed || busyAction !== null}
-                    onClick={() => stopJob(jobId)}
-                  >
-                    Stop Job
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={!isRetryAllowed || busyAction !== null}
-                    onClick={() => retryFailedRows(jobId)}
-                  >
-                    Retry Failed Rows
-                  </Button>
-                  <DownloadButton href={`${baseUrl}/errors`} label="Download Failure Report" />
-                  <DownloadButton href={`${baseUrl}/corrected-template`} label="Download Corrected Template" />
-                  <DownloadButton href={`${baseUrl}/report`} label="Download Job Summary" />
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-700">
+                      <span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Created</span>{" "}
+                        <span className="ml-1">{formatDate(job.created_at)}</span>
+                      </span>
+                      <span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Started</span>{" "}
+                        <span className="ml-1">{formatDate(job.processing_started_at || job.started_at)}</span>
+                      </span>
+                      <span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Completed</span>{" "}
+                        <span className="ml-1">{formatDate(job.completed_at)}</span>
+                      </span>
+                      <span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last Activity</span>{" "}
+                        <span className="ml-1">{formatDate(job.last_activity_at)}</span>
+                      </span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                            STATUS_BADGE[status] ?? "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {prettyStatus(status)}
+                        </span>
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-start gap-x-6 gap-y-2 text-sm text-slate-700">
+                      <div className="min-w-[220px]">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Progress</p>
+                        <ProgressCell job={job} />
+                      </div>
+                      <p>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Rows</span>{" "}
+                        <span className="ml-1">
+                          total {toNumber(job.total_rows, 0)} | processed {toNumber(job.processed_rows, 0)} | ok{" "}
+                          {toNumber(job.successful_rows, 0)} | failed {toNumber(job.failed_rows, 0)}
+                        </span>
+                      </p>
+                      <p className="min-w-[260px] flex-1">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last Error</span>{" "}
+                        <span className="ml-1 text-xs text-red-700">{toText(job.last_error_message) || "-"}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end lg:pl-4">
+                    <Button
+                      type="button"
+                      variant="danger"
+                      disabled={!isStopAllowed || busyAction !== null}
+                      onClick={() => stopJob(jobId)}
+                    >
+                      Stop Job
+                    </Button>
+                  </div>
                 </div>
               </div>
             );
