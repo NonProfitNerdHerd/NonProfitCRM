@@ -23,14 +23,19 @@ function isJwtLikeToken(value: unknown) {
   return parts.length === 3 && parts.every((part) => part.length > 0);
 }
 
-function resolveFunctionGatewayAuthKey() {
+function resolveFunctionGatewayApiKey() {
   const serviceRoleKey = toText(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
   const anonKey = toText(Deno.env.get("SUPABASE_ANON_KEY"));
+  return serviceRoleKey || anonKey;
+}
 
+function resolveFunctionGatewayBearerToken() {
+  const serviceRoleKey = toText(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
+  const anonKey = toText(Deno.env.get("SUPABASE_ANON_KEY"));
   // Function gateway Authorization expects a JWT token format.
   if (isJwtLikeToken(serviceRoleKey)) return serviceRoleKey;
   if (isJwtLikeToken(anonKey)) return anonKey;
-  return serviceRoleKey || anonKey;
+  return "";
 }
 
 function slugifyTag(input: unknown) {
@@ -2164,8 +2169,9 @@ Deno.serve(async (request) => {
 
     if (status === "processing") {
       const supabaseUrl = ensureEnv("SUPABASE_URL");
-      const functionGatewayAuthKey = resolveFunctionGatewayAuthKey();
-      if (!functionGatewayAuthKey) {
+      const functionGatewayApiKey = resolveFunctionGatewayApiKey();
+      const functionGatewayBearerToken = resolveFunctionGatewayBearerToken();
+      if (!functionGatewayApiKey) {
         throw new Error("Missing Supabase function gateway auth key for import runner scheduling.");
       }
       const runnerSecret = toText(Deno.env.get("IMPORT_CENTER_RUNNER_SECRET"));
@@ -2178,14 +2184,17 @@ Deno.serve(async (request) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), scheduleTimeoutMs);
         try {
+          const headers: Record<string, string> = {
+            "content-type": "application/json",
+            apikey: functionGatewayApiKey,
+            ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
+          };
+          if (functionGatewayBearerToken) {
+            headers.authorization = `Bearer ${functionGatewayBearerToken}`;
+          }
           const response = await fetch(`${supabaseUrl}/functions/v1/import-center-runner`, {
             method: "POST",
-            headers: {
-              "content-type": "application/json",
-              authorization: `Bearer ${functionGatewayAuthKey}`,
-              apikey: functionGatewayAuthKey,
-              ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
-            },
+            headers,
             body: JSON.stringify({ jobId: toText(job.id) }),
             signal: controller.signal
           });
