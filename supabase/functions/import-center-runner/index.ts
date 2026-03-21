@@ -11,6 +11,23 @@ function toLower(value: unknown) {
   return toText(value).toLowerCase();
 }
 
+function toNumber(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function appendLog(current: unknown, message: string, maxChars = 16000) {
+  const existing = toText(current);
+  const next = [existing, `${new Date().toISOString()} ${message}`].filter(Boolean).join("\n");
+  if (next.length <= maxChars) return next;
+  return next.slice(next.length - maxChars);
+}
+
+function getBatchSize() {
+  const configured = toNumber(Deno.env.get("IMPORT_CENTER_BATCH_SIZE"), 50);
+  return Math.min(Math.max(configured, 10), 250);
+}
+
 function normalizePhone(value: unknown) {
   return toText(value).replace(/\D+/g, "");
 }
@@ -88,11 +105,14 @@ async function heartbeat(input: {
   jobId: string;
   processedRows: number;
 }) {
+  const nowIso = new Date().toISOString();
   await input.supabase
     .from("import_center_jobs")
     .update({
       processed_rows: input.processedRows,
-      processing_heartbeat_at: new Date().toISOString()
+      last_processed_row: input.processedRows,
+      processing_heartbeat_at: nowIso,
+      last_activity_at: nowIso
     })
     .eq("id", input.jobId);
 }
@@ -102,14 +122,19 @@ async function markJobFailed(
   jobId: string,
   errorMessage: string
 ) {
+  const nowIso = new Date().toISOString();
   await supabase
     .from("import_center_jobs")
     .update({
       status: "failed",
       processor_error: errorMessage.slice(0, 4000),
-      processing_heartbeat_at: new Date().toISOString(),
-      runner_completed_at: new Date().toISOString(),
-      completed_at: new Date().toISOString()
+      last_error_message: errorMessage.slice(0, 4000),
+      processing_heartbeat_at: nowIso,
+      last_activity_at: nowIso,
+      runner_completed_at: nowIso,
+      completed_at: nowIso,
+      runner_lock_token: null,
+      runner_lock_expires_at: null
     })
     .eq("id", jobId);
 }
@@ -515,6 +540,7 @@ async function processContactsImport(input: {
   supabase: ReturnType<typeof createClient>;
   job: Record<string, unknown>;
   rows: Array<Record<string, unknown>>;
+  rowOffset?: number;
 }) {
   const organizationId = toText(input.job.organization_id);
   const userId = toText(input.job.uploaded_by) || null;
@@ -566,9 +592,10 @@ async function processContactsImport(input: {
   const createdTagTracker = new Set<string>();
   const rerunCustomFieldCache = new Map<string, string | null>();
 
+  const rowOffset = toNumber(input.rowOffset, 0);
   for (let index = 0; index < input.rows.length; index += 1) {
     const row = input.rows[index];
-    const rowIndex = index + 1;
+    const rowIndex = rowOffset + index + 1;
     try {
       const mapped = mapContactRowToTargets(row, mappings);
       const mappedOrgName = toText(mapped.standard.organization_name);
@@ -868,7 +895,7 @@ async function processContactsImport(input: {
       await heartbeat({
         supabase: input.supabase,
         jobId: toText(input.job.id),
-        processedRows: index + 1
+        processedRows: rowOffset + index + 1
       });
     }
   }
@@ -1102,6 +1129,7 @@ async function processTransactionsImport(input: {
   supabase: ReturnType<typeof createClient>;
   job: Record<string, unknown>;
   rows: Array<Record<string, unknown>>;
+  rowOffset?: number;
 }) {
   const organizationId = toText(input.job.organization_id);
   const userId = toText(input.job.uploaded_by) || null;
@@ -1210,9 +1238,10 @@ async function processTransactionsImport(input: {
   let campaignUnmappedSkipCount = 0;
   let ambiguousContactMatchCount = 0;
 
+  const rowOffset = toNumber(input.rowOffset, 0);
   for (let index = 0; index < input.rows.length; index += 1) {
     const row = input.rows[index];
-    const rowIndex = index + 1;
+    const rowIndex = rowOffset + index + 1;
     try {
       const sourceMatchColumn = toText(config.contactMatchSourceColumn);
       const matchValue = toText(row[sourceMatchColumn]);
@@ -1455,7 +1484,7 @@ async function processTransactionsImport(input: {
       await heartbeat({
         supabase: input.supabase,
         jobId: toText(input.job.id),
-        processedRows: index + 1
+        processedRows: rowOffset + index + 1
       });
     }
   }
@@ -1494,16 +1523,17 @@ Deno.serve(async (request) => {
     const jobId = toText(requestPayload.jobId);
     if (!jobId) return json({ message: "jobId is required." }, 400);
 
+    const nowIso = new Date().toISOString();
+    const lockToken = crypto.randomUUID();
     const claim = await supabase
       .from("import_center_jobs")
       .update({
         status: "processing",
-        processor_error: null,
-        processing_started_at: new Date().toISOString(),
-        processing_heartbeat_at: new Date().toISOString(),
-        runner_invoked_at: new Date().toISOString(),
-        runner_completed_at: null,
-        completed_at: null
+        processing_heartbeat_at: nowIso,
+        last_activity_at: nowIso,
+        runner_invoked_at: nowIso,
+        runner_lock_token: lockToken,
+        runner_lock_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
       })
       .eq("id", jobId)
       .eq("status", "queued")
@@ -1513,7 +1543,11 @@ Deno.serve(async (request) => {
 
     const job = (claim.data ?? null) as Record<string, unknown> | null;
     if (!job) {
-      const existing = await supabase.from("import_center_jobs").select("id,status").eq("id", jobId).maybeSingle();
+      const existing = await supabase
+        .from("import_center_jobs")
+        .select("id,status")
+        .eq("id", jobId)
+        .maybeSingle();
       if (existing.error) throw new Error(existing.error.message);
       return json({
         ok: true,
@@ -1540,96 +1574,268 @@ Deno.serve(async (request) => {
         ? parseWorkbookRows(await fileRes.data.arrayBuffer(), toText(job.source_sheet_name) || null)
         : parseCsvRows(await fileRes.data.text());
 
-    await supabase
-      .from("import_center_job_errors")
-      .delete()
-      .eq("organization_id", organizationId)
-      .eq("import_center_job_id", toText(job.id));
+    let processedRows = Math.max(
+      0,
+      toNumber(
+        job.processed_rows,
+        toNumber(job.successful_rows, 0) + toNumber(job.failed_rows, 0) + toNumber(job.skipped_rows, 0)
+      )
+    );
+    let successfulRows = toNumber(job.successful_rows, 0);
+    let failedRows = toNumber(job.failed_rows, 0);
+    let skippedRows = toNumber(job.skipped_rows, 0);
+    let newTagsCreated = toNumber(job.new_tags_created, 0);
+    let matchedRecordCount = toNumber(job.matched_record_count, 0);
+    let overwrittenRecordCount = toNumber(job.overwritten_record_count, 0);
+    let blankOnlyUpdateCount = toNumber(job.blank_only_update_count, 0);
+    let newRecordCount = toNumber(job.new_record_count, 0);
+    let skippedExistingCount = toNumber(job.skipped_existing_count, 0);
+    let missingKeySkipCount = toNumber(job.missing_key_skip_count, 0);
+    let ambiguousMatchCount = toNumber(job.ambiguous_match_count, 0);
+    let matchedContactCount = toNumber(job.matched_contact_count, 0);
+    let createdContactCount = toNumber(job.created_contact_count, 0);
+    let createdTransactionCount = toNumber(job.created_transaction_count, 0);
+    let noContactMatchSkipCount = toNumber(job.no_contact_match_skip_count, 0);
+    let campaignMappedCount = toNumber(job.campaign_mapped_count, 0);
+    let campaignUnmappedSkipCount = toNumber(job.campaign_unmapped_skip_count, 0);
+    let ambiguousContactMatchCount = toNumber(job.ambiguous_contact_match_count, 0);
+    let processorLog = toText(job.processor_log);
 
-    await supabase
+    if (processedRows === 0) {
+      await supabase
+        .from("import_center_job_errors")
+        .delete()
+        .eq("organization_id", organizationId)
+        .eq("import_center_job_id", toText(job.id));
+
+      const resetNow = new Date().toISOString();
+      processorLog = appendLog(processorLog, "Starting async import job processing.");
+      await supabase
+        .from("import_center_jobs")
+        .update({
+          total_rows: rows.length,
+          processed_rows: 0,
+          last_processed_row: 0,
+          successful_rows: 0,
+          failed_rows: 0,
+          skipped_rows: 0,
+          new_tags_created: 0,
+          matched_record_count: 0,
+          overwritten_record_count: 0,
+          blank_only_update_count: 0,
+          new_record_count: 0,
+          skipped_existing_count: 0,
+          missing_key_skip_count: 0,
+          ambiguous_match_count: 0,
+          matched_contact_count: 0,
+          created_contact_count: 0,
+          created_transaction_count: 0,
+          no_contact_match_skip_count: 0,
+          campaign_mapped_count: 0,
+          campaign_unmapped_skip_count: 0,
+          ambiguous_contact_match_count: 0,
+          processing_started_at: resetNow,
+          processing_heartbeat_at: resetNow,
+          last_activity_at: resetNow,
+          completed_at: null,
+          runner_completed_at: null,
+          processor_error: null,
+          last_error_message: null,
+          processor_log: processorLog
+        })
+        .eq("id", toText(job.id));
+      successfulRows = 0;
+      failedRows = 0;
+      skippedRows = 0;
+      newTagsCreated = 0;
+      matchedRecordCount = 0;
+      overwrittenRecordCount = 0;
+      blankOnlyUpdateCount = 0;
+      newRecordCount = 0;
+      skippedExistingCount = 0;
+      missingKeySkipCount = 0;
+      ambiguousMatchCount = 0;
+      matchedContactCount = 0;
+      createdContactCount = 0;
+      createdTransactionCount = 0;
+      noContactMatchSkipCount = 0;
+      campaignMappedCount = 0;
+      campaignUnmappedSkipCount = 0;
+      ambiguousContactMatchCount = 0;
+    }
+
+    const batchSize = getBatchSize();
+    const startIndex = Math.max(0, Math.min(processedRows, rows.length));
+    const batchRows = rows.slice(startIndex, startIndex + batchSize);
+
+    let chunkResult: Record<string, unknown> = {
+      totalRows: batchRows.length,
+      successfulRows: 0,
+      failedRows: 0,
+      skippedRows: 0
+    };
+    if (batchRows.length > 0) {
+      chunkResult =
+        toText(job.import_type) === "transactions"
+          ? await processTransactionsImport({ supabase, job, rows: batchRows, rowOffset: startIndex })
+          : await processContactsImport({ supabase, job, rows: batchRows, rowOffset: startIndex });
+    }
+
+    const nextProcessedRows = startIndex + batchRows.length;
+    successfulRows += toNumber(chunkResult.successfulRows, 0);
+    failedRows += toNumber(chunkResult.failedRows, 0);
+    skippedRows += toNumber(chunkResult.skippedRows, 0);
+    if (toText(job.import_type) === "transactions") {
+      matchedContactCount += toNumber(chunkResult.matchedContactCount, 0);
+      createdContactCount += toNumber(chunkResult.createdContactCount, 0);
+      createdTransactionCount += toNumber(chunkResult.createdTransactionCount, 0);
+      noContactMatchSkipCount += toNumber(chunkResult.noContactMatchSkipCount, 0);
+      campaignMappedCount += toNumber(chunkResult.campaignMappedCount, 0);
+      campaignUnmappedSkipCount += toNumber(chunkResult.campaignUnmappedSkipCount, 0);
+      ambiguousContactMatchCount += toNumber(chunkResult.ambiguousContactMatchCount, 0);
+    } else {
+      newTagsCreated += toNumber(chunkResult.newTagsCreated, 0);
+      matchedRecordCount += toNumber(chunkResult.matchedRecordCount, 0);
+      overwrittenRecordCount += toNumber(chunkResult.overwrittenRecordCount, 0);
+      blankOnlyUpdateCount += toNumber(chunkResult.blankOnlyUpdateCount, 0);
+      newRecordCount += toNumber(chunkResult.newRecordCount, 0);
+      skippedExistingCount += toNumber(chunkResult.skippedExistingCount, 0);
+      missingKeySkipCount += toNumber(chunkResult.missingKeySkipCount, 0);
+      ambiguousMatchCount += toNumber(chunkResult.ambiguousMatchCount, 0);
+    }
+
+    const stopCheck = await supabase
       .from("import_center_jobs")
-      .update({
-        total_rows: rows.length,
-        processed_rows: 0,
-        successful_rows: 0,
-        failed_rows: 0,
-        skipped_rows: 0,
-        new_tags_created: 0,
-        matched_record_count: 0,
-        overwritten_record_count: 0,
-        blank_only_update_count: 0,
-        new_record_count: 0,
-        skipped_existing_count: 0,
-        missing_key_skip_count: 0,
-        ambiguous_match_count: 0,
-        matched_contact_count: 0,
-        created_contact_count: 0,
-        created_transaction_count: 0,
-        no_contact_match_skip_count: 0,
-        campaign_mapped_count: 0,
-        campaign_unmapped_skip_count: 0,
-        ambiguous_contact_match_count: 0,
-        processing_heartbeat_at: new Date().toISOString()
-      })
-      .eq("id", toText(job.id));
+      .select("stop_requested")
+      .eq("id", jobId)
+      .maybeSingle();
+    if (stopCheck.error) throw new Error(stopCheck.error.message);
+    const stopRequested = Boolean(stopCheck.data?.stop_requested);
 
-    const result =
-      toText(job.import_type) === "transactions"
-        ? await processTransactionsImport({ supabase, job, rows })
-        : await processContactsImport({ supabase, job, rows });
+    const done = nextProcessedRows >= rows.length || batchRows.length === 0;
+    const status = stopRequested
+      ? "cancelled"
+      : done
+        ? failedRows > 0
+          ? "completed_with_errors"
+          : "completed"
+        : "queued";
 
-    const failedRows = Number(result.failedRows ?? 0);
-    const skippedRows = Number(result.skippedRows ?? 0);
-    const status = failedRows > 0 ? "completed_with_errors" : "completed";
+    const updateNow = new Date().toISOString();
+    processorLog = appendLog(
+      processorLog,
+      `Processed batch rows ${startIndex + 1}-${nextProcessedRows} of ${rows.length}.`
+    );
     const updates: Record<string, unknown> = {
       status,
-      processed_rows: Number(result.totalRows ?? rows.length),
-      successful_rows: Number(result.successfulRows ?? 0),
+      total_rows: rows.length,
+      processed_rows: nextProcessedRows,
+      last_processed_row: nextProcessedRows,
+      successful_rows: successfulRows,
       failed_rows: failedRows,
       skipped_rows: skippedRows,
-      error_log_location: failedRows + skippedRows > 0 ? `import_center_job_errors:${toText(job.id)}` : null,
-      processing_heartbeat_at: new Date().toISOString(),
-      runner_completed_at: new Date().toISOString(),
-      completed_at: new Date().toISOString()
+      error_log_location:
+        failedRows + skippedRows > 0 ? `import_center_job_errors:${toText(job.id)}` : null,
+      processing_heartbeat_at: updateNow,
+      last_activity_at: updateNow,
+      new_tags_created: newTagsCreated,
+      matched_record_count: matchedRecordCount,
+      overwritten_record_count: overwrittenRecordCount,
+      blank_only_update_count: blankOnlyUpdateCount,
+      new_record_count: newRecordCount,
+      skipped_existing_count: skippedExistingCount,
+      missing_key_skip_count: missingKeySkipCount,
+      ambiguous_match_count: ambiguousMatchCount,
+      matched_contact_count: matchedContactCount,
+      created_contact_count: createdContactCount,
+      created_transaction_count: createdTransactionCount,
+      no_contact_match_skip_count: noContactMatchSkipCount,
+      campaign_mapped_count: campaignMappedCount,
+      campaign_unmapped_skip_count: campaignUnmappedSkipCount,
+      ambiguous_contact_match_count: ambiguousContactMatchCount,
+      last_error_message:
+        failedRows > 0 ? `${failedRows} row(s) failed. Download failure report for details.` : null,
+      processor_error:
+        failedRows > 0 ? `${failedRows} row(s) failed. Download failure report for details.` : null,
+      runner_lock_token: null,
+      runner_lock_expires_at: null,
+      processor_log: processorLog
     };
-    if (toText(job.import_type) === "transactions") {
-      updates.matched_contact_count = Number(result.matchedContactCount ?? 0);
-      updates.created_contact_count = Number(result.createdContactCount ?? 0);
-      updates.created_transaction_count = Number(result.createdTransactionCount ?? 0);
-      updates.no_contact_match_skip_count = Number(result.noContactMatchSkipCount ?? 0);
-      updates.campaign_mapped_count = Number(result.campaignMappedCount ?? 0);
-      updates.campaign_unmapped_skip_count = Number(result.campaignUnmappedSkipCount ?? 0);
-      updates.ambiguous_contact_match_count = Number(result.ambiguousContactMatchCount ?? 0);
+
+    if (status === "cancelled" || status === "completed" || status === "completed_with_errors") {
+      updates.runner_completed_at = updateNow;
+      updates.completed_at = updateNow;
+      if (status === "cancelled") {
+        updates.stopped_at = updateNow;
+        updates.last_error_message = "Stopped by user request.";
+        updates.processor_error = "Stopped by user request.";
+        processorLog = appendLog(processorLog, "Import stopped by user request.");
+        updates.processor_log = processorLog;
+      }
     } else {
-      updates.new_tags_created = Number(result.newTagsCreated ?? 0);
-      updates.matched_record_count = Number(result.matchedRecordCount ?? 0);
-      updates.overwritten_record_count = Number(result.overwrittenRecordCount ?? 0);
-      updates.blank_only_update_count = Number(result.blankOnlyUpdateCount ?? 0);
-      updates.new_record_count = Number(result.newRecordCount ?? 0);
-      updates.skipped_existing_count = Number(result.skippedExistingCount ?? 0);
-      updates.missing_key_skip_count = Number(result.missingKeySkipCount ?? 0);
-      updates.ambiguous_match_count = Number(result.ambiguousMatchCount ?? 0);
+      updates.runner_completed_at = null;
+      updates.completed_at = null;
     }
-    const { error: updateError } = await supabase.from("import_center_jobs").update(updates).eq("id", toText(job.id));
+
+    const { error: updateError } = await supabase
+      .from("import_center_jobs")
+      .update(updates)
+      .eq("id", toText(job.id));
     if (updateError) throw updateError;
 
-    await supabase.from("audit_log").insert({
-      organization_id: organizationId,
-      actor_user_id: toText(job.uploaded_by) || null,
-      action_type:
-        toText(job.import_type) === "transactions"
-          ? "import_center_transactions_run"
-          : "import_center_contacts_run",
-      target_entity_type: "import_center_jobs",
-      target_entity_id: toText(job.id),
-      metadata: result
-    });
+    if (status === "queued") {
+      const supabaseUrl = ensureEnv("SUPABASE_URL");
+      const serviceRoleKey = ensureEnv("SUPABASE_SERVICE_ROLE_KEY");
+      const runnerSecret = toText(Deno.env.get("IMPORT_CENTER_RUNNER_SECRET"));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+      try {
+        await fetch(`${supabaseUrl}/functions/v1/import-center-runner`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${serviceRoleKey}`,
+            apikey: serviceRoleKey,
+            ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
+          },
+          body: JSON.stringify({ jobId: toText(job.id) }),
+          signal: controller.signal
+        });
+      } catch (scheduleError) {
+        if (!(scheduleError instanceof Error && scheduleError.name === "AbortError")) {
+          throw scheduleError;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } else {
+      await supabase.from("audit_log").insert({
+        organization_id: organizationId,
+        actor_user_id: toText(job.uploaded_by) || null,
+        action_type:
+          toText(job.import_type) === "transactions"
+            ? "import_center_transactions_run"
+            : "import_center_contacts_run",
+        target_entity_type: "import_center_jobs",
+        target_entity_id: toText(job.id),
+        metadata: {
+          status,
+          totalRows: rows.length,
+          processedRows: nextProcessedRows,
+          successfulRows,
+          failedRows,
+          skippedRows
+        }
+      });
+    }
 
     return json({
       ok: true,
       jobId: toText(job.id),
       status,
-      totalRows: Number(result.totalRows ?? rows.length)
+      totalRows: rows.length,
+      processedRows: nextProcessedRows,
+      batchSize
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown import runner failure.";

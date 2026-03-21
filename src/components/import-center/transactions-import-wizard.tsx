@@ -354,11 +354,14 @@ export function TransactionsImportWizard() {
           totalRows: Number.isFinite(totalRows) ? totalRows : 0
         });
 
-        if (["completed", "completed_with_errors", "failed"].includes(status)) {
+        if (["completed", "completed_with_errors", "failed", "cancelled", "stalled"].includes(status)) {
           setActiveJobId(null);
           setLoading(false);
-          if (status === "failed") {
+          if (status === "failed" || status === "stalled") {
             setError(toText(job.processor_error) || "Import failed.");
+          }
+          if (status === "cancelled") {
+            setMessage("Transactions import was stopped. Partial results were preserved.");
           }
           setRunResult({
             jobId: toText(job.id),
@@ -374,7 +377,7 @@ export function TransactionsImportWizard() {
             noContactMatchSkipCount: Number(job.no_contact_match_skip_count ?? 0),
             ambiguousContactMatchCount: Number(job.ambiguous_contact_match_count ?? 0)
           });
-          if (status !== "failed") {
+          if (!["failed", "stalled", "cancelled"].includes(status)) {
             setMessage("Transactions import finished.");
           }
         }

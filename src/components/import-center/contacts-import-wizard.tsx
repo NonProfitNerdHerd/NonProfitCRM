@@ -280,11 +280,14 @@ export function ContactsImportWizard() {
           totalRows: Number.isFinite(totalRows) ? totalRows : 0
         });
 
-        if (["completed", "completed_with_errors", "failed"].includes(status)) {
+        if (["completed", "completed_with_errors", "failed", "cancelled", "stalled"].includes(status)) {
           setActiveJobId(null);
           setLoading(false);
-          if (status === "failed") {
+          if (status === "failed" || status === "stalled") {
             setError(toText(job.processor_error) || "Import failed.");
+          }
+          if (status === "cancelled") {
+            setMessage("Import was stopped. Partial results were preserved.");
           }
           setRunResult({
             jobId: toText(job.id),
@@ -301,7 +304,7 @@ export function ContactsImportWizard() {
             missingKeySkipCount: Number(job.missing_key_skip_count ?? 0),
             ambiguousMatchCount: Number(job.ambiguous_match_count ?? 0)
           });
-          if (status !== "failed") {
+          if (!["failed", "stalled", "cancelled"].includes(status)) {
             setMessage("Import finished.");
           }
         }

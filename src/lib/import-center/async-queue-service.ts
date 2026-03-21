@@ -59,11 +59,20 @@ export async function attachImportFileToJob(input: {
       source_sheet_name: toText(input.sourceSheetName) || null,
       status: "queued",
       processor_error: null,
+      last_error_message: null,
       processing_started_at: null,
       processing_heartbeat_at: null,
+      last_activity_at: null,
       runner_invoked_at: null,
       runner_completed_at: null,
-      completed_at: null
+      completed_at: null,
+      stop_requested: false,
+      stop_requested_at: null,
+      stopped_at: null,
+      last_processed_row: 0,
+      runner_lock_token: null,
+      runner_lock_expires_at: null,
+      processor_log: null
     })
     .eq("id", input.jobId);
   if (error) throw error;

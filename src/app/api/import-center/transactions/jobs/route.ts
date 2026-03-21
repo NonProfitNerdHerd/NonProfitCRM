@@ -111,7 +111,13 @@ export async function POST(request: Request) {
               triggerError instanceof Error
                 ? triggerError.message.slice(0, 4000)
                 : "Unable to trigger Import Center runner.",
-            completed_at: new Date().toISOString()
+            last_error_message:
+              triggerError instanceof Error
+                ? triggerError.message.slice(0, 4000)
+                : "Unable to trigger Import Center runner.",
+            completed_at: new Date().toISOString(),
+            last_activity_at: new Date().toISOString(),
+            runner_completed_at: new Date().toISOString()
           })
           .eq("id", started.jobId);
         throw triggerError;

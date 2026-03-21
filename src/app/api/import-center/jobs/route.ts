@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   completeContactsImportJob,
-  listImportCenterJobs,
   processContactsImportChunk,
   startContactsImportJob
 } from "@/lib/import-center/contact-import-service";
+import { listImportJobs } from "@/lib/import-center/import-jobs-service";
 import {
   attachImportFileToJob,
   triggerImportCenterRunner,
@@ -70,9 +70,18 @@ function resolveRunnerSystemContext(request: Request, payload: Record<string, un
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const limit = Number(url.searchParams.get("limit") ?? "25");
-    const jobs = await listImportCenterJobs(limit);
-    return NextResponse.json({ jobs });
+    const payload = await listImportJobs({
+      limit: Number(url.searchParams.get("limit") ?? "25"),
+      offset: Number(url.searchParams.get("offset") ?? "0"),
+      status: url.searchParams.get("status"),
+      importType: url.searchParams.get("importType"),
+      fromDate: url.searchParams.get("fromDate"),
+      toDate: url.searchParams.get("toDate"),
+      submittedBy: url.searchParams.get("submittedBy"),
+      fileSearch: url.searchParams.get("fileSearch"),
+      stalledThresholdMinutes: Number(url.searchParams.get("stalledThresholdMinutes") ?? "10")
+    });
+    return NextResponse.json(payload);
   } catch (error) {
     return errorResponse(error, "Unable to load import history.");
   }
@@ -138,7 +147,13 @@ export async function POST(request: Request) {
               triggerError instanceof Error
                 ? triggerError.message.slice(0, 4000)
                 : "Unable to trigger Import Center runner.",
-            completed_at: new Date().toISOString()
+            last_error_message:
+              triggerError instanceof Error
+                ? triggerError.message.slice(0, 4000)
+                : "Unable to trigger Import Center runner.",
+            completed_at: new Date().toISOString(),
+            last_activity_at: new Date().toISOString(),
+            runner_completed_at: new Date().toISOString()
           })
           .eq("id", started.jobId);
         throw triggerError;
