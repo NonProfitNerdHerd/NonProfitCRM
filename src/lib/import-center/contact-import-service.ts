@@ -39,6 +39,20 @@ function toText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function slugifyTag(input: unknown) {
+  const slug = String(input ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "tag";
+}
+
+function isTagSlugConflictError(error: unknown) {
+  const value = error as { code?: string; message?: string; details?: string; hint?: string };
+  const message = [value?.message, value?.details, value?.hint].filter(Boolean).join(" ").toLowerCase();
+  return value?.code === "23505" || (value?.code === "P0001" && message.includes("tag slug already exists"));
+}
+
 function importCenterSchemaErrorMessage(error: unknown) {
   const value = error as { message?: string; details?: string; hint?: string; code?: string };
   return [value?.message, value?.details, value?.hint, value?.code]
@@ -826,10 +840,8 @@ export async function processContactsImportChunk(input: {
 
   function relationCacheKey(value: string, transform: ResolvedImportCenterMappingTransform) {
     const normalized = transform.relatedRecord.normalizeTrim ? value.trim() : value;
-    const relationKey = transform.relatedRecord.caseInsensitiveMatch
-      ? normalized.toLowerCase()
-      : normalized;
-    return `${transform.relatedRecord.caseInsensitiveMatch ? "i" : "s"}:${transform.relatedRecord.normalizeTrim ? "t" : "r"}:${relationKey}`;
+    const slug = slugifyTag(normalized);
+    return `slug:${slug}`;
   }
 
   async function resolveTagIdByValue(input: {
@@ -850,6 +862,7 @@ export async function processContactsImportChunk(input: {
       `tag_lookup_start source=${input.sourceHeader} raw_value=${input.value} normalized=${lookupValue}`
     );
     if (!lookupValue) return null;
+    const lookupSlug = slugifyTag(lookupValue);
     const cacheKey = relationCacheKey(lookupValue, input.transform);
     if (tagLookupCache.has(cacheKey)) {
       input.diagnostics?.log(
@@ -860,18 +873,15 @@ export async function processContactsImportChunk(input: {
 
     const lookupBase = supabase
       .from("tags")
-      .select("id,name")
+      .select("id,name,slug")
       .eq("organization_id", context.organizationId)
-      .is("parent_tag_id", null)
       .limit(1);
-    const { data: existing, error: existingError } = input.transform.relatedRecord.caseInsensitiveMatch
-      ? await lookupBase.ilike("name", lookupValue).maybeSingle()
-      : await lookupBase.eq("name", lookupValue).maybeSingle();
+    const { data: existing, error: existingError } = await lookupBase.eq("slug", lookupSlug).maybeSingle();
     if (existingError) throw existingError;
     if (existing?.id) {
       const id = String(existing.id);
       tagLookupCache.set(cacheKey, id);
-      input.diagnostics?.log(`tag_lookup_existing value=${lookupValue} tag_id=${id}`);
+      input.diagnostics?.log(`tag_lookup_reused slug=${lookupSlug} value=${lookupValue} tag_id=${id}`);
       return id;
     }
 
@@ -897,7 +907,7 @@ export async function processContactsImportChunk(input: {
       .insert({
         organization_id: context.organizationId,
         name: createName,
-        slug: createName,
+        slug: lookupSlug,
         module: "contacts",
         is_active: true,
         created_by: context.userId,
@@ -905,14 +915,33 @@ export async function processContactsImportChunk(input: {
       })
       .select("id")
       .single();
-    if (createdError) throw createdError;
+    if (createdError) {
+      if (isTagSlugConflictError(createdError)) {
+        const { data: recovered, error: recoveredError } = await supabase
+          .from("tags")
+          .select("id")
+          .eq("organization_id", context.organizationId)
+          .eq("slug", lookupSlug)
+          .maybeSingle();
+        if (recoveredError) throw recoveredError;
+        if (recovered?.id) {
+          const recoveredId = String(recovered.id);
+          tagLookupCache.set(cacheKey, recoveredId);
+          input.diagnostics?.log(
+            `tag_lookup_recovered_after_conflict slug=${lookupSlug} value=${lookupValue} tag_id=${recoveredId}`
+          );
+          return recoveredId;
+        }
+      }
+      throw createdError;
+    }
     const createdId = String(created.id);
     tagLookupCache.set(cacheKey, createdId);
     if (!createdTagTracker.has(createdId)) {
       createdTagTracker.add(createdId);
       newTagsCreated += 1;
     }
-    input.diagnostics?.log(`tag_created value=${lookupValue} tag_id=${createdId}`);
+    input.diagnostics?.log(`tag_created slug=${lookupSlug} value=${lookupValue} tag_id=${createdId}`);
     return createdId;
   }
 

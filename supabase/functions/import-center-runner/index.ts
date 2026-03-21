@@ -16,6 +16,23 @@ function toNumber(value: unknown, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function slugifyTag(input: unknown) {
+  const slug = String(input ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "tag";
+}
+
+function isTagSlugConflictError(error: unknown) {
+  const value = error as { code?: string; message?: string; details?: string; hint?: string };
+  const message = [toText(value?.message), toText(value?.details), toText(value?.hint)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return value?.code === "23505" || (value?.code === "P0001" && message.includes("tag slug already exists"));
+}
+
 function formatImportErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) {
     const message = toText(error.message);
@@ -816,10 +833,7 @@ async function processContactsImport(input: {
 
       const relationCacheKey = (value: string, transform: ReturnType<typeof resolveMappingTransform>) => {
         const normalized = transform.relatedRecord.normalizeTrim ? value.trim() : value;
-        const relationKey = transform.relatedRecord.caseInsensitiveMatch
-          ? normalized.toLowerCase()
-          : normalized;
-        return `${transform.relatedRecord.caseInsensitiveMatch ? "i" : "s"}:${transform.relatedRecord.normalizeTrim ? "t" : "r"}:${relationKey}`;
+        return `slug:${slugifyTag(normalized)}`;
       };
 
       const resolveTagIdByValue = async (params: {
@@ -834,28 +848,26 @@ async function processContactsImport(input: {
           : params.value;
         logRow(`tag_lookup_start source=${params.sourceHeader} raw_value=${params.value} normalized=${lookupValue}`);
         if (!lookupValue) return null;
+        const lookupSlug = slugifyTag(lookupValue);
         const cacheKey = relationCacheKey(lookupValue, params.transform);
         if (tagLookupCache.has(cacheKey)) {
           logRow(`tag_lookup_cache_hit value=${lookupValue} tag_id=${toText(tagLookupCache.get(cacheKey)) || "null"}`);
           return tagLookupCache.get(cacheKey) ?? null;
         }
 
-        let lookupQuery = input.supabase
+        const lookupQuery = input.supabase
           .from("tags")
-          .select("id,name")
+          .select("id,name,slug")
           .eq("organization_id", organizationId)
-          .is("parent_tag_id", null)
+          .eq("slug", lookupSlug)
           .limit(1)
           .maybeSingle();
-        lookupQuery = params.transform.relatedRecord.caseInsensitiveMatch
-          ? lookupQuery.ilike("name", lookupValue)
-          : lookupQuery.eq("name", lookupValue);
         const { data: existing, error: existingError } = await lookupQuery;
         if (existingError) throw existingError;
         if (existing?.id) {
           const id = toText(existing.id);
           tagLookupCache.set(cacheKey, id);
-          logRow(`tag_lookup_existing value=${lookupValue} tag_id=${id}`);
+          logRow(`tag_lookup_reused slug=${lookupSlug} value=${lookupValue} tag_id=${id}`);
           return id;
         }
 
@@ -880,7 +892,7 @@ async function processContactsImport(input: {
           .insert({
             organization_id: organizationId,
             name: createName,
-            slug: createName,
+            slug: lookupSlug,
             module: "contacts",
             is_active: true,
             created_by: userId,
@@ -888,14 +900,33 @@ async function processContactsImport(input: {
           })
           .select("id")
           .single();
-        if (createdError) throw createdError;
+        if (createdError) {
+          if (isTagSlugConflictError(createdError)) {
+            const { data: recovered, error: recoveredError } = await input.supabase
+              .from("tags")
+              .select("id")
+              .eq("organization_id", organizationId)
+              .eq("slug", lookupSlug)
+              .maybeSingle();
+            if (recoveredError) throw recoveredError;
+            if (recovered?.id) {
+              const recoveredId = toText(recovered.id);
+              tagLookupCache.set(cacheKey, recoveredId);
+              logRow(
+                `tag_lookup_recovered_after_conflict slug=${lookupSlug} value=${lookupValue} tag_id=${recoveredId}`
+              );
+              return recoveredId;
+            }
+          }
+          throw createdError;
+        }
         const createdId = toText(created.id);
         tagLookupCache.set(cacheKey, createdId);
         if (!createdTagTracker.has(createdId)) {
           createdTagTracker.add(createdId);
           newTagsCreated += 1;
         }
-        logRow(`tag_created value=${lookupValue} tag_id=${createdId}`);
+        logRow(`tag_created slug=${lookupSlug} value=${lookupValue} tag_id=${createdId}`);
         return createdId;
       };
 
@@ -1852,7 +1883,8 @@ Deno.serve(async (request) => {
         runner_lock_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
       })
       .eq("id", jobId)
-      .eq("status", "queued")
+      .in("status", ["queued", "processing"])
+      .is("runner_lock_token", null)
       .select("*")
       .maybeSingle();
     if (claim.error) throw new Error(claim.error.message);
@@ -2035,7 +2067,7 @@ Deno.serve(async (request) => {
         ? failedRows > 0
           ? "completed_with_errors"
           : "completed"
-        : "queued";
+        : "processing";
 
     const updateNow = new Date().toISOString();
     processorLog = appendLog(
@@ -2099,7 +2131,7 @@ Deno.serve(async (request) => {
       .eq("id", toText(job.id));
     if (updateError) throw updateError;
 
-    if (status === "queued") {
+    if (status === "processing") {
       const supabaseUrl = ensureEnv("SUPABASE_URL");
       const serviceRoleKey = ensureEnv("SUPABASE_SERVICE_ROLE_KEY");
       const runnerSecret = toText(Deno.env.get("IMPORT_CENTER_RUNNER_SECRET"));
