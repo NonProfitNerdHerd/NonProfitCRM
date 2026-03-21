@@ -86,8 +86,6 @@ function resolveSupabaseInvocationConfig() {
 
 export async function triggerImportCenterRunner(input: {
   jobId: string;
-  callbackBaseUrl: string;
-  callbackBypassToken?: string | null;
 }) {
   const { supabaseUrl, serviceRoleKey } = resolveSupabaseInvocationConfig();
   const runnerSecret = process.env.IMPORT_CENTER_RUNNER_SECRET;
@@ -103,9 +101,7 @@ export async function triggerImportCenterRunner(input: {
         ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
       },
       body: JSON.stringify({
-        jobId: input.jobId,
-        callbackBaseUrl: input.callbackBaseUrl,
-        callbackBypassToken: toText(input.callbackBypassToken) || null
+        jobId: input.jobId
       }),
       signal: controller.signal
     });

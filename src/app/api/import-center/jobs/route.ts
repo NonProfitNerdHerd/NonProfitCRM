@@ -67,16 +67,6 @@ function resolveRunnerSystemContext(request: Request, payload: Record<string, un
   return { organizationId, userId };
 }
 
-function resolveVercelBypassToken() {
-  return (
-    toText(process.env.IMPORT_CENTER_CALLBACK_BYPASS_TOKEN) ||
-    toText(process.env.VERCEL_AUTOMATION_BYPASS_SECRET) ||
-    toText(process.env.VERCEL_PROTECTION_BYPASS) ||
-    toText(process.env.VERCEL_BYPASS_TOKEN) ||
-    null
-  );
-}
-
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -137,9 +127,7 @@ export async function POST(request: Request) {
       });
 
       await triggerImportCenterRunner({
-        jobId: started.jobId,
-        callbackBaseUrl: new URL(request.url).origin,
-        callbackBypassToken: resolveVercelBypassToken()
+        jobId: started.jobId
       }).catch(async (triggerError) => {
         const admin = createAdminClient();
         await admin
