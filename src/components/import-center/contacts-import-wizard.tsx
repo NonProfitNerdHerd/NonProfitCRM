@@ -11,6 +11,11 @@ import {
   normalizeHeader,
   sanitizeInternalKey
 } from "@/lib/import-center/field-mapping-engine";
+import {
+  resolveMappingTransform,
+  resolveSplitDelimiter,
+  tokenizeMappedValue
+} from "@/lib/import-center/mapping-transform";
 import type {
   ContactClassificationInput,
   ContactStandardFieldDefinition,
@@ -47,16 +52,6 @@ function parseWorkbook(buffer: ArrayBuffer, sheetName?: string) {
   const worksheet = workbook.Sheets[selectedSheet];
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
   return { rows, sheetNames: workbook.SheetNames, selectedSheet };
-}
-
-function parseTagValue(value: unknown, delimiter: string) {
-  const source = toText(value);
-  if (!source) return [];
-  const resolvedDelimiter = delimiter || ";";
-  return source
-    .split(resolvedDelimiter)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
 }
 
 export function ContactsImportWizard() {
@@ -114,16 +109,31 @@ export function ContactsImportWizard() {
   );
 
   const uniqueTagsDetected = useMemo(() => {
-    const tagsMapping = mappings.find((mapping) => mapping.targetType === "tags");
-    if (!tagsMapping) return 0;
     const unique = new Set<string>();
-    for (const row of rows) {
-      for (const tag of parseTagValue(row[tagsMapping.sourceHeader], tagDelimiter)) {
-        unique.add(tag.toLowerCase());
+    const tagMappings = mappings.filter((mapping) => mapping.targetType === "tags");
+    if (tagMappings.length === 0) return 0;
+    for (const mapping of tagMappings) {
+      const transform = resolveMappingTransform({ mapping, fallbackDelimiter: tagDelimiter });
+      for (const row of rows) {
+        const values = tokenizeMappedValue({
+          rawValue: row[mapping.sourceHeader],
+          transform,
+          fallbackDelimiter: tagDelimiter
+        });
+        for (const value of values) {
+          unique.add(value.trim().toLowerCase());
+        }
       }
     }
     return unique.size;
   }, [mappings, rows, tagDelimiter]);
+
+  const tagDelimiterForFallback = useMemo(() => {
+    const tagMapping = mappings.find((mapping) => mapping.targetType === "tags");
+    if (!tagMapping) return tagDelimiter;
+    const transform = resolveMappingTransform({ mapping: tagMapping, fallbackDelimiter: tagDelimiter });
+    return resolveSplitDelimiter(transform.split, tagDelimiter);
+  }, [mappings, tagDelimiter]);
 
   const pendingNewFields = useMemo(
     () =>
@@ -447,7 +457,19 @@ export function ContactsImportWizard() {
     setRerunMatching(templateRerun);
 
     if (headers.length === 0) {
-      setMappings(templateMappings);
+      setMappings(
+        templateMappings.map((mapping) =>
+          mapping.targetType === "tags"
+            ? {
+                ...mapping,
+                transform: resolveMappingTransform({
+                  mapping,
+                  fallbackDelimiter: toText(tagConfig.delimiter) || ";"
+                })
+              }
+            : mapping
+        )
+      );
       return;
     }
 
@@ -463,6 +485,13 @@ export function ContactsImportWizard() {
               sourceHeader: mapping.sourceHeader,
               targetType: override.targetType,
               targetKey: override.targetKey,
+              transform:
+                override.targetType === "tags"
+                  ? resolveMappingTransform({
+                      mapping: override,
+                      fallbackDelimiter: toText(tagConfig.delimiter) || ";"
+                    })
+                  : override.transform ?? null,
               createField: override.createField ?? null
             }
           : mapping;
@@ -476,16 +505,32 @@ export function ContactsImportWizard() {
       prev.map((mapping, mappingIndex) => {
         if (mappingIndex !== index) return mapping;
         if (encoded === "unmapped") {
-          return { ...mapping, targetType: "unmapped", targetKey: null, createField: null };
+          return {
+            ...mapping,
+            targetType: "unmapped",
+            targetKey: null,
+            transform: null,
+            createField: null
+          };
         }
         if (encoded === "tags") {
-          return { ...mapping, targetType: "tags", targetKey: "tags", createField: null };
+          return {
+            ...mapping,
+            targetType: "tags",
+            targetKey: "tags",
+            transform: resolveMappingTransform({
+              mapping: { ...mapping, targetType: "tags", targetKey: "tags" },
+              fallbackDelimiter: tagDelimiter
+            }),
+            createField: null
+          };
         }
         if (encoded === "create_custom") {
           return {
             ...mapping,
             targetType: "custom",
             targetKey: sanitizeInternalKey(mapping.sourceHeader),
+            transform: null,
             createField: { label: mapping.sourceHeader, dataType: "text" }
           };
         }
@@ -494,6 +539,7 @@ export function ContactsImportWizard() {
             ...mapping,
             targetType: "standard",
             targetKey: encoded.replace("standard:", ""),
+            transform: null,
             createField: null
           };
         }
@@ -502,10 +548,28 @@ export function ContactsImportWizard() {
             ...mapping,
             targetType: "custom",
             targetKey: encoded.replace("custom:", ""),
+            transform: null,
             createField: null
           };
         }
         return mapping;
+      })
+    );
+  }
+
+  function updateTagMappingTransform(
+    index: number,
+    updater: (current: ReturnType<typeof resolveMappingTransform>) => ReturnType<typeof resolveMappingTransform>
+  ) {
+    setMappings((prev) =>
+      prev.map((mapping, mappingIndex) => {
+        if (mappingIndex !== index || mapping.targetType !== "tags") return mapping;
+        const resolved = resolveMappingTransform({ mapping, fallbackDelimiter: tagDelimiter });
+        const next = updater(resolved);
+        return {
+          ...mapping,
+          transform: next
+        };
       })
     );
   }
@@ -566,7 +630,7 @@ export function ContactsImportWizard() {
           name: name.trim(),
           mappings,
           classification,
-          tagDelimiter: tagsMapped ? tagDelimiter : null,
+          tagDelimiter: tagsMapped ? tagDelimiterForFallback : null,
           duplicateHandling,
           rerunMatching
         })
@@ -614,7 +678,7 @@ export function ContactsImportWizard() {
           mappings,
           classification,
           templateId: selectedTemplateId || null,
-          tagDelimiter: tagsMapped ? tagDelimiter : null,
+          tagDelimiter: tagsMapped ? tagDelimiterForFallback : null,
           duplicateHandling,
           rerunMatching,
           selectedSheet: selectedSheet || null
@@ -1004,6 +1068,7 @@ export function ContactsImportWizard() {
                   <th className="py-2">Source Header</th>
                   <th className="py-2">Sample Value</th>
                   <th className="py-2">Mapping</th>
+                  <th className="py-2">Field Transformation</th>
                   <th className="py-2">Custom Field Setup</th>
                 </tr>
               </thead>
@@ -1063,6 +1128,227 @@ export function ContactsImportWizard() {
                           <option value="create_custom">Create New Custom Field</option>
                         </select>
                       </td>
+                      <td className="py-2 align-top">
+                        {mapping.targetType === "tags" ? (
+                          <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 p-2">
+                            {(() => {
+                              const transform = resolveMappingTransform({
+                                mapping,
+                                fallbackDelimiter: tagDelimiter
+                              });
+                              const splitDelimiter = resolveSplitDelimiter(
+                                transform.split,
+                                tagDelimiter
+                              );
+                              return (
+                                <>
+                                  <div>
+                                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                                      Value handling mode
+                                    </label>
+                                    <select
+                                      className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                                      value={transform.valueHandlingMode}
+                                      onChange={(event) =>
+                                        updateTagMappingTransform(index, (current) => ({
+                                          ...current,
+                                          valueHandlingMode: event.target.value as typeof current.valueHandlingMode
+                                        }))
+                                      }
+                                    >
+                                      <option value="direct_value">direct value</option>
+                                      <option value="multi_value_split">multi-value split</option>
+                                      <option value="relation_lookup">relation lookup</option>
+                                      <option value="relation_lookup_or_create">
+                                        relation lookup-or-create
+                                      </option>
+                                    </select>
+                                  </div>
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(transform.split.enabled)}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            split: {
+                                              ...current.split,
+                                              enabled: event.target.checked
+                                            }
+                                          }))
+                                        }
+                                      />
+                                      Enable splitting
+                                    </label>
+                                    <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(transform.split.trimWhitespace)}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            split: {
+                                              ...current.split,
+                                              trimWhitespace: event.target.checked
+                                            }
+                                          }))
+                                        }
+                                      />
+                                      Trim whitespace
+                                    </label>
+                                    <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(transform.split.ignoreBlankValues)}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            split: {
+                                              ...current.split,
+                                              ignoreBlankValues: event.target.checked
+                                            }
+                                          }))
+                                        }
+                                      />
+                                      Ignore blank values
+                                    </label>
+                                  </div>
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    <div>
+                                      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                                        Delimiter
+                                      </label>
+                                      <select
+                                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                                        value={transform.split.delimiterPreset}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            split: {
+                                              ...current.split,
+                                              delimiterPreset: event.target.value as typeof current.split.delimiterPreset
+                                            }
+                                          }))
+                                        }
+                                      >
+                                        <option value="semicolon">semicolon (;)</option>
+                                        <option value="comma">comma (,)</option>
+                                        <option value="pipe">pipe (|)</option>
+                                        <option value="custom">custom</option>
+                                      </select>
+                                    </div>
+                                    {transform.split.delimiterPreset === "custom" ? (
+                                      <div>
+                                        <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                                          Custom delimiter
+                                        </label>
+                                        <Input
+                                          value={toText(transform.split.delimiterValue)}
+                                          onChange={(event) =>
+                                            updateTagMappingTransform(index, (current) => ({
+                                              ...current,
+                                              split: {
+                                                ...current.split,
+                                                delimiterValue: event.target.value
+                                              }
+                                            }))
+                                          }
+                                          placeholder=";"
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600">
+                                        Using delimiter: <span className="font-semibold">{splitDelimiter}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    <div>
+                                      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                                        If related record missing
+                                      </label>
+                                      <select
+                                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                                        value={transform.relatedRecord.onMissing}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            relatedRecord: {
+                                              ...current.relatedRecord,
+                                              onMissing: event.target.value as typeof current.relatedRecord.onMissing
+                                            }
+                                          }))
+                                        }
+                                      >
+                                        <option value="fail_row">fail row</option>
+                                        <option value="skip_value">skip value</option>
+                                        <option value="create">create</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                                        Apply behavior
+                                      </label>
+                                      <select
+                                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                                        value={transform.applyBehavior}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            applyBehavior: event.target.value as typeof current.applyBehavior
+                                          }))
+                                        }
+                                      >
+                                        <option value="append">append to existing values</option>
+                                        <option value="replace">replace existing values</option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(transform.relatedRecord.caseInsensitiveMatch)}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            relatedRecord: {
+                                              ...current.relatedRecord,
+                                              caseInsensitiveMatch: event.target.checked
+                                            }
+                                          }))
+                                        }
+                                      />
+                                      Case-insensitive matching
+                                    </label>
+                                    <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(transform.relatedRecord.normalizeTrim)}
+                                        onChange={(event) =>
+                                          updateTagMappingTransform(index, (current) => ({
+                                            ...current,
+                                            relatedRecord: {
+                                              ...current.relatedRecord,
+                                              normalizeTrim: event.target.checked
+                                            }
+                                          }))
+                                        }
+                                      />
+                                      Normalize trim matching
+                                    </label>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-500">
+                            Transformation options are shown only for multi-value/related mappings.
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2">
                         {mapping.targetType === "custom" && !hasPersistedCustomField ? (
                           <div className="space-y-2">
@@ -1113,18 +1399,9 @@ export function ContactsImportWizard() {
             </table>
           </div>
           {tagsMapped ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Tags delimiter (for multi-value tag columns)
-                </label>
-                <Input
-                  value={tagDelimiter}
-                  onChange={(event) => setTagDelimiter(event.target.value || ";")}
-                  placeholder="; or , or |"
-                />
-              </div>
-            </div>
+            <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+              Tags mapping uses field-level transformation settings above (split, lookup/create, and append/replace).
+            </p>
           ) : null}
           <div className="mt-4 flex gap-2">
             <Button type="button" variant="secondary" onClick={() => setStep(2)}>
@@ -1175,7 +1452,7 @@ export function ContactsImportWizard() {
               New Fields Pending Creation: {pendingNewFields.length}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-              Tag Delimiter: {tagsMapped ? tagDelimiter : "N/A"}
+              Tag Transform Rules: {tagsMapped ? "Configured per mapped tag field" : "N/A"}
             </p>
             <p className="rounded-md bg-slate-100 px-3 py-2 text-sm">
               Re-Import Matching Enabled: {selectedTemplateId ? (rerunMatching.enabled ? "Yes" : "No") : "N/A"}

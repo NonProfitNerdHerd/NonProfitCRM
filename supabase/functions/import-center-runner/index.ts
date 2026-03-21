@@ -37,13 +37,111 @@ function sanitizeInternalKey(label: string) {
   return normalized || `field_${Date.now()}`;
 }
 
-function parseTagsFromCell(value: unknown, delimiter: string) {
-  const raw = toText(value);
-  if (!raw) return [];
-  return raw
-    .split(delimiter || ";")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+function buildDefaultMappingTransform(targetType: string) {
+  if (targetType === "tags") {
+    return {
+      valueHandlingMode: "multi_value_split",
+      split: {
+        enabled: true,
+        delimiterPreset: "semicolon",
+        delimiterValue: ";",
+        trimWhitespace: true,
+        ignoreBlankValues: true
+      },
+      relatedRecord: {
+        lookupExisting: true,
+        onMissing: "create",
+        caseInsensitiveMatch: true,
+        normalizeTrim: true
+      },
+      applyBehavior: "append"
+    };
+  }
+  return {
+    valueHandlingMode: "direct_value",
+    split: {
+      enabled: false,
+      delimiterPreset: "semicolon",
+      delimiterValue: ";",
+      trimWhitespace: true,
+      ignoreBlankValues: true
+    },
+    relatedRecord: {
+      lookupExisting: false,
+      onMissing: "skip_value",
+      caseInsensitiveMatch: true,
+      normalizeTrim: true
+    },
+    applyBehavior: "append"
+  };
+}
+
+function resolveSplitDelimiter(split: Record<string, unknown>, fallbackDelimiter?: string) {
+  const fallback = toText(fallbackDelimiter) || ";";
+  const preset = toText(split.delimiterPreset || "semicolon");
+  if (preset === "comma") return ",";
+  if (preset === "pipe") return "|";
+  if (preset === "semicolon") return ";";
+  return toText(split.delimiterValue) || fallback;
+}
+
+function resolveMappingTransform(mapping: Record<string, unknown>, fallbackDelimiter?: string) {
+  const targetType = toText(mapping.targetType) || "standard";
+  const defaults = buildDefaultMappingTransform(targetType);
+  const transform = (mapping.transform ?? {}) as Record<string, unknown>;
+  const split = (transform.split ?? {}) as Record<string, unknown>;
+  const relatedRecord = (transform.relatedRecord ?? {}) as Record<string, unknown>;
+  const resolved = {
+    valueHandlingMode: toText(transform.valueHandlingMode || defaults.valueHandlingMode),
+    split: {
+      enabled: Boolean(split.enabled ?? defaults.split.enabled),
+      delimiterPreset: toText(split.delimiterPreset || defaults.split.delimiterPreset),
+      delimiterValue: toText(split.delimiterValue || defaults.split.delimiterValue) || null,
+      trimWhitespace: Boolean(split.trimWhitespace ?? defaults.split.trimWhitespace),
+      ignoreBlankValues: Boolean(split.ignoreBlankValues ?? defaults.split.ignoreBlankValues)
+    },
+    relatedRecord: {
+      lookupExisting: Boolean(relatedRecord.lookupExisting ?? defaults.relatedRecord.lookupExisting),
+      onMissing: toText(relatedRecord.onMissing || defaults.relatedRecord.onMissing),
+      caseInsensitiveMatch: Boolean(
+        relatedRecord.caseInsensitiveMatch ?? defaults.relatedRecord.caseInsensitiveMatch
+      ),
+      normalizeTrim: Boolean(relatedRecord.normalizeTrim ?? defaults.relatedRecord.normalizeTrim)
+    },
+    applyBehavior: toText(transform.applyBehavior || defaults.applyBehavior)
+  };
+  if (targetType === "tags" && !toText(split.delimiterValue) && fallbackDelimiter) {
+    resolved.split.delimiterValue = toText(fallbackDelimiter);
+  }
+  if (resolved.valueHandlingMode === "multi_value_split") {
+    resolved.split.enabled = true;
+  }
+  if (resolved.valueHandlingMode === "relation_lookup_or_create") {
+    resolved.relatedRecord.lookupExisting = true;
+    resolved.relatedRecord.onMissing = "create";
+  }
+  if (resolved.valueHandlingMode === "relation_lookup") {
+    resolved.relatedRecord.lookupExisting = true;
+  }
+  return resolved;
+}
+
+function tokenizeMappedValue(input: {
+  rawValue: unknown;
+  transform: ReturnType<typeof resolveMappingTransform>;
+  fallbackDelimiter?: string;
+}) {
+  const source = String(input.rawValue ?? "");
+  const shouldSplit =
+    Boolean(input.transform.split.enabled) || input.transform.valueHandlingMode === "multi_value_split";
+  const delimiter = resolveSplitDelimiter(input.transform.split, input.fallbackDelimiter);
+  const values = shouldSplit ? source.split(delimiter) : [source];
+  const normalized = values.map((entry) =>
+    input.transform.split.trimWhitespace ? entry.trim() : entry
+  );
+  return input.transform.split.ignoreBlankValues
+    ? normalized.filter((entry) => entry.trim().length > 0)
+    : normalized;
 }
 
 function isBlankImportValue(value: unknown) {
@@ -142,7 +240,11 @@ async function markJobFailed(
 function mapContactRowToTargets(row: Record<string, unknown>, mappings: Array<Record<string, unknown>>) {
   const standard: Record<string, unknown> = {};
   const custom: Record<string, unknown> = {};
-  let tagsValue: string | null = null;
+  const tags: Array<{
+    sourceHeader: string;
+    rawValue: unknown;
+    transform: ReturnType<typeof resolveMappingTransform>;
+  }> = [];
   for (const mapping of mappings) {
     const sourceHeader = toText(mapping.sourceHeader);
     const targetType = toText(mapping.targetType);
@@ -150,8 +252,11 @@ function mapContactRowToTargets(row: Record<string, unknown>, mappings: Array<Re
     const raw = row[sourceHeader];
     if (targetType === "unmapped") continue;
     if (targetType === "tags") {
-      const value = toText(raw);
-      if (value) tagsValue = value;
+      tags.push({
+        sourceHeader,
+        rawValue: raw,
+        transform: resolveMappingTransform(mapping)
+      });
       continue;
     }
     if (!targetKey) continue;
@@ -161,7 +266,7 @@ function mapContactRowToTargets(row: Record<string, unknown>, mappings: Array<Re
     }
     if (targetType === "custom") custom[targetKey] = raw;
   }
-  return { standard, custom, tagsValue };
+  return { standard, custom, tags };
 }
 
 function mapTransactionRowToTargets(row: Record<string, unknown>, mappings: Array<Record<string, unknown>>) {
@@ -588,7 +693,7 @@ async function processContactsImport(input: {
     userId,
     mappings
   });
-  const tagCache = new Map<string, string>();
+  const tagLookupCache = new Map<string, string | null>();
   const createdTagTracker = new Set<string>();
   const rerunCustomFieldCache = new Map<string, string | null>();
 
@@ -668,20 +773,132 @@ async function processContactsImport(input: {
         updated_by: userId
       };
 
+      const relationCacheKey = (value: string, transform: ReturnType<typeof resolveMappingTransform>) => {
+        const normalized = transform.relatedRecord.normalizeTrim ? value.trim() : value;
+        const relationKey = transform.relatedRecord.caseInsensitiveMatch
+          ? normalized.toLowerCase()
+          : normalized;
+        return `${transform.relatedRecord.caseInsensitiveMatch ? "i" : "s"}:${transform.relatedRecord.normalizeTrim ? "t" : "r"}:${relationKey}`;
+      };
+
+      const resolveTagIdByValue = async (params: {
+        value: string;
+        transform: ReturnType<typeof resolveMappingTransform>;
+        sourceHeader: string;
+        rowIndex: number;
+      }) => {
+        const lookupValue = params.transform.relatedRecord.normalizeTrim
+          ? params.value.trim()
+          : params.value;
+        if (!lookupValue) return null;
+        const cacheKey = relationCacheKey(lookupValue, params.transform);
+        if (tagLookupCache.has(cacheKey)) {
+          return tagLookupCache.get(cacheKey) ?? null;
+        }
+
+        let lookupQuery = input.supabase
+          .from("tags")
+          .select("id,name")
+          .eq("organization_id", organizationId)
+          .is("parent_tag_id", null)
+          .limit(1)
+          .maybeSingle();
+        lookupQuery = params.transform.relatedRecord.caseInsensitiveMatch
+          ? lookupQuery.ilike("name", lookupValue)
+          : lookupQuery.eq("name", lookupValue);
+        const { data: existing, error: existingError } = await lookupQuery;
+        if (existingError) throw existingError;
+        if (existing?.id) {
+          const id = toText(existing.id);
+          tagLookupCache.set(cacheKey, id);
+          return id;
+        }
+
+        let onMissing = params.transform.relatedRecord.onMissing;
+        if (params.transform.valueHandlingMode === "relation_lookup_or_create") {
+          onMissing = "create";
+        }
+        if (onMissing === "skip_value") {
+          tagLookupCache.set(cacheKey, null);
+          return null;
+        }
+        if (onMissing === "fail_row") {
+          throw new Error(
+            `Tag "${lookupValue}" from column "${params.sourceHeader}" was not found (row ${params.rowIndex}).`
+          );
+        }
+
+        const createName = lookupValue.trim();
+        const { data: created, error: createdError } = await input.supabase
+          .from("tags")
+          .insert({
+            organization_id: organizationId,
+            name: createName,
+            slug: createName,
+            module: "contacts",
+            is_active: true,
+            created_by: userId,
+            updated_by: userId
+          })
+          .select("id")
+          .single();
+        if (createdError) throw createdError;
+        const createdId = toText(created.id);
+        tagLookupCache.set(cacheKey, createdId);
+        if (!createdTagTracker.has(createdId)) {
+          createdTagTracker.add(createdId);
+          newTagsCreated += 1;
+        }
+        return createdId;
+      };
+
       const applyMappedTags = async (contactId: string) => {
-        const tags = parseTagsFromCell(mapped.tagsValue, tagDelimiter);
-        if (tags.length === 0) return;
-        const ensured = await ensureContactTags({
-          supabase: input.supabase,
-          organizationId,
-          userId,
-          tagNames: tags,
-          cache: tagCache,
-          createdTracker: createdTagTracker
-        });
-        newTagsCreated += ensured.createdCount;
-        if (ensured.tagIds.length === 0) return;
-        const tagRows = ensured.tagIds.map((tagId) => ({
+        if (!Array.isArray(mapped.tags) || mapped.tags.length === 0) return;
+        let replaceExisting = false;
+        const tagIds = new Set<string>();
+
+        for (const mappedTag of mapped.tags) {
+          const transform = resolveMappingTransform(
+            {
+              targetType: "tags",
+              targetKey: "tags",
+              transform: mappedTag.transform
+            },
+            tagDelimiter
+          );
+          if (transform.applyBehavior === "replace") {
+            replaceExisting = true;
+          }
+
+          const values = tokenizeMappedValue({
+            rawValue: mappedTag.rawValue,
+            transform,
+            fallbackDelimiter: tagDelimiter
+          });
+          for (const value of values) {
+            const tagId = await resolveTagIdByValue({
+              value,
+              transform,
+              sourceHeader: mappedTag.sourceHeader,
+              rowIndex
+            });
+            if (tagId) {
+              tagIds.add(tagId);
+            }
+          }
+        }
+
+        if (replaceExisting) {
+          const { error: deleteError } = await input.supabase
+            .from("contact_tags")
+            .delete()
+            .eq("organization_id", organizationId)
+            .eq("contact_id", contactId);
+          if (deleteError) throw deleteError;
+        }
+
+        if (tagIds.size === 0) return;
+        const tagRows = Array.from(tagIds).map((tagId) => ({
           organization_id: organizationId,
           contact_id: contactId,
           tag_id: tagId,

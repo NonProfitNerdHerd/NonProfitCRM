@@ -7,10 +7,41 @@ export type ContactClassificationInput = {
 
 export type ImportCenterMappingTargetType = "standard" | "custom" | "tags" | "unmapped";
 
+export type ImportCenterValueHandlingMode =
+  | "direct_value"
+  | "multi_value_split"
+  | "relation_lookup"
+  | "relation_lookup_or_create";
+
+export type ImportCenterSplitDelimiterPreset = "semicolon" | "comma" | "pipe" | "custom";
+
+export type ImportCenterRelationOnMissingBehavior = "fail_row" | "skip_value" | "create";
+
+export type ImportCenterApplyBehavior = "append" | "replace";
+
+export type ImportCenterMappingTransform = {
+  valueHandlingMode?: ImportCenterValueHandlingMode;
+  split?: {
+    enabled?: boolean;
+    delimiterPreset?: ImportCenterSplitDelimiterPreset;
+    delimiterValue?: string | null;
+    trimWhitespace?: boolean;
+    ignoreBlankValues?: boolean;
+  };
+  relatedRecord?: {
+    lookupExisting?: boolean;
+    onMissing?: ImportCenterRelationOnMissingBehavior;
+    caseInsensitiveMatch?: boolean;
+    normalizeTrim?: boolean;
+  };
+  applyBehavior?: ImportCenterApplyBehavior;
+};
+
 export type ImportCenterMapping = {
   sourceHeader: string;
   targetType: ImportCenterMappingTargetType;
   targetKey: string | null;
+  transform?: ImportCenterMappingTransform | null;
   createField?: {
     label: string;
     dataType?: "text" | "number" | "date" | "boolean" | "json";

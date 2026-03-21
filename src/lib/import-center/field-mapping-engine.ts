@@ -3,13 +3,14 @@ import {
   type ContactStandardFieldDefinition,
   type ImportCenterMapping
 } from "@/lib/import-center/types";
+import {
+  buildDefaultMappingTransform,
+  resolveMappingTransform,
+  type ResolvedImportCenterMappingTransform
+} from "@/lib/import-center/mapping-transform";
 
 export function normalizeHeader(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
-}
-
-function toText(value: unknown) {
-  return String(value ?? "").trim();
 }
 
 export function suggestStandardField(header: string): ContactStandardFieldDefinition | null {
@@ -31,7 +32,8 @@ export function buildSuggestedMappings(headers: string[]): ImportCenterMapping[]
       return {
         sourceHeader: header,
         targetType: "tags",
-        targetKey: "tags"
+        targetKey: "tags",
+        transform: buildDefaultMappingTransform("tags")
       } satisfies ImportCenterMapping;
     }
     if (suggestion) {
@@ -78,18 +80,29 @@ export function mapRowToTargets(
 ): {
   standard: Record<string, unknown>;
   custom: Record<string, unknown>;
-  tagsValue: string | null;
+  tags: Array<{
+    sourceHeader: string;
+    rawValue: unknown;
+    transform: ResolvedImportCenterMappingTransform;
+  }>;
 } {
   const standard: Record<string, unknown> = {};
   const custom: Record<string, unknown> = {};
-  let tagsValue: string | null = null;
+  const tags: Array<{
+    sourceHeader: string;
+    rawValue: unknown;
+    transform: ResolvedImportCenterMappingTransform;
+  }> = [];
 
   for (const mapping of mappings) {
     const raw = row[mapping.sourceHeader];
     if (mapping.targetType === "unmapped") continue;
     if (mapping.targetType === "tags") {
-      const value = toText(raw);
-      if (value) tagsValue = value;
+      tags.push({
+        sourceHeader: mapping.sourceHeader,
+        rawValue: raw,
+        transform: resolveMappingTransform({ mapping })
+      });
       continue;
     }
     if (!mapping.targetKey) continue;
@@ -102,5 +115,5 @@ export function mapRowToTargets(
     }
   }
 
-  return { standard, custom, tagsValue };
+  return { standard, custom, tags };
 }

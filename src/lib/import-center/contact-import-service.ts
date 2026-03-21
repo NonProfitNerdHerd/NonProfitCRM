@@ -8,8 +8,12 @@ import {
   sanitizeInternalKey
 } from "@/lib/import-center/field-mapping-engine";
 import { appendImportCenterRowError, logImportCenterAudit } from "@/lib/import-center/logging-service";
-import { ensureContactTags, parseTagsFromCell } from "@/lib/import-center/tag-parser-service";
 import { createContactCustomField, listContactCustomFields } from "@/lib/import-center/custom-fields-service";
+import {
+  resolveMappingTransform,
+  tokenizeMappedValue,
+  type ResolvedImportCenterMappingTransform
+} from "@/lib/import-center/mapping-transform";
 import {
   buildRerunMatchingWarnings,
   detectInFileDuplicateWarnings,
@@ -770,7 +774,7 @@ export async function processContactsImportChunk(input: {
   let skippedExistingCount = 0;
   let missingKeySkipCount = 0;
   let ambiguousMatchCount = 0;
-  const tagCache = new Map<string, string>();
+  const tagLookupCache = new Map<string, string | null>();
   const createdTagTracker = new Set<string>();
   const customFieldIdMap = await ensureCustomFieldIdMap(mappings);
   const rerunPrefetch = await buildRerunMatchPrefetch({
@@ -819,19 +823,140 @@ export async function processContactsImportChunk(input: {
     }
   }
 
-  async function applyMappedTags(contactId: string, tagsValue: string | null) {
-    const tags = parseTagsFromCell(tagsValue, tagDelimiter);
-    if (tags.length === 0) return;
-    const ensured = await ensureContactTags({
-      organizationId: context.organizationId,
-      userId: context.userId,
-      tagNames: tags,
-      cache: tagCache,
-      createdTracker: createdTagTracker
-    });
-    newTagsCreated += ensured.createdCount;
-    if (ensured.tagIds.length === 0) return;
-    const tagRows = ensured.tagIds.map((tagId) => ({
+  function relationCacheKey(value: string, transform: ResolvedImportCenterMappingTransform) {
+    const normalized = transform.relatedRecord.normalizeTrim ? value.trim() : value;
+    const relationKey = transform.relatedRecord.caseInsensitiveMatch
+      ? normalized.toLowerCase()
+      : normalized;
+    return `${transform.relatedRecord.caseInsensitiveMatch ? "i" : "s"}:${transform.relatedRecord.normalizeTrim ? "t" : "r"}:${relationKey}`;
+  }
+
+  async function resolveTagIdByValue(input: {
+    value: string;
+    transform: ResolvedImportCenterMappingTransform;
+    sourceHeader: string;
+    rowIndex: number;
+  }) {
+    const lookupValue = input.transform.relatedRecord.normalizeTrim
+      ? input.value.trim()
+      : input.value;
+    if (!lookupValue) return null;
+    const cacheKey = relationCacheKey(lookupValue, input.transform);
+    if (tagLookupCache.has(cacheKey)) {
+      return tagLookupCache.get(cacheKey) ?? null;
+    }
+
+    const lookupBase = supabase
+      .from("tags")
+      .select("id,name")
+      .eq("organization_id", context.organizationId)
+      .is("parent_tag_id", null)
+      .limit(1);
+    const { data: existing, error: existingError } = input.transform.relatedRecord.caseInsensitiveMatch
+      ? await lookupBase.ilike("name", lookupValue).maybeSingle()
+      : await lookupBase.eq("name", lookupValue).maybeSingle();
+    if (existingError) throw existingError;
+    if (existing?.id) {
+      const id = String(existing.id);
+      tagLookupCache.set(cacheKey, id);
+      return id;
+    }
+
+    let onMissing = input.transform.relatedRecord.onMissing;
+    if (input.transform.valueHandlingMode === "relation_lookup_or_create") {
+      onMissing = "create";
+    }
+
+    if (onMissing === "skip_value") {
+      tagLookupCache.set(cacheKey, null);
+      return null;
+    }
+    if (onMissing === "fail_row") {
+      throw new Error(
+        `Tag "${lookupValue}" from column "${input.sourceHeader}" was not found (row ${input.rowIndex}).`
+      );
+    }
+
+    const createName = lookupValue.trim();
+    const { data: created, error: createdError } = await supabase
+      .from("tags")
+      .insert({
+        organization_id: context.organizationId,
+        name: createName,
+        slug: createName,
+        module: "contacts",
+        is_active: true,
+        created_by: context.userId,
+        updated_by: context.userId
+      })
+      .select("id")
+      .single();
+    if (createdError) throw createdError;
+    const createdId = String(created.id);
+    tagLookupCache.set(cacheKey, createdId);
+    if (!createdTagTracker.has(createdId)) {
+      createdTagTracker.add(createdId);
+      newTagsCreated += 1;
+    }
+    return createdId;
+  }
+
+  async function applyMappedTags(
+    contactId: string,
+    tagMappings: Array<{
+      sourceHeader: string;
+      rawValue: unknown;
+      transform: ResolvedImportCenterMappingTransform;
+    }>,
+    rowIndex: number
+  ) {
+    if (tagMappings.length === 0) return;
+    let replaceExisting = false;
+    const tagIds = new Set<string>();
+
+    for (const mappedTag of tagMappings) {
+      const transform = resolveMappingTransform({
+        mapping: {
+          sourceHeader: mappedTag.sourceHeader,
+          targetType: "tags",
+          targetKey: "tags",
+          transform: mappedTag.transform
+        },
+        fallbackDelimiter: tagDelimiter
+      });
+      if (transform.applyBehavior === "replace") {
+        replaceExisting = true;
+      }
+
+      const values = tokenizeMappedValue({
+        rawValue: mappedTag.rawValue,
+        transform,
+        fallbackDelimiter: tagDelimiter
+      });
+      for (const value of values) {
+        const tagId = await resolveTagIdByValue({
+          value,
+          transform,
+          sourceHeader: mappedTag.sourceHeader,
+          rowIndex
+        });
+        if (tagId) {
+          tagIds.add(tagId);
+        }
+      }
+    }
+
+    if (replaceExisting) {
+      const { error: deleteError } = await supabase
+        .from("contact_tags")
+        .delete()
+        .eq("organization_id", context.organizationId)
+        .eq("contact_id", contactId);
+      if (deleteError) throw deleteError;
+    }
+
+    if (tagIds.size === 0) return;
+    const tagRows = Array.from(tagIds).map((tagId) => ({
       organization_id: context.organizationId,
       contact_id: contactId,
       tag_id: tagId,
@@ -981,7 +1106,7 @@ export async function processContactsImportChunk(input: {
           mappedCustom: mapped.custom,
           mode: rerun.onMatchBehavior === "update_blank_only" ? "update_blank_only" : "overwrite_existing"
         });
-        await applyMappedTags(matchedContactId, mapped.tagsValue);
+        await applyMappedTags(matchedContactId, mapped.tags, rowIndex);
 
         if (rerun.onMatchBehavior === "overwrite_existing") overwrittenRecordCount += 1;
         if (rerun.onMatchBehavior === "update_blank_only") blankOnlyUpdateCount += 1;
@@ -1050,7 +1175,7 @@ export async function processContactsImportChunk(input: {
           mappedCustom: mapped.custom,
           mode: "overwrite_existing"
         });
-        await applyMappedTags(contactId, mapped.tagsValue);
+        await applyMappedTags(contactId, mapped.tags, rowIndex);
         overwrittenRecordCount += 1;
         matchedRecordCount += 1;
         successfulRows += 1;
@@ -1070,7 +1195,7 @@ export async function processContactsImportChunk(input: {
         mappedCustom: mapped.custom,
         mode: "overwrite_existing"
       });
-      await applyMappedTags(contactId, mapped.tagsValue);
+      await applyMappedTags(contactId, mapped.tags, rowIndex);
       newRecordCount += 1;
       successfulRows += 1;
     } catch (error) {

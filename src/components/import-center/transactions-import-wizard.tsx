@@ -461,7 +461,7 @@ export function TransactionsImportWizard() {
     setConfig(templateConfig);
 
     if (headers.length === 0) {
-      setMappings(templateMappings);
+      setMappings(templateMappings.map((mapping) => ({ ...mapping, transform: mapping.transform ?? null })));
       return;
     }
 
@@ -477,6 +477,7 @@ export function TransactionsImportWizard() {
               sourceHeader: mapping.sourceHeader,
               targetType: override.targetType,
               targetKey: override.targetKey,
+              transform: override.transform ?? null,
               createField: override.createField ?? null
             }
           : mapping;
@@ -490,13 +491,20 @@ export function TransactionsImportWizard() {
       prev.map((mapping, mappingIndex) => {
         if (mappingIndex !== index) return mapping;
         if (encoded === "unmapped") {
-          return { ...mapping, targetType: "unmapped", targetKey: null, createField: null };
+          return {
+            ...mapping,
+            targetType: "unmapped",
+            targetKey: null,
+            transform: null,
+            createField: null
+          };
         }
         if (encoded === "create_custom") {
           return {
             ...mapping,
             targetType: "custom",
             targetKey: sanitizeInternalKey(mapping.sourceHeader),
+            transform: null,
             createField: { label: mapping.sourceHeader, dataType: "text" }
           };
         }
@@ -505,6 +513,7 @@ export function TransactionsImportWizard() {
             ...mapping,
             targetType: "standard",
             targetKey: encoded.replace("standard:", ""),
+            transform: null,
             createField: null
           };
         }
@@ -513,6 +522,7 @@ export function TransactionsImportWizard() {
             ...mapping,
             targetType: "custom",
             targetKey: encoded.replace("custom:", ""),
+            transform: null,
             createField: null
           };
         }
