@@ -30,6 +30,14 @@ function resolveFunctionGatewayApiKey() {
 }
 
 function resolveFunctionGatewayBearerToken() {
+  const explicitBearer = toText(Deno.env.get("IMPORT_CENTER_FUNCTIONS_BEARER_TOKEN"));
+  if (isJwtLikeToken(explicitBearer)) return explicitBearer;
+
+  const legacyServiceJwt = toText(Deno.env.get("SUPABASE_SERVICE_ROLE_JWT"));
+  const legacyAnonJwt = toText(Deno.env.get("SUPABASE_ANON_JWT"));
+  if (isJwtLikeToken(legacyServiceJwt)) return legacyServiceJwt;
+  if (isJwtLikeToken(legacyAnonJwt)) return legacyAnonJwt;
+
   const serviceRoleKey = toText(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
   const anonKey = toText(Deno.env.get("SUPABASE_ANON_KEY"));
   // Function gateway Authorization expects a JWT token format.
@@ -2174,6 +2182,11 @@ Deno.serve(async (request) => {
       if (!functionGatewayApiKey) {
         throw new Error("Missing Supabase function gateway auth key for import runner scheduling.");
       }
+      if (!functionGatewayBearerToken) {
+        throw new Error(
+          "Missing JWT bearer token for import runner scheduling. Set IMPORT_CENTER_FUNCTIONS_BEARER_TOKEN."
+        );
+      }
       const runnerSecret = toText(Deno.env.get("IMPORT_CENTER_RUNNER_SECRET"));
       const scheduleTimeoutMs = getScheduleTimeoutMs();
       const scheduleRetries = getScheduleRetries();
@@ -2186,12 +2199,10 @@ Deno.serve(async (request) => {
         try {
           const headers: Record<string, string> = {
             "content-type": "application/json",
-            apikey: functionGatewayApiKey,
+            apikey: isJwtLikeToken(functionGatewayBearerToken) ? functionGatewayBearerToken : functionGatewayApiKey,
             ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
           };
-          if (functionGatewayBearerToken) {
-            headers.authorization = `Bearer ${functionGatewayBearerToken}`;
-          }
+          headers.authorization = `Bearer ${functionGatewayBearerToken}`;
           const response = await fetch(`${supabaseUrl}/functions/v1/import-center-runner`, {
             method: "POST",
             headers,
