@@ -62,7 +62,7 @@ function ProgressCell({ job }: { job: JobRow }) {
   const processed = toNumber(job.processed_rows, 0);
   const total = toNumber(job.total_rows, 0);
   return (
-    <div className="min-w-[190px] space-y-1">
+    <div className="min-w-[210px] space-y-1">
       <div className="h-2 w-full rounded bg-slate-200">
         <div className="h-2 rounded bg-brand-600" style={{ width: `${percent}%` }} />
       </div>
@@ -70,6 +70,26 @@ function ProgressCell({ job }: { job: JobRow }) {
         {percent}% ({processed}/{total})
       </p>
     </div>
+  );
+}
+
+function InfoField({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`text-sm text-slate-900 ${valueClassName ?? ""}`}>{value || "-"}</p>
+    </div>
+  );
+}
+
+function DownloadButton({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-xs font-medium text-slate-900 hover:bg-slate-200"
+      href={href}
+    >
+      {label}
+    </a>
   );
 }
 
@@ -91,9 +111,12 @@ export function ImportJobsDashboard({
   const [total, setTotal] = useState(initialTotal);
   const [limit, setLimit] = useState(initialLimit);
   const [offset, setOffset] = useState(initialOffset);
-  const [selectedJobId, setSelectedJobId] = useState<string>(toText(initialJobs[0]?.id));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  const [detailJobId, setDetailJobId] = useState<string>("");
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [detail, setDetail] = useState<JobRow | null>(null);
   const [failedRows, setFailedRows] = useState<FailedRow[]>([]);
   const [failedRowsTotal, setFailedRowsTotal] = useState(0);
@@ -101,7 +124,6 @@ export function ImportJobsDashboard({
   const [failedRowsLimit] = useState(25);
   const [failedRowsSearch, setFailedRowsSearch] = useState("");
   const [failedRowsOnly, setFailedRowsOnly] = useState(true);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const pageCount = useMemo(() => Math.max(1, Math.ceil(total / Math.max(1, limit))), [limit, total]);
   const currentPage = useMemo(() => Math.floor(offset / Math.max(1, limit)) + 1, [limit, offset]);
@@ -127,9 +149,6 @@ export function ImportJobsDashboard({
     setTotal(toNumber(payload?.total, nextJobs.length));
     setLimit(toNumber(payload?.limit, nextLimit));
     setOffset(toNumber(payload?.offset, nextOffset));
-    if (nextJobs.length > 0 && !nextJobs.some((job) => toText(job.id) === selectedJobId)) {
-      setSelectedJobId(toText(nextJobs[0].id));
-    }
   }
 
   async function loadDetail(jobId: string, nextFailedOffset = failedRowsOffset) {
@@ -138,6 +157,7 @@ export function ImportJobsDashboard({
     params.set("failedOffset", String(nextFailedOffset));
     params.set("failedLimit", String(failedRowsLimit));
     if (failedRowsSearch) params.set("failedSearch", failedRowsSearch);
+
     const response = await fetch(`/api/import-center/jobs/${encodeURIComponent(jobId)}?${params.toString()}`);
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
@@ -154,6 +174,9 @@ export function ImportJobsDashboard({
     setError(null);
     try {
       await loadJobs(offset, limit);
+      if (isDetailOpen && detailJobId) {
+        await loadDetail(detailJobId, failedRowsOffset);
+      }
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Unable to refresh jobs.");
     } finally {
@@ -172,8 +195,10 @@ export function ImportJobsDashboard({
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.message ?? "Unable to stop job.");
-      await refreshAll();
-      await loadDetail(jobId, failedRowsOffset);
+      await loadJobs(offset, limit);
+      if (isDetailOpen && detailJobId === jobId) {
+        await loadDetail(jobId, failedRowsOffset);
+      }
     } catch (stopError) {
       setError(stopError instanceof Error ? stopError.message : "Unable to stop job.");
     } finally {
@@ -190,10 +215,11 @@ export function ImportJobsDashboard({
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.message ?? "Unable to retry failed rows.");
-      await refreshAll();
+      await loadJobs(offset, limit);
       const nextJobId = toText(payload?.jobId);
       if (nextJobId) {
-        setSelectedJobId(nextJobId);
+        setDetailJobId(nextJobId);
+        setIsDetailOpen(true);
         setFailedRowsOffset(0);
         await loadDetail(nextJobId, 0);
       }
@@ -204,24 +230,34 @@ export function ImportJobsDashboard({
     }
   }
 
+  function openDetail(jobId: string) {
+    setDetailJobId(jobId);
+    setFailedRowsOffset(0);
+    setIsDetailOpen(true);
+    setError(null);
+    loadDetail(jobId, 0).catch((detailError) => {
+      setError(detailError instanceof Error ? detailError.message : "Unable to load job detail.");
+    });
+  }
+
+  function closeDetail() {
+    setIsDetailOpen(false);
+  }
+
   useEffect(() => {
-    if (!selectedJobId) {
-      setDetail(null);
-      setFailedRows([]);
-      return;
-    }
-    loadDetail(selectedJobId, failedRowsOffset).catch((detailError) => {
-      setError(detailError instanceof Error ? detailError.message : "Unable to load selected job.");
+    if (!isDetailOpen || !detailJobId) return;
+    loadDetail(detailJobId, failedRowsOffset).catch((detailError) => {
+      setError(detailError instanceof Error ? detailError.message : "Unable to refresh job detail.");
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedJobId, failedRowsOffset, failedRowsLimit, failedRowsSearch]);
+  }, [failedRowsOffset, failedRowsSearch, failedRowsLimit, detailJobId, isDetailOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
     const interval = window.setInterval(() => {
       loadJobs(offset, limit, controller.signal).catch(() => null);
-      if (selectedJobId) {
-        loadDetail(selectedJobId, failedRowsOffset).catch(() => null);
+      if (isDetailOpen && detailJobId) {
+        loadDetail(detailJobId, failedRowsOffset).catch(() => null);
       }
     }, 8000);
     return () => {
@@ -229,15 +265,15 @@ export function ImportJobsDashboard({
       window.clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, limit, selectedJobId, failedRowsOffset, failedRowsSearch, filters]);
+  }, [offset, limit, isDetailOpen, detailJobId, failedRowsOffset, failedRowsSearch, filters]);
 
-  const selectedStatus = toText(detail?.status);
-  const stopAllowed = selectedStatus === "queued" || selectedStatus === "processing";
-  const retryAllowed =
-    (selectedStatus === "failed" ||
-      selectedStatus === "completed_with_errors" ||
-      selectedStatus === "stalled" ||
-      selectedStatus === "cancelled") &&
+  const detailStatus = toText(detail?.status);
+  const detailStopAllowed = detailStatus === "queued" || detailStatus === "processing";
+  const detailRetryAllowed =
+    (detailStatus === "failed" ||
+      detailStatus === "completed_with_errors" ||
+      detailStatus === "stalled" ||
+      detailStatus === "cancelled") &&
     toNumber(detail?.failed_rows, 0) > 0;
 
   return (
@@ -328,80 +364,102 @@ export function ImportJobsDashboard({
       </Card>
 
       <Card>
-        <CardHeader title="Job Queue and History" subtitle="Click any job row to view full details." />
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1400px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="py-2">Job ID</th>
-                <th className="py-2">Import Type</th>
-                <th className="py-2">Source File</th>
-                <th className="py-2">Submitted By</th>
-                <th className="py-2">Created</th>
-                <th className="py-2">Started</th>
-                <th className="py-2">Completed</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Progress</th>
-                <th className="py-2">Rows</th>
-                <th className="py-2">Last Activity</th>
-                <th className="py-2">Last Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((job) => {
-                const id = toText(job.id);
-                const status = toText(job.status);
-                return (
-                  <tr
-                    key={id}
-                    className={`cursor-pointer border-b border-slate-100 ${
-                      selectedJobId === id ? "bg-brand-50" : "hover:bg-slate-50"
-                    }`}
-                    onClick={() => {
-                      setSelectedJobId(id);
-                      setFailedRowsOffset(0);
-                    }}
+        <CardHeader
+          title="Job Queue and History"
+          subtitle="Each row includes status, progress, actions, and downloadable reports."
+        />
+        <div className="space-y-3">
+          {jobs.map((job) => {
+            const jobId = toText(job.id);
+            const status = toText(job.status);
+            const failedRowsCount = toNumber(job.failed_rows, 0);
+            const isStopAllowed = status === "queued" || status === "processing";
+            const isRetryAllowed =
+              (status === "failed" ||
+                status === "completed_with_errors" ||
+                status === "stalled" ||
+                status === "cancelled") &&
+              failedRowsCount > 0;
+            const baseUrl = `/api/import-center/jobs/${encodeURIComponent(jobId)}`;
+            return (
+              <div key={jobId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="grid gap-3 lg:grid-cols-4 xl:grid-cols-6">
+                  <div className="rounded-md border border-slate-200 bg-brand-50 p-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-700">Job ID</p>
+                    <button
+                      type="button"
+                      onClick={() => openDetail(jobId)}
+                      className="text-left text-sm font-semibold text-brand-700 underline"
+                    >
+                      {jobId || "-"}
+                    </button>
+                  </div>
+                  <InfoField label="Import Type" value={toText(job.import_type) || "-"} />
+                  <InfoField label="Source File" value={toText(job.file_name) || "-"} />
+                  <InfoField label="Submitted By" value={toText(job.submitted_by_name) || "-"} />
+                  <InfoField label="Created" value={formatDate(job.created_at)} />
+                  <InfoField label="Started" value={formatDate(job.processing_started_at || job.started_at)} />
+                  <InfoField label="Completed" value={formatDate(job.completed_at)} />
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</p>
+                    <span
+                      className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                        STATUS_BADGE[status] ?? "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {prettyStatus(status)}
+                    </span>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Progress</p>
+                    <ProgressCell job={job} />
+                  </div>
+                  <InfoField
+                    label="Rows"
+                    value={`total ${toNumber(job.total_rows, 0)} | processed ${toNumber(
+                      job.processed_rows,
+                      0
+                    )} | ok ${toNumber(job.successful_rows, 0)} | failed ${toNumber(job.failed_rows, 0)}`}
+                  />
+                  <InfoField label="Last Activity" value={formatDate(job.last_activity_at)} />
+                  <InfoField
+                    label="Last Error"
+                    value={toText(job.last_error_message) || "-"}
+                    valueClassName="text-xs text-red-700"
+                  />
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="danger"
+                    disabled={!isStopAllowed || busyAction !== null}
+                    onClick={() => stopJob(jobId)}
                   >
-                    <td className="py-2 font-mono text-xs text-slate-700">{id || "-"}</td>
-                    <td className="py-2">{toText(job.import_type) || "-"}</td>
-                    <td className="py-2">{toText(job.file_name) || "-"}</td>
-                    <td className="py-2">{toText(job.submitted_by_name) || "-"}</td>
-                    <td className="py-2">{formatDate(job.created_at)}</td>
-                    <td className="py-2">{formatDate(job.processing_started_at || job.started_at)}</td>
-                    <td className="py-2">{formatDate(job.completed_at)}</td>
-                    <td className="py-2">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
-                          STATUS_BADGE[status] ?? "bg-slate-100 text-slate-700"
-                        }`}
-                      >
-                        {prettyStatus(status)}
-                      </span>
-                    </td>
-                    <td className="py-2">
-                      <ProgressCell job={job} />
-                    </td>
-                    <td className="py-2 text-xs text-slate-700">
-                      total {toNumber(job.total_rows, 0)} | processed {toNumber(job.processed_rows, 0)} | ok{" "}
-                      {toNumber(job.successful_rows, 0)} | failed {toNumber(job.failed_rows, 0)}
-                    </td>
-                    <td className="py-2">{formatDate(job.last_activity_at)}</td>
-                    <td className="max-w-[260px] py-2 text-xs text-red-700">
-                      {toText(job.last_error_message) || "-"}
-                    </td>
-                  </tr>
-                );
-              })}
-              {jobs.length === 0 ? (
-                <tr>
-                  <td className="py-3 text-slate-500" colSpan={12}>
-                    No import jobs found for the current filters.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+                    Stop Job
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!isRetryAllowed || busyAction !== null}
+                    onClick={() => retryFailedRows(jobId)}
+                  >
+                    Retry Failed Rows
+                  </Button>
+                  <DownloadButton href={`${baseUrl}/errors`} label="Download Failure Report" />
+                  <DownloadButton href={`${baseUrl}/corrected-template`} label="Download Corrected Template" />
+                  <DownloadButton href={`${baseUrl}/report`} label="Download Job Summary" />
+                </div>
+              </div>
+            );
+          })}
+          {jobs.length === 0 ? (
+            <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              No import jobs found for the current filters.
+            </p>
+          ) : null}
         </div>
+
         <div className="mt-3 flex items-center justify-between">
           <p className="text-xs text-slate-600">
             Page {currentPage} of {pageCount} ({total} total jobs)
@@ -435,178 +493,187 @@ export function ImportJobsDashboard({
         </div>
       </Card>
 
-      <Card>
-        <CardHeader title="Job Detail" subtitle="Operational detail, error rows, logs, and corrective actions." />
-        {!detail ? (
-          <p className="text-sm text-slate-600">Select a job to inspect full details.</p>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Job ID:</span> <span className="font-mono">{toText(detail.id)}</span>
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Import Type:</span> {toText(detail.import_type) || "-"}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">File Name:</span> {toText(detail.file_name) || "-"}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Submitted By:</span> {toText(detail.submitted_by_name) || "-"}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Submitted:</span> {formatDate(detail.created_at)}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Started:</span>{" "}
-                {formatDate(detail.processing_started_at || detail.started_at)}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Completed:</span> {formatDate(detail.completed_at)}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Last Activity:</span> {formatDate(detail.last_activity_at)}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Manual Stop Requested:</span>{" "}
-                {Boolean(detail.stop_requested) ? "Yes" : "No"}
-              </p>
-              <p className="text-sm">
-                <span className="font-semibold text-slate-900">Last Checkpoint:</span>{" "}
-                {toNumber(detail.last_processed_row, toNumber(detail.processed_rows, 0))}
-              </p>
-              <p className="text-sm xl:col-span-2">
-                <span className="font-semibold text-slate-900">Error Summary:</span>{" "}
-                <span className="text-red-700">{toText(detail.last_error_message) || "-"}</span>
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="danger"
-                disabled={!stopAllowed || busyAction !== null}
-                onClick={() => stopJob(toText(detail.id))}
-              >
-                Stop Job
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!retryAllowed || busyAction !== null}
-                onClick={() => retryFailedRows(toText(detail.id))}
-              >
-                Retry Failed Rows
-              </Button>
-              <a
-                className="inline-flex items-center rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-200"
-                href={`/api/import-center/jobs/${encodeURIComponent(toText(detail.id))}/errors`}
-              >
-                Download Failure Report
-              </a>
-              <a
-                className="inline-flex items-center rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-200"
-                href={`/api/import-center/jobs/${encodeURIComponent(toText(detail.id))}/corrected-template`}
-              >
-                Download Corrected Template
-              </a>
-              <a
-                className="inline-flex items-center rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-200"
-                href={`/api/import-center/jobs/${encodeURIComponent(toText(detail.id))}/report`}
-              >
-                Download Job Summary
-              </a>
-            </div>
-
-            <div>
-              <p className="mb-2 text-sm font-semibold text-slate-900">Processor Log Snippet</p>
-              <div className="max-h-48 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                <pre className="whitespace-pre-wrap">{toText(detail.processor_log) || "No processor log available."}</pre>
+      {isDetailOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/45 p-4"
+          onClick={closeDetail}
+        >
+          <div
+            className="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <div>
+                <p className="text-base font-semibold text-slate-900">Job Detail</p>
+                <p className="text-xs text-slate-600">Operational detail, errors, logs, and corrective actions.</p>
               </div>
+              <Button type="button" variant="secondary" onClick={closeDetail}>
+                Close
+              </Button>
             </div>
-
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={failedRowsOnly}
-                    onChange={(event) => setFailedRowsOnly(event.target.checked)}
-                  />
-                  View only failed rows
-                </label>
-                <Input
-                  className="max-w-sm"
-                  placeholder="Filter failed rows by error message"
-                  value={failedRowsSearch}
-                  onChange={(event) => {
-                    setFailedRowsOffset(0);
-                    setFailedRowsSearch(event.target.value);
-                  }}
-                />
-              </div>
-              {failedRowsOnly ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200">
-                        <th className="py-2">Row #</th>
-                        <th className="py-2">Error</th>
-                        <th className="py-2">Raw Row</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {failedRows.map((row) => (
-                        <tr key={`${toText(row.id)}:${toText(row.row_index)}`} className="border-b border-slate-100">
-                          <td className="py-2">{toText(row.row_index) || "-"}</td>
-                          <td className="max-w-[320px] py-2 text-xs text-red-700">{toText(row.error_message) || "-"}</td>
-                          <td className="py-2 text-xs text-slate-700">
-                            <pre className="max-h-28 overflow-auto whitespace-pre-wrap">
-                              {JSON.stringify(row.raw_row ?? {}, null, 2)}
-                            </pre>
-                          </td>
-                        </tr>
-                      ))}
-                      {failedRows.length === 0 ? (
-                        <tr>
-                          <td className="py-3 text-slate-500" colSpan={3}>
-                            No failed rows for this job.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
+            <div className="max-h-[calc(92vh-72px)] space-y-4 overflow-auto p-5">
+              {!detail ? (
+                <p className="text-sm text-slate-600">Loading job detail...</p>
               ) : (
-                <p className="text-sm text-slate-600">
-                  Row-level detail storage currently tracks failed rows only. Turn this filter on to inspect failures.
-                </p>
+                <>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <InfoField label="Job ID" value={toText(detail.id)} valueClassName="font-mono text-xs" />
+                    <InfoField label="Import Type" value={toText(detail.import_type) || "-"} />
+                    <InfoField label="File Name" value={toText(detail.file_name) || "-"} />
+                    <InfoField label="Submitted By" value={toText(detail.submitted_by_name) || "-"} />
+                    <InfoField label="Submitted" value={formatDate(detail.created_at)} />
+                    <InfoField label="Started" value={formatDate(detail.processing_started_at || detail.started_at)} />
+                    <InfoField label="Completed" value={formatDate(detail.completed_at)} />
+                    <InfoField label="Last Activity" value={formatDate(detail.last_activity_at)} />
+                    <InfoField
+                      label="Manual Stop Requested"
+                      value={Boolean(detail.stop_requested) ? "Yes" : "No"}
+                    />
+                    <InfoField
+                      label="Last Checkpoint"
+                      value={String(toNumber(detail.last_processed_row, toNumber(detail.processed_rows, 0)))}
+                    />
+                    <InfoField
+                      label="Error Summary"
+                      value={toText(detail.last_error_message) || "-"}
+                      valueClassName="text-xs text-red-700"
+                    />
+                    <InfoField
+                      label="Rows"
+                      value={`total ${toNumber(detail.total_rows, 0)} | processed ${toNumber(
+                        detail.processed_rows,
+                        0
+                      )} | ok ${toNumber(detail.successful_rows, 0)} | failed ${toNumber(detail.failed_rows, 0)}`}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="danger"
+                      disabled={!detailStopAllowed || busyAction !== null}
+                      onClick={() => stopJob(toText(detail.id))}
+                    >
+                      Stop Job
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!detailRetryAllowed || busyAction !== null}
+                      onClick={() => retryFailedRows(toText(detail.id))}
+                    >
+                      Retry Failed Rows
+                    </Button>
+                    <DownloadButton
+                      href={`/api/import-center/jobs/${encodeURIComponent(toText(detail.id))}/errors`}
+                      label="Download Failure Report"
+                    />
+                    <DownloadButton
+                      href={`/api/import-center/jobs/${encodeURIComponent(toText(detail.id))}/corrected-template`}
+                      label="Download Corrected Template"
+                    />
+                    <DownloadButton
+                      href={`/api/import-center/jobs/${encodeURIComponent(toText(detail.id))}/report`}
+                      label="Download Job Summary"
+                    />
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-sm font-semibold text-slate-900">Processor Log Snippet</p>
+                    <div className="max-h-48 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                      <pre className="whitespace-pre-wrap">
+                        {toText(detail.processor_log) || "No processor log available."}
+                      </pre>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={failedRowsOnly}
+                          onChange={(event) => setFailedRowsOnly(event.target.checked)}
+                        />
+                        View only failed rows
+                      </label>
+                      <Input
+                        className="max-w-sm"
+                        placeholder="Filter failed rows by error message"
+                        value={failedRowsSearch}
+                        onChange={(event) => {
+                          setFailedRowsOffset(0);
+                          setFailedRowsSearch(event.target.value);
+                        }}
+                      />
+                    </div>
+                    {failedRowsOnly ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[900px] text-left text-sm">
+                          <thead>
+                            <tr className="border-b border-slate-200">
+                              <th className="py-2">Row #</th>
+                              <th className="py-2">Error</th>
+                              <th className="py-2">Raw Row</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {failedRows.map((row) => (
+                              <tr key={`${toText(row.id)}:${toText(row.row_index)}`} className="border-b border-slate-100">
+                                <td className="py-2">{toText(row.row_index) || "-"}</td>
+                                <td className="max-w-[320px] py-2 text-xs text-red-700">
+                                  {toText(row.error_message) || "-"}
+                                </td>
+                                <td className="py-2 text-xs text-slate-700">
+                                  <pre className="max-h-28 overflow-auto whitespace-pre-wrap">
+                                    {JSON.stringify(row.raw_row ?? {}, null, 2)}
+                                  </pre>
+                                </td>
+                              </tr>
+                            ))}
+                            {failedRows.length === 0 ? (
+                              <tr>
+                                <td className="py-3 text-slate-500" colSpan={3}>
+                                  No failed rows for this job.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-600">
+                        Row-level detail storage currently tracks failed rows only. Turn this filter on to inspect failures.
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-slate-600">{failedRowsTotal} failed rows</p>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={failedRowsOffset <= 0}
+                          onClick={() => setFailedRowsOffset(Math.max(0, failedRowsOffset - failedRowsLimit))}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={failedRowsOffset + failedRowsLimit >= failedRowsTotal}
+                          onClick={() => setFailedRowsOffset(failedRowsOffset + failedRowsLimit)}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </>
               )}
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-slate-600">{failedRowsTotal} failed rows</p>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={failedRowsOffset <= 0}
-                    onClick={() => setFailedRowsOffset(Math.max(0, failedRowsOffset - failedRowsLimit))}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={failedRowsOffset + failedRowsLimit >= failedRowsTotal}
-                    onClick={() => setFailedRowsOffset(failedRowsOffset + failedRowsLimit)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
             </div>
           </div>
-        )}
-      </Card>
+        </div>
+      ) : null}
     </div>
   );
 }

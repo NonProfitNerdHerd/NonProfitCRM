@@ -41,9 +41,9 @@ export default async function DataToolsPage() {
           <p className="text-sm font-semibold text-slate-900">Roles</p>
           <p className="text-xs text-slate-600">Review role hierarchy and permission matrix.</p>
         </Link>
-        <Link href="/staff/admin/contacts/merge" className={LINK_CARD_CLASSES}>
-          <p className="text-sm font-semibold text-slate-900">Contact Merge</p>
-          <p className="text-xs text-slate-600">Merge duplicate contacts with audit traceability.</p>
+        <Link href="/staff/data-tools/merge-center" className={LINK_CARD_CLASSES}>
+          <p className="text-sm font-semibold text-slate-900">Merge Center</p>
+          <p className="text-xs text-slate-600">Open contact merge workflows and deduplication tools.</p>
         </Link>
         {givingFuelState.allowModuleAccess ? (
           <Link href="/staff/data-tools/giving-fuel" className={LINK_CARD_CLASSES}>

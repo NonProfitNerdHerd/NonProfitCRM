@@ -10,7 +10,14 @@ type MenuItem = {
   href: string;
   label: string;
   matches: (pathname: string) => boolean;
-  children?: Array<{ href: string; label: string }>;
+  children?: MenuChild[];
+};
+
+type MenuChild = {
+  href: string;
+  label: string;
+  matches?: (pathname: string) => boolean;
+  children?: MenuChild[];
 };
 
 const BASE_MENU: MenuItem[] = [
@@ -99,6 +106,32 @@ export function StaffSidebar({
   const withTenantPrefix = (href: string) => `${tenantPrefix}${href}`;
   const isPathActive = (baseHref: string) =>
     normalizedPathname === baseHref || normalizedPathname.startsWith(`${baseHref}/`);
+  const isChildActive = (child: MenuChild) =>
+    child.matches ? child.matches(normalizedPathname) : isPathActive(child.href);
+
+  function renderChildLinks(children: MenuChild[], depth = 0) {
+    return (
+      <div className={cn("mt-1 space-y-1 border-slate-200", depth === 0 ? "ml-3 border-l pl-3" : "ml-2 border-l pl-2")}>
+        {children.map((child) => {
+          const childActive = isChildActive(child);
+          return (
+            <div key={child.href}>
+              <Link
+                href={withTenantPrefix(child.href)}
+                className={cn(
+                  "block rounded-md px-2 py-1.5 text-xs font-medium transition",
+                  childActive ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100"
+                )}
+              >
+                {child.label}
+              </Link>
+              {childActive && child.children?.length ? renderChildLinks(child.children, depth + 1) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   const menu = [
     ...BASE_MENU,
     ...(canAccessVolunteerCoordination
@@ -143,20 +176,30 @@ export function StaffSidebar({
               path.startsWith("/staff/admin/contacts/merge"),
             children: [
               { href: "/staff/data-tools", label: "Overview" },
-              { href: "/staff/import-center", label: "Import Center" },
-              { href: "/staff/import-center/jobs", label: "Import Jobs" },
-              { href: "/staff/import-center/contacts", label: "Contacts Import" },
-              { href: "/staff/import-center/transactions", label: "Transactions Import" },
+              {
+                href: "/staff/import-center",
+                label: "Import Center",
+                matches: (path: string) => path.startsWith("/staff/import-center"),
+                children: [
+                  { href: "/staff/import-center/jobs", label: "Import Jobs" },
+                  { href: "/staff/import-center/contacts", label: "Contacts Import" },
+                  { href: "/staff/import-center/transactions", label: "Transactions Import" }
+                ]
+              },
               ...(canAccessGivingFuelModule
-                ? ([{ href: "/staff/data-tools/giving-fuel", label: "Giving Fuel" }] as Array<{
-                    href: string;
-                    label: string;
-                  }>)
+                ? ([{ href: "/staff/data-tools/giving-fuel", label: "Giving Fuel" }] as MenuChild[])
                 : []),
               { href: "/staff/data-tools/bulk-tag-contacts", label: "Bulk Tag Contacts" },
+              {
+                href: "/staff/data-tools/merge-center",
+                label: "Merge Center",
+                matches: (path: string) =>
+                  path.startsWith("/staff/data-tools/merge-center") ||
+                  path.startsWith("/staff/admin/contacts/merge"),
+                children: [{ href: "/staff/admin/contacts/merge", label: "Contact Merge" }]
+              },
               { href: "/staff/admin/roles", label: "Roles" },
-              { href: "/staff/admin/tags", label: "Tags" },
-              { href: "/staff/admin/contacts/merge", label: "Contact Merge" }
+              { href: "/staff/admin/tags", label: "Tags" }
             ]
           } satisfies MenuItem
         ] as MenuItem[])
@@ -207,27 +250,7 @@ export function StaffSidebar({
               >
                 {item.label}
               </Link>
-              {isActive && item.children ? (
-                <div className="ml-3 mt-1 space-y-1 border-l border-slate-200 pl-3">
-                  {item.children.map((child) => {
-                    const childActive = isPathActive(child.href);
-                    return (
-                      <Link
-                        key={child.href}
-                        href={withTenantPrefix(child.href)}
-                        className={cn(
-                          "block rounded-md px-2 py-1.5 text-xs font-medium transition",
-                          childActive
-                            ? "bg-brand-50 text-brand-700"
-                            : "text-slate-600 hover:bg-slate-100"
-                        )}
-                      >
-                        {child.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              ) : null}
+              {isActive && item.children ? renderChildLinks(item.children) : null}
             </div>
           );
         })}
