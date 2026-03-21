@@ -33,6 +33,7 @@ import {
   type ReimportMatchSettings
 } from "@/lib/import-center/types";
 import { listImportCenterTemplates } from "@/lib/import-center/template-service";
+import { formatImportErrorMessage } from "@/lib/import-center/error-diagnostics";
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -1204,8 +1205,10 @@ export async function processContactsImportChunk(input: {
         organizationId: context.organizationId,
         jobId: input.jobId,
         rowIndex,
-        errorMessage:
-          error instanceof Error ? error.message : "Unexpected error while importing contact row.",
+        errorMessage: formatImportErrorMessage(
+          error,
+          "Unexpected error while importing contact row."
+        ),
         rawRow: row
       });
     }

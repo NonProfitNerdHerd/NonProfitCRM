@@ -6,6 +6,7 @@ import { mappingSummary, sanitizeInternalKey } from "@/lib/import-center/field-m
 import { appendImportCenterRowError, logImportCenterAudit } from "@/lib/import-center/logging-service";
 import { createContactCustomField, listContactCustomFields } from "@/lib/import-center/custom-fields-service";
 import type { ImportCenterMapping, TransactionImportConfig } from "@/lib/import-center/types";
+import { formatImportErrorMessage } from "@/lib/import-center/error-diagnostics";
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -809,8 +810,10 @@ export async function processTransactionsImportChunk(input: {
         organizationId: context.organizationId,
         jobId: input.jobId,
         rowIndex,
-        errorMessage:
-          error instanceof Error ? error.message : "Unexpected error while importing transaction row.",
+        errorMessage: formatImportErrorMessage(
+          error,
+          "Unexpected error while importing transaction row."
+        ),
         rawRow: row
       });
     }

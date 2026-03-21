@@ -5,6 +5,7 @@ import {
   triggerImportCenterRunner
 } from "@/lib/import-center/async-queue-service";
 import { resolveImportCenterExecution } from "@/lib/import-center/execution-context";
+import { classifyImportError } from "@/lib/import-center/error-diagnostics";
 
 function toText(value: unknown) {
   return String(value ?? "").trim();
@@ -462,18 +463,43 @@ export async function requestRetryFailedRows(jobId: string) {
 }
 
 export async function buildFailureReportCsv(jobId: string) {
+  const { context, supabase } = await resolveImportCenterExecution();
+  const { data: job, error: jobError } = await supabase
+    .from("import_center_jobs")
+    .select("id,status,last_error_message,processor_error,mapping_configuration_snapshot,classification_snapshot")
+    .eq("organization_id", context.organizationId)
+    .eq("id", jobId)
+    .maybeSingle();
+  if (jobError) throw jobError;
+
   const { rows } = await listImportJobErrorsPaged({ jobId, offset: 0, limit: 20000 });
   const typedRows = rows as Array<Record<string, unknown>>;
   const rawRows = typedRows.map((row) => (row.raw_row ?? {}) as Record<string, unknown>);
   const rawHeaders = Array.from(new Set(rawRows.flatMap((raw) => Object.keys(raw ?? {}))));
-  const headers = ["row_number", "error_message", "notes", ...rawHeaders];
+  const headers = [
+    "row_number",
+    "error_message",
+    "diagnostic_category",
+    "likely_cause",
+    "suggested_fix",
+    "job_status",
+    "job_last_error",
+    "raw_row_json",
+    ...rawHeaders
+  ];
   const lines = [headers.map((header) => escapeCsv(header)).join(",")];
   for (const row of typedRows) {
     const raw = (row.raw_row ?? {}) as Record<string, unknown>;
+    const diagnostics = classifyImportError(toText(row.error_message));
     const values = [
       escapeCsv(row.row_index),
       escapeCsv(row.error_message),
-      escapeCsv("Fix and retry import"),
+      escapeCsv(diagnostics.category),
+      escapeCsv(diagnostics.likelyCause),
+      escapeCsv(diagnostics.suggestedFix),
+      escapeCsv(toText(job?.status) || "-"),
+      escapeCsv(toText(job?.last_error_message) || toText(job?.processor_error) || "-"),
+      escapeCsv(JSON.stringify(raw)),
       ...rawHeaders.map((header) => escapeCsv(raw[header]))
     ];
     lines.push(values.join(","));

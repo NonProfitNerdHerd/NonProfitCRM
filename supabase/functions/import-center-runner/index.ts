@@ -16,6 +16,37 @@ function toNumber(value: unknown, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function formatImportErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    const message = toText(error.message);
+    if (message) return message;
+    return fallback;
+  }
+  if (typeof error === "string") {
+    const message = toText(error);
+    return message || fallback;
+  }
+  if (error && typeof error === "object") {
+    const value = error as {
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      code?: unknown;
+      error?: unknown;
+    };
+    const parts = [toText(value.message), toText(value.details), toText(value.hint), toText(value.code)].filter(Boolean);
+    if (parts.length > 0) return parts.join(" | ");
+    const nested = toText(value.error);
+    if (nested) return nested;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 function appendLog(current: unknown, message: string, maxChars = 16000) {
   const existing = toText(current);
   const next = [existing, `${new Date().toISOString()} ${message}`].filter(Boolean).join("\n");
@@ -1103,7 +1134,10 @@ async function processContactsImport(input: {
         organizationId,
         jobId: toText(input.job.id),
         rowIndex,
-        errorMessage: error instanceof Error ? error.message : "Unexpected error while importing contact row.",
+        errorMessage: formatImportErrorMessage(
+          error,
+          "Unexpected error while importing contact row."
+        ),
         rawRow: row
       });
     }
@@ -1692,7 +1726,10 @@ async function processTransactionsImport(input: {
         organizationId,
         jobId: toText(input.job.id),
         rowIndex,
-        errorMessage: error instanceof Error ? error.message : "Unexpected error while importing transaction row.",
+        errorMessage: formatImportErrorMessage(
+          error,
+          "Unexpected error while importing transaction row."
+        ),
         rawRow: row
       });
     }
@@ -2055,7 +2092,7 @@ Deno.serve(async (request) => {
       batchSize
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown import runner failure.";
+    const message = formatImportErrorMessage(error, "Unknown import runner failure.");
     const jobId = toText(requestPayload.jobId);
     try {
       if (jobId) {
