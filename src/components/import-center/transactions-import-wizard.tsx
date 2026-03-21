@@ -182,6 +182,7 @@ export function TransactionsImportWizard() {
   const [createdFieldKeys, setCreatedFieldKeys] = useState<string[]>([]);
 
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -206,9 +207,9 @@ export function TransactionsImportWizard() {
   );
 
   const [runResult, setRunResult] = useState<Record<string, unknown> | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [runProgress, setRunProgress] = useState<{
-    currentChunk: number;
-    totalChunks: number;
+    status: string;
     processedRows: number;
     totalRows: number;
   } | null>(null);
@@ -321,6 +322,76 @@ export function TransactionsImportWizard() {
     }
   }, [rows, mappingPreviewIndex]);
 
+  useEffect(() => {
+    const jobId = activeJobId;
+    if (!jobId) return;
+    let cancelled = false;
+
+    async function pollJob() {
+      try {
+        const response = await fetch(`/api/import-center/jobs/${encodeURIComponent(String(jobId))}`, {
+          cache: "no-store"
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | { job?: Record<string, unknown>; message?: string }
+          | null;
+        if (!response.ok) {
+          throw new Error(toText(payload?.message) || "Unable to load import job.");
+        }
+        const job = (payload?.job ?? {}) as Record<string, unknown>;
+        const status = toText(job.status) || "queued";
+        const totalRows = Number(job.total_rows ?? rows.length);
+        const processedRows = Number(
+          job.processed_rows ??
+            Number(job.successful_rows ?? 0) +
+              Number(job.failed_rows ?? 0) +
+              Number(job.skipped_rows ?? 0)
+        );
+        if (cancelled) return;
+        setRunProgress({
+          status,
+          processedRows: Number.isFinite(processedRows) ? processedRows : 0,
+          totalRows: Number.isFinite(totalRows) ? totalRows : 0
+        });
+
+        if (["completed", "completed_with_errors", "failed"].includes(status)) {
+          setActiveJobId(null);
+          setLoading(false);
+          if (status === "failed") {
+            setError(toText(job.processor_error) || "Import failed.");
+          }
+          setRunResult({
+            jobId: toText(job.id),
+            totalRows: Number(job.total_rows ?? 0),
+            successfulRows: Number(job.successful_rows ?? 0),
+            failedRows: Number(job.failed_rows ?? 0),
+            skippedRows: Number(job.skipped_rows ?? 0),
+            matchedContactCount: Number(job.matched_contact_count ?? 0),
+            createdContactCount: Number(job.created_contact_count ?? 0),
+            createdTransactionCount: Number(job.created_transaction_count ?? 0),
+            campaignMappedCount: Number(job.campaign_mapped_count ?? 0),
+            campaignUnmappedSkipCount: Number(job.campaign_unmapped_skip_count ?? 0),
+            noContactMatchSkipCount: Number(job.no_contact_match_skip_count ?? 0),
+            ambiguousContactMatchCount: Number(job.ambiguous_contact_match_count ?? 0)
+          });
+          if (status !== "failed") {
+            setMessage("Transactions import finished.");
+          }
+        }
+      } catch (pollError) {
+        if (cancelled) return;
+        setError(pollError instanceof Error ? pollError.message : "Unable to load import status.");
+      }
+    }
+
+    void pollJob();
+    const interval = window.setInterval(() => void pollJob(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeJobId, rows.length]);
+
   async function handleUpload(file: File | null) {
     if (!file) return;
     setError(null);
@@ -328,6 +399,7 @@ export function TransactionsImportWizard() {
     setRunResult(null);
     setCreatedFieldKeys([]);
     setMappingPreviewIndex(0);
+    setUploadedFile(file);
     setFileName(file.name);
     try {
       const lower = file.name.toLowerCase();
@@ -620,86 +692,51 @@ export function TransactionsImportWizard() {
   }
 
   async function runImport() {
-    const CHUNK_SIZE = 100;
     setLoading(true);
     setError(null);
     setMessage(null);
     setRunProgress(null);
     try {
+      if (!uploadedFile) {
+        throw new Error("Upload a file before running import.");
+      }
       const setupError = validateStep2() ?? validateStep3() ?? validateStep4() ?? validateStep5();
       if (setupError) throw new Error(setupError);
-
-      const startResponse = await fetch("/api/import-center/transactions/jobs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "start",
+      const formData = new FormData();
+      formData.append("action", "enqueue");
+      formData.append("file", uploadedFile);
+      formData.append(
+        "metadata",
+        JSON.stringify({
           fileName,
           totalRows: rows.length,
           mappings,
           templateId: selectedTemplateId || null,
-          config
+          config,
+          selectedSheet: selectedSheet || null
         })
-      });
-      const startPayload = (await startResponse.json().catch(() => null)) as Record<string, unknown> | null;
-      if (!startResponse.ok) {
-        throw new Error(toText(startPayload?.message) || "Unable to start transactions import.");
-      }
-      const jobId = toText(startPayload?.jobId);
-      if (!jobId) throw new Error("Import did not return a job ID.");
-
-      const totalChunks = Math.max(1, Math.ceil(rows.length / CHUNK_SIZE));
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-        const rowOffset = chunkIndex * CHUNK_SIZE;
-        const chunkRows = rows.slice(rowOffset, rowOffset + CHUNK_SIZE);
-        setRunProgress({
-          currentChunk: chunkIndex + 1,
-          totalChunks,
-          processedRows: Math.min(rowOffset, rows.length),
-          totalRows: rows.length
-        });
-
-        const chunkResponse = await fetch("/api/import-center/transactions/jobs", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            action: "chunk",
-            jobId,
-            rows: chunkRows,
-            rowOffset
-          })
-        });
-        const chunkPayload = (await chunkResponse.json().catch(() => null)) as Record<string, unknown> | null;
-        if (!chunkResponse.ok) {
-          throw new Error(toText(chunkPayload?.message) || `Chunk ${chunkIndex + 1} failed.`);
-        }
-      }
-
-      const completeResponse = await fetch("/api/import-center/transactions/jobs", {
+      );
+      const response = await fetch("/api/import-center/transactions/jobs", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "complete",
-          jobId
-        })
+        body: formData
       });
-      const completePayload = (await completeResponse.json().catch(() => null)) as
-        | Record<string, unknown>
-        | null;
-      if (!completeResponse.ok) {
-        throw new Error(toText(completePayload?.message) || "Import completed chunks but failed to finalize.");
+      const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!response.ok) {
+        throw new Error(toText(payload?.message) || "Unable to queue transactions import.");
       }
+      const jobId = toText(payload?.jobId);
+      if (!jobId) throw new Error("Unable to queue import job. No job ID was returned.");
+      setActiveJobId(jobId);
+      setRunResult(null);
       setRunProgress({
-        currentChunk: totalChunks,
-        totalChunks,
-        processedRows: rows.length,
+        status: "queued",
+        processedRows: 0,
         totalRows: rows.length
       });
-      setRunResult(completePayload);
-      setMessage("Transactions import finished.");
+      setMessage("Transactions import queued. Processing continues in the background.");
+      setLoading(false);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Unable to run transactions import.");
-    } finally {
       setLoading(false);
     }
   }
@@ -797,10 +834,7 @@ export function TransactionsImportWizard() {
                     onChange={async (event) => {
                       const selected = event.target.value;
                       setSelectedSheet(selected);
-                      const file = (document.querySelector(
-                        'input[type="file"]'
-                      ) as HTMLInputElement | null)?.files?.[0];
-                      if (file) await reloadWorkbookSheet(file, selected);
+                      if (uploadedFile) await reloadWorkbookSheet(uploadedFile, selected);
                     }}
                   >
                     {sheetNames.map((sheet) => (
@@ -1345,13 +1379,16 @@ export function TransactionsImportWizard() {
             subtitle="Import transactions, link contacts, create missing contacts (if selected), and resolve campaigns."
           />
           <div className="space-y-3">
-            <Button type="button" disabled={loading} onClick={() => void runImport()}>
-              {loading ? "Running Import..." : "Run Transactions Import"}
+            <Button type="button" disabled={loading || Boolean(activeJobId)} onClick={() => void runImport()}>
+              {loading
+                ? "Queuing Import..."
+                : activeJobId
+                  ? "Import Running..."
+                  : "Run Transactions Import"}
             </Button>
             {runProgress ? (
               <p className="text-xs text-slate-600">
-                Processing chunk {runProgress.currentChunk} of {runProgress.totalChunks} (
-                {runProgress.processedRows} / {runProgress.totalRows} rows)
+                Status: {runProgress.status} ({runProgress.processedRows} / {runProgress.totalRows} rows)
               </p>
             ) : null}
             {runResult ? (

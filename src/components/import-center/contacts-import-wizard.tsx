@@ -73,6 +73,7 @@ export function ContactsImportWizard() {
   const [customFields, setCustomFields] = useState<Array<Record<string, unknown>>>([]);
 
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -100,9 +101,9 @@ export function ContactsImportWizard() {
   const [createdFieldKeys, setCreatedFieldKeys] = useState<string[]>([]);
 
   const [runResult, setRunResult] = useState<Record<string, unknown> | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [runProgress, setRunProgress] = useState<{
-    currentChunk: number;
-    totalChunks: number;
+    status: string;
     processedRows: number;
     totalRows: number;
   } | null>(null);
@@ -247,6 +248,77 @@ export function ContactsImportWizard() {
     }
   }, [rows, mappingPreviewIndex]);
 
+  useEffect(() => {
+    const jobId = activeJobId;
+    if (!jobId) return;
+    let cancelled = false;
+
+    async function pollJob() {
+      try {
+        const response = await fetch(`/api/import-center/jobs/${encodeURIComponent(String(jobId))}`, {
+          cache: "no-store"
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | { job?: Record<string, unknown>; message?: string }
+          | null;
+        if (!response.ok) {
+          throw new Error(toText(payload?.message) || "Unable to load import job.");
+        }
+        const job = (payload?.job ?? {}) as Record<string, unknown>;
+        const status = toText(job.status) || "queued";
+        const totalRows = Number(job.total_rows ?? rows.length);
+        const processedRows = Number(
+          job.processed_rows ??
+            Number(job.successful_rows ?? 0) +
+              Number(job.failed_rows ?? 0) +
+              Number(job.skipped_rows ?? 0)
+        );
+        if (cancelled) return;
+        setRunProgress({
+          status,
+          processedRows: Number.isFinite(processedRows) ? processedRows : 0,
+          totalRows: Number.isFinite(totalRows) ? totalRows : 0
+        });
+
+        if (["completed", "completed_with_errors", "failed"].includes(status)) {
+          setActiveJobId(null);
+          setLoading(false);
+          if (status === "failed") {
+            setError(toText(job.processor_error) || "Import failed.");
+          }
+          setRunResult({
+            jobId: toText(job.id),
+            totalRows: Number(job.total_rows ?? 0),
+            successfulRows: Number(job.successful_rows ?? 0),
+            failedRows: Number(job.failed_rows ?? 0),
+            skippedRows: Number(job.skipped_rows ?? 0),
+            newTagsCreated: Number(job.new_tags_created ?? 0),
+            matchedRecordCount: Number(job.matched_record_count ?? 0),
+            overwrittenRecordCount: Number(job.overwritten_record_count ?? 0),
+            blankOnlyUpdateCount: Number(job.blank_only_update_count ?? 0),
+            newRecordCount: Number(job.new_record_count ?? 0),
+            skippedExistingCount: Number(job.skipped_existing_count ?? 0),
+            missingKeySkipCount: Number(job.missing_key_skip_count ?? 0),
+            ambiguousMatchCount: Number(job.ambiguous_match_count ?? 0)
+          });
+          if (status !== "failed") {
+            setMessage("Import finished.");
+          }
+        }
+      } catch (pollError) {
+        if (cancelled) return;
+        setError(pollError instanceof Error ? pollError.message : "Unable to load import status.");
+      }
+    }
+
+    void pollJob();
+    const interval = window.setInterval(() => void pollJob(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeJobId, rows.length]);
+
   async function handleUpload(file: File | null) {
     if (!file) return;
     setError(null);
@@ -254,6 +326,7 @@ export function ContactsImportWizard() {
     setRunResult(null);
     setCreatedFieldKeys([]);
     setMappingPreviewIndex(0);
+    setUploadedFile(file);
     setFileName(file.name);
     try {
       const lower = file.name.toLowerCase();
@@ -515,22 +588,24 @@ export function ContactsImportWizard() {
   }
 
   async function runImport() {
-    const CHUNK_SIZE = 100;
     setLoading(true);
     setError(null);
     setMessage(null);
     setRunProgress(null);
     try {
+      if (!uploadedFile) {
+        throw new Error("Upload a file before running import.");
+      }
       const rerunError = validateRerunMatchingForCurrentFile();
       if (rerunError) {
         throw new Error(rerunError);
       }
-
-      const startResponse = await fetch("/api/import-center/jobs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "start",
+      const formData = new FormData();
+      formData.append("action", "enqueue");
+      formData.append("file", uploadedFile);
+      formData.append(
+        "metadata",
+        JSON.stringify({
           fileName,
           totalRows: rows.length,
           mappings,
@@ -538,120 +613,32 @@ export function ContactsImportWizard() {
           templateId: selectedTemplateId || null,
           tagDelimiter: tagsMapped ? tagDelimiter : null,
           duplicateHandling,
-          rerunMatching
+          rerunMatching,
+          selectedSheet: selectedSheet || null
         })
-      });
+      );
 
-      const rawStartPayload = await startResponse.text();
-      let startPayload: Record<string, unknown> | null = null;
-      try {
-        startPayload = rawStartPayload
-          ? (JSON.parse(rawStartPayload) as Record<string, unknown>)
-          : null;
-      } catch {
-        startPayload = null;
-      }
-
-      if (!startResponse.ok) {
-        const parts = [
-          toText(startPayload?.message) ||
-            toText(rawStartPayload) ||
-            "Unable to run import. The server did not return details.",
-          toText(startPayload?.details) ? `Details: ${toText(startPayload?.details)}` : "",
-          toText(startPayload?.hint) ? `Hint: ${toText(startPayload?.hint)}` : "",
-          toText(startPayload?.code) ? `Code: ${toText(startPayload?.code)}` : ""
-        ].filter(Boolean);
-        throw new Error(parts.join(" "));
-      }
-      const jobId = toText(startPayload?.jobId);
-      if (!jobId) {
-        throw new Error("Unable to start import job. No job ID was returned.");
-      }
-
-      const totalChunks = Math.max(1, Math.ceil(rows.length / CHUNK_SIZE));
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-        const rowOffset = chunkIndex * CHUNK_SIZE;
-        const chunkRows = rows.slice(rowOffset, rowOffset + CHUNK_SIZE);
-        setRunProgress({
-          currentChunk: chunkIndex + 1,
-          totalChunks,
-          processedRows: Math.min(rowOffset, rows.length),
-          totalRows: rows.length
-        });
-
-        const chunkResponse = await fetch("/api/import-center/jobs", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            action: "chunk",
-            jobId,
-            rows: chunkRows,
-            rowOffset
-          })
-        });
-
-        const rawChunkPayload = await chunkResponse.text();
-        let chunkPayload: Record<string, unknown> | null = null;
-        try {
-          chunkPayload = rawChunkPayload
-            ? (JSON.parse(rawChunkPayload) as Record<string, unknown>)
-            : null;
-        } catch {
-          chunkPayload = null;
-        }
-        if (!chunkResponse.ok) {
-          const parts = [
-            toText(chunkPayload?.message) ||
-              toText(rawChunkPayload) ||
-              `Chunk ${chunkIndex + 1} failed.`,
-            toText(chunkPayload?.details) ? `Details: ${toText(chunkPayload?.details)}` : "",
-            toText(chunkPayload?.hint) ? `Hint: ${toText(chunkPayload?.hint)}` : "",
-            toText(chunkPayload?.code) ? `Code: ${toText(chunkPayload?.code)}` : ""
-          ].filter(Boolean);
-          throw new Error(parts.join(" "));
-        }
-      }
-
-      const completeResponse = await fetch("/api/import-center/jobs", {
+      const response = await fetch("/api/import-center/jobs", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "complete",
-          jobId
-        })
+        body: formData
       });
-      const rawCompletePayload = await completeResponse.text();
-      let completePayload: Record<string, unknown> | null = null;
-      try {
-        completePayload = rawCompletePayload
-          ? (JSON.parse(rawCompletePayload) as Record<string, unknown>)
-          : null;
-      } catch {
-        completePayload = null;
+      const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!response.ok) {
+        throw new Error(toText(payload?.message) || "Unable to queue import.");
       }
-      if (!completeResponse.ok) {
-        const parts = [
-          toText(completePayload?.message) ||
-            toText(rawCompletePayload) ||
-            "Import completed chunks but failed to finalize.",
-          toText(completePayload?.details) ? `Details: ${toText(completePayload?.details)}` : "",
-          toText(completePayload?.hint) ? `Hint: ${toText(completePayload?.hint)}` : "",
-          toText(completePayload?.code) ? `Code: ${toText(completePayload?.code)}` : ""
-        ].filter(Boolean);
-        throw new Error(parts.join(" "));
-      }
-
+      const jobId = toText(payload?.jobId);
+      if (!jobId) throw new Error("Unable to queue import job. No job ID was returned.");
+      setActiveJobId(jobId);
       setRunProgress({
-        currentChunk: totalChunks,
-        totalChunks,
-        processedRows: rows.length,
+        status: "queued",
+        processedRows: 0,
         totalRows: rows.length
       });
-      setRunResult(completePayload as Record<string, unknown>);
-      setMessage("Import finished.");
+      setRunResult(null);
+      setMessage("Import queued. Processing continues in the background.");
+      setLoading(false);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Unable to run import.");
-    } finally {
       setLoading(false);
     }
   }
@@ -711,10 +698,7 @@ export function ContactsImportWizard() {
                     onChange={async (event) => {
                       const selected = event.target.value;
                       setSelectedSheet(selected);
-                      const file = (document.querySelector(
-                        'input[type="file"]'
-                      ) as HTMLInputElement | null)?.files?.[0];
-                      if (file) await reloadWorkbookSheet(file, selected);
+                      if (uploadedFile) await reloadWorkbookSheet(uploadedFile, selected);
                     }}
                   >
                     {sheetNames.map((sheet) => (
@@ -1260,13 +1244,16 @@ export function ContactsImportWizard() {
             subtitle="Create contacts, assign tags, and write Import History."
           />
           <div className="space-y-3">
-            <Button type="button" disabled={loading} onClick={() => void runImport()}>
-              {loading ? "Running Import..." : "Run Contact Import"}
+            <Button type="button" disabled={loading || Boolean(activeJobId)} onClick={() => void runImport()}>
+              {loading
+                ? "Queuing Import..."
+                : activeJobId
+                  ? "Import Running..."
+                  : "Run Contact Import"}
             </Button>
             {runProgress ? (
               <p className="text-xs text-slate-600">
-                Processing chunk {runProgress.currentChunk} of {runProgress.totalChunks} (
-                {runProgress.processedRows} / {runProgress.totalRows} rows)
+                Status: {runProgress.status} ({runProgress.processedRows} / {runProgress.totalRows} rows)
               </p>
             ) : null}
             {runResult ? (
