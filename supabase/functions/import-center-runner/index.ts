@@ -16,6 +16,23 @@ function toNumber(value: unknown, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function isJwtLikeToken(value: unknown) {
+  const token = toText(value);
+  if (!token) return false;
+  const parts = token.split(".");
+  return parts.length === 3 && parts.every((part) => part.length > 0);
+}
+
+function resolveFunctionGatewayAuthKey() {
+  const serviceRoleKey = toText(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
+  const anonKey = toText(Deno.env.get("SUPABASE_ANON_KEY"));
+
+  // Function gateway Authorization expects a JWT token format.
+  if (isJwtLikeToken(serviceRoleKey)) return serviceRoleKey;
+  if (isJwtLikeToken(anonKey)) return anonKey;
+  return serviceRoleKey || anonKey;
+}
+
 function slugifyTag(input: unknown) {
   const slug = String(input ?? "")
     .toLowerCase()
@@ -2147,7 +2164,10 @@ Deno.serve(async (request) => {
 
     if (status === "processing") {
       const supabaseUrl = ensureEnv("SUPABASE_URL");
-      const serviceRoleKey = ensureEnv("SUPABASE_SERVICE_ROLE_KEY");
+      const functionGatewayAuthKey = resolveFunctionGatewayAuthKey();
+      if (!functionGatewayAuthKey) {
+        throw new Error("Missing Supabase function gateway auth key for import runner scheduling.");
+      }
       const runnerSecret = toText(Deno.env.get("IMPORT_CENTER_RUNNER_SECRET"));
       const scheduleTimeoutMs = getScheduleTimeoutMs();
       const scheduleRetries = getScheduleRetries();
@@ -2162,8 +2182,8 @@ Deno.serve(async (request) => {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              authorization: `Bearer ${serviceRoleKey}`,
-              apikey: serviceRoleKey,
+              authorization: `Bearer ${functionGatewayAuthKey}`,
+              apikey: functionGatewayAuthKey,
               ...(runnerSecret ? { "x-import-center-runner-secret": runnerSecret } : {})
             },
             body: JSON.stringify({ jobId: toText(job.id) }),
