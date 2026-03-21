@@ -916,22 +916,22 @@ export async function processContactsImportChunk(input: {
       .select("id")
       .single();
     if (createdError) {
-      if (isTagSlugConflictError(createdError)) {
-        const { data: recovered, error: recoveredError } = await supabase
-          .from("tags")
-          .select("id")
-          .eq("organization_id", context.organizationId)
-          .eq("slug", lookupSlug)
-          .maybeSingle();
-        if (recoveredError) throw recoveredError;
-        if (recovered?.id) {
-          const recoveredId = String(recovered.id);
-          tagLookupCache.set(cacheKey, recoveredId);
-          input.diagnostics?.log(
-            `tag_lookup_recovered_after_conflict slug=${lookupSlug} value=${lookupValue} tag_id=${recoveredId}`
-          );
-          return recoveredId;
-        }
+      const { data: recovered, error: recoveredError } = await supabase
+        .from("tags")
+        .select("id")
+        .eq("organization_id", context.organizationId)
+        .eq("slug", lookupSlug)
+        .maybeSingle();
+      if (recoveredError) throw recoveredError;
+      if (recovered?.id) {
+        const recoveredId = String(recovered.id);
+        tagLookupCache.set(cacheKey, recoveredId);
+        input.diagnostics?.log(
+          isTagSlugConflictError(createdError)
+            ? `tag_lookup_recovered_after_conflict slug=${lookupSlug} value=${lookupValue} tag_id=${recoveredId}`
+            : `tag_lookup_recovered_after_create_error slug=${lookupSlug} value=${lookupValue} tag_id=${recoveredId} create_error=${formatImportErrorMessage(createdError, "unknown create error")}`
+        );
+        return recoveredId;
       }
       throw createdError;
     }
