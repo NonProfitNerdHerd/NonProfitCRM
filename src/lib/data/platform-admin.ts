@@ -128,6 +128,10 @@ const EMPTY_PLATFORM_DASHBOARD_ROLLUP: PlatformDashboardRollup = {
   }
 };
 
+function cloneEmptyPlatformDashboardRollup(): PlatformDashboardRollup {
+  return JSON.parse(JSON.stringify(EMPTY_PLATFORM_DASHBOARD_ROLLUP)) as PlatformDashboardRollup;
+}
+
 function generateTemporaryPassword() {
   return `Tmp!${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
@@ -312,8 +316,79 @@ export async function getPlatformDashboardRollup(): Promise<PlatformDashboardRol
   await requirePlatformAccess();
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("platform_get_dashboard_rollup");
-  if (error) throw new Error(error.message);
+  if (error) {
+    const fallback = await buildPlatformDashboardRollupFallback(supabase).catch(() => null);
+    if (fallback) return fallback;
+    throw new Error(error.message);
+  }
   return ((data as PlatformDashboardRollup | null) ?? EMPTY_PLATFORM_DASHBOARD_ROLLUP);
+}
+
+async function buildPlatformDashboardRollupFallback(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<PlatformDashboardRollup> {
+  const [tenantsRes, restoreRes, backupMetaRes] = await Promise.all([
+    supabase.from("tenants").select("id,status,backup_tier_id"),
+    supabase.from("tenant_restore_requests").select("status"),
+    supabase.from("tenant_backup_metadata").select("tenant_id,last_backup_at,last_backup_status")
+  ]);
+  if (tenantsRes.error) throw new Error(tenantsRes.error.message);
+  if (restoreRes.error) throw new Error(restoreRes.error.message);
+  if (backupMetaRes.error) throw new Error(backupMetaRes.error.message);
+
+  const tenants = (tenantsRes.data ?? []) as Array<Record<string, unknown>>;
+  const backupMetadata = (backupMetaRes.data ?? []) as Array<Record<string, unknown>>;
+  const restoreRequests = (restoreRes.data ?? []) as Array<Record<string, unknown>>;
+
+  const statusMap = new Map<string, number>();
+  let backupTierAssignedCount = 0;
+  for (const row of tenants) {
+    const status = toText(row.status) || "unknown";
+    statusMap.set(status, (statusMap.get(status) ?? 0) + 1);
+    if (toText(row.backup_tier_id)) backupTierAssignedCount += 1;
+  }
+
+  const restoreStatusMap = new Map<string, number>();
+  for (const row of restoreRequests) {
+    const status = toText(row.status) || "unknown";
+    restoreStatusMap.set(status, (restoreStatusMap.get(status) ?? 0) + 1);
+  }
+
+  const backupStatusMap = new Map<string, number>();
+  const now = Date.now();
+  const staleThreshold = now - 1000 * 60 * 60 * 48;
+  let staleBackups = 0;
+  for (const row of backupMetadata) {
+    const backupStatus = toText(row.last_backup_status) || "unknown";
+    backupStatusMap.set(backupStatus, (backupStatusMap.get(backupStatus) ?? 0) + 1);
+    const timestamp = Date.parse(toText(row.last_backup_at));
+    if (Number.isNaN(timestamp) || timestamp < staleThreshold) staleBackups += 1;
+  }
+
+  const rollup = cloneEmptyPlatformDashboardRollup();
+  rollup.tenantConfiguration.totalTenants = tenants.length;
+  rollup.tenantConfiguration.backupTierAssignedCount = backupTierAssignedCount;
+  rollup.tenantConfiguration.backupTierUnassignedCount = Math.max(
+    tenants.length - backupTierAssignedCount,
+    0
+  );
+  rollup.tenantConfiguration.statusCounts = Array.from(statusMap.entries())
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+
+  rollup.backupStatus.tenantsWithBackupMetadata = backupMetadata.length;
+  rollup.backupStatus.tenantsWithoutBackupMetadata = Math.max(tenants.length - backupMetadata.length, 0);
+  rollup.backupStatus.staleBackups = staleBackups;
+  rollup.backupStatus.statusCounts = Array.from(backupStatusMap.entries())
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+
+  rollup.restoreRequestWorkflow.totalRequests = restoreRequests.length;
+  rollup.restoreRequestWorkflow.statusCounts = Array.from(restoreStatusMap.entries())
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+
+  return rollup;
 }
 
 export async function createTenantProvisioning(input: {
