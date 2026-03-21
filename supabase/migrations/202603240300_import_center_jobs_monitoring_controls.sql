@@ -18,6 +18,16 @@ set last_processed_row = greatest(coalesce(last_processed_row, 0), coalesce(proc
 update public.import_center_jobs
 set last_activity_at = coalesce(last_activity_at, processing_heartbeat_at, updated_at, started_at, created_at);
 
+update public.import_center_jobs
+set status = 'processing'
+where status = 'running';
+
+update public.import_center_jobs
+set status = 'failed',
+    last_error_message = coalesce(nullif(last_error_message, ''), 'Unsupported legacy status migrated to failed.'),
+    processor_error = coalesce(nullif(processor_error, ''), 'Unsupported legacy status migrated to failed.')
+where status not in ('queued', 'processing', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'stalled');
+
 do $$
 begin
   if exists (
