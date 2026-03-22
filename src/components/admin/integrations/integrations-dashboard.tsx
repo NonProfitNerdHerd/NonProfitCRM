@@ -15,6 +15,7 @@ type IntegrationRow = {
   syncStatus?: "Fully Synced" | "Currently Working" | "Could Not Complete";
   syncStatusColor?: "green" | "yellow" | "red";
   statusDetail?: string;
+  lastServerResponseAt?: string | null;
   lastRecordProcessedAt?: string | null;
   canManageIntegration?: boolean;
 };
@@ -106,8 +107,10 @@ export function IntegrationsDashboard({
                 </p>
                 <p className="mt-1 text-xs text-slate-600">{row.statusDetail ?? "No status detail available."}</p>
                 <p className="mt-2 text-xs text-slate-700">
-                  Last Record Processed:{" "}
-                  <span className="font-medium">{formatDateTime(row.lastRecordProcessedAt ?? null)}</span>
+                  Last Server Response:{" "}
+                  <span className="font-medium">
+                    {formatDateTime(row.lastServerResponseAt ?? row.lastRecordProcessedAt ?? null)}
+                  </span>
                 </p>
               </div>
             </div>

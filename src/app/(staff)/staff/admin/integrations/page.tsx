@@ -28,6 +28,7 @@ export default async function IntegrationsPage() {
     currentCursor?: string | null;
     errorSummary?: string | null;
     completedSuccessfully?: boolean;
+    lastServerResponseAt?: string | null;
     lastRecordProcessedAt?: string | null;
     canManageIntegration?: boolean;
   }> = [];
@@ -61,6 +62,7 @@ export default async function IntegrationsPage() {
       currentCursor: item.currentCursor,
       errorSummary: item.errorSummary,
       completedSuccessfully: item.completedSuccessfully,
+      lastServerResponseAt: item.lastServerResponseAt,
       lastRecordProcessedAt: item.lastRecordProcessedAt,
       canManageIntegration: item.canManageIntegration
     }));
@@ -97,6 +99,7 @@ export default async function IntegrationsPage() {
         currentCursor: null,
         errorSummary: "Migration required",
         completedSuccessfully: false,
+        lastServerResponseAt: null,
         canManageIntegration: false
       },
       {
@@ -124,6 +127,7 @@ export default async function IntegrationsPage() {
         currentCursor: null,
         errorSummary: "Migration required",
         completedSuccessfully: false,
+        lastServerResponseAt: null,
         canManageIntegration: false
       },
       {
@@ -151,6 +155,7 @@ export default async function IntegrationsPage() {
         currentCursor: null,
         errorSummary: "Migration required",
         completedSuccessfully: false,
+        lastServerResponseAt: null,
         canManageIntegration: false
       }
     ];

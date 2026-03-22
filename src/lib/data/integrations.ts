@@ -214,7 +214,8 @@ function createFallbackDetail(integrationKey: string, organizationId: string) {
       lastSuccessfulSync: null,
       lastFailedSync: null,
       lastSyncDurationMs: null,
-        lastRecordProcessedAt: null,
+      lastRecordProcessedAt: null,
+      lastServerResponseAt: null,
       totalContactsSynced: 0,
       totalContactsProcessed: 0,
       totalContactUpsertsSuccessful: 0,
@@ -488,6 +489,115 @@ async function getWebhookLastProcessedAt(input: {
   return processedAt;
 }
 
+type ContactSyncStateSnapshot = {
+  syncModeStatus: string;
+  initialFullSyncCompleted: boolean;
+  lastSuccessfulFullSyncAt: string | null;
+  lastSuccessfulIncrementalSyncAt: string | null;
+  statusMessage: string | null;
+  lastErrorMessage: string | null;
+};
+
+async function getContactSyncStateSnapshot(input: {
+  organizationId: string;
+  connectionId: string;
+}) {
+  const supabase = await createIntegrationClient();
+  const { data, error } = await supabase
+    .from("integration_sync_states")
+    .select(
+      "sync_mode_status, initial_full_sync_completed, last_successful_full_sync_at, last_successful_incremental_sync_at, status_message, last_error_message"
+    )
+    .eq("organization_id", input.organizationId)
+    .eq("integration_connection_id", input.connectionId)
+    .eq("sync_scope", "contacts")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    syncModeStatus: String(data.sync_mode_status ?? "pending_initial_sync"),
+    initialFullSyncCompleted: Boolean(data.initial_full_sync_completed),
+    lastSuccessfulFullSyncAt:
+      typeof data.last_successful_full_sync_at === "string" && data.last_successful_full_sync_at.trim()
+        ? data.last_successful_full_sync_at
+        : null,
+    lastSuccessfulIncrementalSyncAt:
+      typeof data.last_successful_incremental_sync_at === "string" &&
+      data.last_successful_incremental_sync_at.trim()
+        ? data.last_successful_incremental_sync_at
+        : null,
+    statusMessage:
+      typeof data.status_message === "string" && data.status_message.trim() ? data.status_message : null,
+    lastErrorMessage:
+      typeof data.last_error_message === "string" && data.last_error_message.trim()
+        ? data.last_error_message
+        : null
+  } satisfies ContactSyncStateSnapshot;
+}
+
+async function getIntegrationLastServerResponseAt(input: {
+  organizationId: string;
+  connectionId: string;
+  integrationKey: string;
+}) {
+  if (input.integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY) {
+    return getWebhookLastProcessedAt({
+      organizationId: input.organizationId,
+      connectionId: input.connectionId
+    });
+  }
+  const entityTypes =
+    input.integrationKey === GIVINGFUEL_INTEGRATION_KEY
+      ? ["contacts_page", "contacts_summary"]
+      : input.integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY
+        ? ["donations_page", "donations_summary"]
+        : ["contacts_page", "contacts_summary", "donations_page", "donations_summary"];
+
+  const supabase = await createIntegrationClient();
+  const { data, error } = await supabase
+    .from("integration_sync_logs")
+    .select("logged_date")
+    .eq("organization_id", input.organizationId)
+    .eq("integration_connection_id", input.connectionId)
+    .in("entity_type", entityTypes)
+    .order("logged_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return typeof data?.logged_date === "string" && data.logged_date.trim() ? data.logged_date : null;
+}
+
+function contactsSyncSynopsisForTile(input: {
+  state: ContactSyncStateSnapshot | null;
+  baseStatusDetail: string;
+  isEnabled: boolean;
+}) {
+  if (!input.state) return input.baseStatusDetail;
+  if (!input.isEnabled) {
+    return "Disabled by administrator. Enable this integration to run sync.";
+  }
+  switch (input.state.syncModeStatus) {
+    case "pending_initial_sync":
+      return "Initial full capture has not completed yet.";
+    case "full_sync_in_progress":
+      return "Initial full capture is running now.";
+    case "incremental_ready":
+      return input.state.lastSuccessfulIncrementalSyncAt
+        ? "Initial full capture completed. Incremental sync is active and has succeeded."
+        : "Initial full capture completed. Incremental sync is ready.";
+    case "incremental_sync_in_progress":
+      return "Initial full capture completed. Incremental sync is running now.";
+    case "failed":
+      return (
+        input.state.lastErrorMessage ??
+        input.state.statusMessage ??
+        "Sync failed and requires attention before continuing."
+      );
+    default:
+      return input.baseStatusDetail;
+  }
+}
+
 export async function listIntegrationsForAdmin() {
   const context = await requireIntegrationsViewer();
   const supabase = await createClient();
@@ -600,19 +710,25 @@ export async function listIntegrationsForAdmin() {
       return new Date(started).getTime() > Date.now() - 24 * 60 * 60 * 1000 ? acc + 1 : acc;
     }, 0);
 
-    const webhookLastProcessedByConnection = new Map<string, string | null>();
+    const lastServerResponseByConnection = new Map<string, string | null>();
+    const contactSyncStateByConnection = new Map<string, ContactSyncStateSnapshot | null>();
     for (const row of rows) {
-      if (
-        row.definition.provider_key !== GIVINGFUEL_WEBHOOK_INTEGRATION_KEY ||
-        !row.connection?.id
-      ) {
+      if (!row.connection?.id) {
         continue;
       }
-      const processedAt = await getWebhookLastProcessedAt({
+      const lastServerResponseAt = await getIntegrationLastServerResponseAt({
         organizationId: context.organizationId,
-        connectionId: row.connection.id
+        connectionId: row.connection.id,
+        integrationKey: row.definition.provider_key
       });
-      webhookLastProcessedByConnection.set(row.connection.id, processedAt);
+      lastServerResponseByConnection.set(row.connection.id, lastServerResponseAt);
+      if (row.definition.provider_key === GIVINGFUEL_INTEGRATION_KEY) {
+        const contactState = await getContactSyncStateSnapshot({
+          organizationId: context.organizationId,
+          connectionId: row.connection.id
+        });
+        contactSyncStateByConnection.set(row.connection.id, contactState);
+      }
     }
 
     return {
@@ -621,15 +737,18 @@ export async function listIntegrationsForAdmin() {
           jobs: row.jobs,
           isEnabled: Boolean(row.connection?.is_enabled)
         });
-        const lastRecordProcessedAt =
-          row.definition.provider_key === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
-            ? row.connection?.id
-              ? webhookLastProcessedByConnection.get(row.connection.id) ?? null
-              : null
-            : syncStatus.lastSyncEndTime ??
-              syncStatus.lastSuccessfulSyncTime ??
-              syncStatus.lastSyncStartTime ??
-              null;
+        const lastServerResponseAt = row.connection?.id
+          ? lastServerResponseByConnection.get(row.connection.id) ?? null
+          : null;
+        const lastRecordProcessedAt = lastServerResponseAt;
+        const statusDetail =
+          row.definition.provider_key === GIVINGFUEL_INTEGRATION_KEY && row.connection?.id
+            ? contactsSyncSynopsisForTile({
+                state: contactSyncStateByConnection.get(row.connection.id) ?? null,
+                baseStatusDetail: syncStatus.statusDetail,
+                isEnabled: Boolean(row.connection?.is_enabled)
+              })
+            : syncStatus.statusDetail;
         return {
           integrationKey: row.definition.provider_key,
           name: row.connection?.name || row.definition.name,
@@ -640,7 +759,7 @@ export async function listIntegrationsForAdmin() {
           connectionStatus: row.connection?.connection_status ?? "Not Tested",
           syncStatus: syncStatus.syncStatus,
           syncStatusColor: syncStatus.syncStatusColor,
-          statusDetail: syncStatus.statusDetail,
+          statusDetail,
           runId: syncStatus.activeRunId ?? syncStatus.latestRunId,
           lastSyncStartTime: syncStatus.lastSyncStartTime,
           lastSyncEndTime: syncStatus.lastSyncEndTime,
@@ -656,6 +775,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: syncStatus.currentCursor,
           errorSummary: syncStatus.errorSummary,
           completedSuccessfully: syncStatus.completedSuccessfully,
+          lastServerResponseAt,
           lastRecordProcessedAt,
           canManageIntegration
         };
@@ -699,6 +819,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: null,
           errorSummary: "Migration required",
           completedSuccessfully: false,
+          lastServerResponseAt: null,
           lastRecordProcessedAt: null,
           canManageIntegration
         },
@@ -729,6 +850,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: null,
           errorSummary: "Migration required",
           completedSuccessfully: false,
+          lastServerResponseAt: null,
           lastRecordProcessedAt: null,
           canManageIntegration
         },
@@ -759,6 +881,7 @@ export async function listIntegrationsForAdmin() {
           currentCursor: null,
           errorSummary: "Migration required",
           completedSuccessfully: false,
+          lastServerResponseAt: null,
           lastRecordProcessedAt: null,
           canManageIntegration
         },
@@ -805,13 +928,11 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
           .or("organization_name.is.null,organization_name.eq.")
       )
     ]);
-    const webhookLastProcessedAt =
-      integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
-        ? await getWebhookLastProcessedAt({
-            organizationId: context.organizationId,
-            connectionId: connection.id
-          })
-        : null;
+    const lastServerResponseAt = await getIntegrationLastServerResponseAt({
+      organizationId: context.organizationId,
+      connectionId: connection.id,
+      integrationKey
+    });
     const contactSyncState =
       integrationKey === GIVINGFUEL_INTEGRATION_KEY
         ? await syncStateService.ensureState({
@@ -874,11 +995,8 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
           (sum, job) => sum + Number(job.records_failed ?? 0),
           0
         ),
-        lastRecordProcessedAt:
-          webhookLastProcessedAt ??
-          jobs[0]?.completed_date ??
-          jobs[0]?.started_date ??
-          null
+        lastServerResponseAt,
+        lastRecordProcessedAt: lastServerResponseAt
       },
       syncState: contactSyncState,
       apiPaused: INTEGRATIONS_API_PAUSED

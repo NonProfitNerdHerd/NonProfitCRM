@@ -252,8 +252,35 @@ export function GivingFuelContactsSetup({
   const stateLastIncrementalSync = String(syncState?.last_successful_incremental_sync_at ?? "");
   const stateStartedAt = String(syncState?.started_at ?? "");
   const stateLastUpdatedAt = String(syncState?.last_updated_at ?? "");
+  const lastServerResponseAt = String(
+    data.overview.lastServerResponseAt ?? data.overview.lastRecordProcessedAt ?? ""
+  );
   const stateInProgress =
     syncModeStatus === "full_sync_in_progress" || syncModeStatus === "incremental_sync_in_progress";
+  const initialFullSyncComplete = Boolean(syncState?.initial_full_sync_completed);
+  const fullSyncInProgress = syncModeStatus === "full_sync_in_progress";
+  const incrementalSyncInProgress = syncModeStatus === "incremental_sync_in_progress";
+  const syncStateFailed = syncModeStatus === "failed";
+
+  const initialCaptureSynopsis = fullSyncInProgress
+    ? "Initial full capture is currently running."
+    : initialFullSyncComplete
+      ? `Initial full capture completed on ${formatDateTime(stateLastFullSync || null)}.`
+      : syncStateFailed
+        ? "Initial full capture has not completed successfully yet."
+        : "Initial full capture has not run yet.";
+
+  const iterativeSyncSynopsis = !initialFullSyncComplete
+    ? "Iterative (incremental) sync is waiting for initial full capture to complete."
+    : incrementalSyncInProgress
+      ? "Iterative (incremental) sync is running now."
+      : stateLastIncrementalSync
+        ? `Iterative sync last succeeded on ${formatDateTime(stateLastIncrementalSync || null)}.`
+        : "Iterative sync is ready but has not completed a run yet.";
+
+  const serverResponseSynopsis = lastServerResponseAt
+    ? `Last successful response from GivingFuel was ${formatDateTime(lastServerResponseAt)}.`
+    : "No successful response from GivingFuel has been logged yet.";
 
   function prettySyncModeStatus(value: string) {
     if (!value) return "Unknown";
@@ -413,6 +440,27 @@ export function GivingFuelContactsSetup({
         </div>
       </section>
 
+      <section className="rounded-md border border-blue-200 bg-blue-50 p-4">
+        <h4 className="mb-2 text-sm font-semibold text-blue-900">Sync Synopsis</h4>
+        <div className="space-y-2 text-sm text-blue-900">
+          <p>
+            <span className="font-semibold">Initial Capture:</span> {initialCaptureSynopsis}
+          </p>
+          <p>
+            <span className="font-semibold">Iterative Sync:</span> {iterativeSyncSynopsis}
+          </p>
+          <p>
+            <span className="font-semibold">GivingFuel Reachability:</span> {serverResponseSynopsis}
+          </p>
+          {stateInProgress ? (
+            <p>
+              <span className="font-semibold">Current Run Heartbeat:</span>{" "}
+              {formatDateTime(stateLastUpdatedAt || null)}
+            </p>
+          ) : null}
+        </div>
+      </section>
+
       <section className="rounded-md border border-slate-200 p-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Integration defaults</h4>
         <div className="grid gap-2 text-sm md:grid-cols-2">
@@ -429,6 +477,11 @@ export function GivingFuelContactsSetup({
         <div className="grid gap-2 text-sm md:grid-cols-2">
           <Info label="Connection Status" value={String(data.overview.connectionStatus ?? "-")} />
           <Info label="Current Status" value={String(data.overview.currentStatus ?? "-")} />
+          <Info
+            label="Last Server Response from GivingFuel"
+            value={formatDateTime(lastServerResponseAt || null)}
+          />
+          <Info label="Current Sync Mode Status" value={prettySyncModeStatus(syncModeStatus)} />
           <Info
             label="Last Successful Sync"
             value={formatDate(data.overview.lastSuccessfulSync as string | null)}

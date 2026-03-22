@@ -132,6 +132,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
         lastFailedSync: null,
         lastSyncDurationMs: null,
         lastRecordProcessedAt: null,
+        lastServerResponseAt: null,
         totalContactsSynced: 0,
         totalDonationsSynced: 0,
         failedRecordsCount: 0
@@ -287,8 +288,8 @@ function IntegrationStatusPanel({
           value={formatDateTime(detail.overview.lastSuccessfulSync)}
         />
         <TileLabel
-          label="Last Record Processed"
-          value={formatDateTime(detail.overview.lastRecordProcessedAt)}
+          label="Last Server Response"
+          value={formatDateTime(detail.overview.lastServerResponseAt ?? detail.overview.lastRecordProcessedAt)}
         />
         <TileLabel label="Progress" value={progress} />
         <TileLabel
