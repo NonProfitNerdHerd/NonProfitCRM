@@ -6,6 +6,7 @@ import { GivingFuelContactsSetup } from "@/components/admin/integrations/givingf
 import { GivingFuelDonationsSetup } from "@/components/admin/integrations/givingfuel-donations-setup";
 import {
   GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
+  GIVINGFUEL_INTEGRATION_KEY,
   GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
 } from "@/lib/integrations/givingfuel-contacts-config";
 import { GivingFuelWebhookSetup } from "@/components/admin/integrations/givingfuel-webhook-setup";
@@ -19,20 +20,29 @@ type RouteProps = {
 
 export default async function IntegrationDetailPage({ params, searchParams }: RouteProps) {
   const { integrationKey } = await params;
+  const isContactsIntegration = integrationKey === GIVINGFUEL_INTEGRATION_KEY;
   const supportedIntegration =
-    integrationKey === "webconnex" ||
+    integrationKey === GIVINGFUEL_INTEGRATION_KEY ||
     integrationKey === GIVINGFUEL_DONATIONS_INTEGRATION_KEY ||
     integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const requestedTab = resolvedSearchParams?.tab;
-  const activeTab: "log" | "configuration" | "status" =
+  const activeTab: "log" | "configuration" | "records" | "errors" | "history" | "status" =
     integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY
       ? requestedTab === "configuration" || requestedTab === "status" || requestedTab === "log"
         ? requestedTab
         : "log"
-      : requestedTab === "status"
-        ? "status"
-        : "configuration";
+      : isContactsIntegration
+        ? requestedTab === "configuration" ||
+          requestedTab === "records" ||
+          requestedTab === "errors" ||
+          requestedTab === "history" ||
+          requestedTab === "status"
+          ? requestedTab
+          : "configuration"
+        : requestedTab === "status"
+          ? "status"
+          : "configuration";
   let detail:
     | {
         definition: Record<string, unknown>;
@@ -192,6 +202,25 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
                 Configuration
               </Button>
             </Link>
+            {isContactsIntegration ? (
+              <>
+                <Link href={`/staff/admin/integrations/${encodeURIComponent(integrationKey)}?tab=records`}>
+                  <Button type="button" variant={activeTab === "records" ? "primary" : "secondary"}>
+                    Recently Synced Records
+                  </Button>
+                </Link>
+                <Link href={`/staff/admin/integrations/${encodeURIComponent(integrationKey)}?tab=errors`}>
+                  <Button type="button" variant={activeTab === "errors" ? "primary" : "secondary"}>
+                    Error Queue
+                  </Button>
+                </Link>
+                <Link href={`/staff/admin/integrations/${encodeURIComponent(integrationKey)}?tab=history`}>
+                  <Button type="button" variant={activeTab === "history" ? "primary" : "secondary"}>
+                    Sync History
+                  </Button>
+                </Link>
+              </>
+            ) : null}
             <Link href={`/staff/admin/integrations/${encodeURIComponent(integrationKey)}?tab=status`}>
               <Button type="button" variant={activeTab === "status" ? "primary" : "secondary"}>
                 Integration Status
@@ -200,6 +229,45 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
           </div>
           {integrationKey === GIVINGFUEL_WEBHOOK_INTEGRATION_KEY && activeTab === "log" ? (
             <GivingFuelWebhookLogPanel integrationKey={integrationKey} />
+          ) : isContactsIntegration && activeTab === "records" ? (
+            <GivingFuelContactsSetup
+              integrationKey={integrationKey}
+              viewMode="records"
+              initialData={detail as {
+                definition: Record<string, unknown>;
+                connection: Record<string, unknown>;
+                jobs: Array<Record<string, unknown>>;
+                errors: Array<Record<string, unknown>>;
+                overview: Record<string, unknown>;
+                apiPaused?: boolean;
+              }}
+            />
+          ) : isContactsIntegration && activeTab === "errors" ? (
+            <GivingFuelContactsSetup
+              integrationKey={integrationKey}
+              viewMode="errors"
+              initialData={detail as {
+                definition: Record<string, unknown>;
+                connection: Record<string, unknown>;
+                jobs: Array<Record<string, unknown>>;
+                errors: Array<Record<string, unknown>>;
+                overview: Record<string, unknown>;
+                apiPaused?: boolean;
+              }}
+            />
+          ) : isContactsIntegration && activeTab === "history" ? (
+            <GivingFuelContactsSetup
+              integrationKey={integrationKey}
+              viewMode="history"
+              initialData={detail as {
+                definition: Record<string, unknown>;
+                connection: Record<string, unknown>;
+                jobs: Array<Record<string, unknown>>;
+                errors: Array<Record<string, unknown>>;
+                overview: Record<string, unknown>;
+                apiPaused?: boolean;
+              }}
+            />
           ) : activeTab === "status" ? (
             <IntegrationStatusPanel
               detail={detail as {
@@ -235,6 +303,7 @@ export default async function IntegrationDetailPage({ params, searchParams }: Ro
           ) : (
             <GivingFuelContactsSetup
               integrationKey={integrationKey}
+              viewMode="configuration"
               initialData={detail as {
                 definition: Record<string, unknown>;
                 connection: Record<string, unknown>;

@@ -34,10 +34,12 @@ type SyncedContact = {
 
 export function GivingFuelContactsSetup({
   integrationKey,
-  initialData
+  initialData,
+  viewMode
 }: {
   integrationKey: string;
   initialData: DetailPayload;
+  viewMode?: "configuration" | "records" | "errors" | "history";
 }) {
   const [data, setData] = useState(initialData);
   const [apiKey, setApiKey] = useState("");
@@ -281,6 +283,13 @@ export function GivingFuelContactsSetup({
   const serverResponseSynopsis = lastServerResponseAt
     ? `Last successful response from GivingFuel was ${formatDateTime(lastServerResponseAt)}.`
     : "No successful response from GivingFuel has been logged yet.";
+  const iterativeSyncCompletedLabel = stateLastIncrementalSync
+    ? formatDateTime(stateLastIncrementalSync || null)
+    : "Not completed yet";
+  const progressInterpretation =
+    initialFullSyncComplete && !fullSyncInProgress
+      ? "Initial full capture is complete. The progress section below reflects the current or most recent run, not total historical lifetime coverage."
+      : "Progress below reflects the currently running initial full capture.";
 
   function prettySyncModeStatus(value: string) {
     if (!value) return "Unknown";
@@ -312,7 +321,8 @@ export function GivingFuelContactsSetup({
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
-      <section className="rounded-md border border-slate-200 p-4">
+      {viewMode === undefined || viewMode === "configuration" ? (
+        <section className="rounded-md border border-slate-200 p-4">
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="Integration Name">
             <Input value={String(data.connection.name ?? "GivingFuel Contacts")} disabled />
@@ -439,8 +449,10 @@ export function GivingFuelContactsSetup({
           </Button>
         </div>
       </section>
+      ) : null}
 
-      <section className="rounded-md border border-blue-200 bg-blue-50 p-4">
+      {viewMode === undefined || viewMode === "configuration" ? (
+        <section className="rounded-md border border-blue-200 bg-blue-50 p-4">
         <h4 className="mb-2 text-sm font-semibold text-blue-900">Sync Synopsis</h4>
         <div className="space-y-2 text-sm text-blue-900">
           <p>
@@ -452,6 +464,12 @@ export function GivingFuelContactsSetup({
           <p>
             <span className="font-semibold">GivingFuel Reachability:</span> {serverResponseSynopsis}
           </p>
+          <p>
+            <span className="font-semibold">Last Iterative Sync Completed:</span> {iterativeSyncCompletedLabel}
+          </p>
+          <p>
+            <span className="font-semibold">Progress Interpretation:</span> {progressInterpretation}
+          </p>
           {stateInProgress ? (
             <p>
               <span className="font-semibold">Current Run Heartbeat:</span>{" "}
@@ -460,8 +478,10 @@ export function GivingFuelContactsSetup({
           ) : null}
         </div>
       </section>
+      ) : null}
 
-      <section className="rounded-md border border-slate-200 p-4">
+      {viewMode === undefined || viewMode === "configuration" ? (
+        <section className="rounded-md border border-slate-200 p-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Integration defaults</h4>
         <div className="grid gap-2 text-sm md:grid-cols-2">
           <Info label="Method" value="GET" />
@@ -471,8 +491,10 @@ export function GivingFuelContactsSetup({
           <Info label="Query Parameter" value="product=givingfuel.com" />
         </div>
       </section>
+      ) : null}
 
-      <section className="rounded-md border border-slate-200 p-4">
+      {viewMode === undefined || viewMode === "configuration" ? (
+        <section className="rounded-md border border-slate-200 p-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Contacts sync status</h4>
         <div className="grid gap-2 text-sm md:grid-cols-2">
           <Info label="Connection Status" value={String(data.overview.connectionStatus ?? "-")} />
@@ -516,9 +538,12 @@ export function GivingFuelContactsSetup({
           />
         </div>
       </section>
+      ) : null}
 
-      <section className="rounded-md border border-slate-200 p-4">
+      {viewMode === undefined || viewMode === "configuration" ? (
+        <section className="rounded-md border border-slate-200 p-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Full + Incremental Sync Progress</h4>
+        <p className="mb-3 text-xs text-slate-600">{progressInterpretation}</p>
         <div className="space-y-3">
           <div>
             <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
@@ -573,9 +598,11 @@ export function GivingFuelContactsSetup({
           </div>
         </div>
       </section>
+      ) : null}
 
       <section className="rounded-md border border-slate-200 p-4">
-        <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+        {viewMode === undefined ? (
+          <div className="mb-3 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
           <button
             type="button"
             onClick={() => setActiveTab("contacts")}
@@ -609,9 +636,10 @@ export function GivingFuelContactsSetup({
           >
             Sync History
           </button>
-        </div>
+          </div>
+        ) : null}
 
-        {activeTab === "contacts" ? (
+        {(viewMode === "records" || (viewMode === undefined && activeTab === "contacts")) ? (
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-sm font-semibold text-slate-900">Recently Synced Contacts</h4>
@@ -698,7 +726,7 @@ export function GivingFuelContactsSetup({
           </div>
         ) : null}
 
-        {activeTab === "errors" ? (
+        {(viewMode === "errors" || (viewMode === undefined && activeTab === "errors")) ? (
           <div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-sm font-semibold text-slate-900">Error Queue</h4>
@@ -805,7 +833,7 @@ export function GivingFuelContactsSetup({
           </div>
         ) : null}
 
-        {activeTab === "history" ? (
+        {(viewMode === "history" || (viewMode === undefined && activeTab === "history")) ? (
           <div>
             <h4 className="mb-2 text-sm font-semibold text-slate-900">Sync History</h4>
             <div className="overflow-x-auto">
