@@ -12,6 +12,7 @@ type DetailPayload = {
   jobs: Array<Record<string, unknown>>;
   errors: Array<Record<string, unknown>>;
   overview: Record<string, unknown>;
+  syncState?: Record<string, unknown> | null;
   apiPaused?: boolean;
 };
 
@@ -40,7 +41,9 @@ export function GivingFuelContactsSetup({
 }) {
   const [data, setData] = useState(initialData);
   const [apiKey, setApiKey] = useState("");
-  const [loading, setLoading] = useState<"test" | "save" | "sync" | null>(null);
+  const [loading, setLoading] = useState<
+    "test" | "save" | "full-sync" | "incremental-sync" | "reset-state" | null
+  >(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contactsLimit, setContactsLimit] = useState<20 | 50 | 100>(20);
@@ -92,7 +95,7 @@ export function GivingFuelContactsSetup({
   }
 
   async function runAction(
-    action: "test" | "save" | "sync",
+    action: "test" | "save" | "full-sync" | "incremental-sync" | "reset-state",
     request: () => Promise<Response>,
     successMessage: string
   ) {
@@ -218,6 +221,44 @@ export function GivingFuelContactsSetup({
   const latestContactJob = useMemo(() => {
     return data.jobs.find((job) => String(job.sync_scope ?? "") === "contacts") ?? null;
   }, [data.jobs]);
+  const syncState = useMemo(
+    () => ((data.syncState ?? null) as Record<string, unknown> | null),
+    [data.syncState]
+  );
+  const syncModeStatus = String(syncState?.sync_mode_status ?? "pending_initial_sync");
+  const stateProcessed = Number(syncState?.records_processed ?? 0);
+  const stateCreated = Number(syncState?.records_created ?? 0);
+  const stateUpdated = Number(syncState?.records_updated ?? 0);
+  const stateSkipped = Number(syncState?.records_skipped ?? 0);
+  const stateFailed = Number(syncState?.records_failed ?? 0);
+  const stateTotalRaw = Number(syncState?.total_records_expected ?? 0);
+  const stateTotal = Number.isFinite(stateTotalRaw) && stateTotalRaw > 0 ? stateTotalRaw : null;
+  const stateRemainingRaw = Number(syncState?.records_remaining ?? 0);
+  const stateRemaining =
+    Number.isFinite(stateRemainingRaw) && stateRemainingRaw >= 0 ? stateRemainingRaw : null;
+  const statePercentRaw = Number(syncState?.percent_complete ?? NaN);
+  const statePercent =
+    Number.isFinite(statePercentRaw) && statePercentRaw >= 0 && statePercentRaw <= 100
+      ? statePercentRaw
+      : stateTotal && stateTotal > 0
+        ? Math.min(100, Math.max(0, (stateProcessed / stateTotal) * 100))
+        : null;
+  const stateCurrentPage = Number(syncState?.current_page ?? 0);
+  const stateCurrentBatch = Number(syncState?.current_batch ?? 0);
+  const stateStatusMessage = String(syncState?.status_message ?? "");
+  const stateLastError = String(syncState?.last_error_message ?? "");
+  const stateCheckpoint = String(syncState?.last_processed_checkpoint ?? "");
+  const stateLastFullSync = String(syncState?.last_successful_full_sync_at ?? "");
+  const stateLastIncrementalSync = String(syncState?.last_successful_incremental_sync_at ?? "");
+  const stateStartedAt = String(syncState?.started_at ?? "");
+  const stateLastUpdatedAt = String(syncState?.last_updated_at ?? "");
+  const stateInProgress =
+    syncModeStatus === "full_sync_in_progress" || syncModeStatus === "incremental_sync_in_progress";
+
+  function prettySyncModeStatus(value: string) {
+    if (!value) return "Unknown";
+    return value.replaceAll("_", " ");
+  }
   const openErrors = useMemo(() => {
     return data.errors.filter((row) => String(row.status ?? "").toLowerCase() !== "resolved");
   }, [data.errors]);
@@ -311,19 +352,63 @@ export function GivingFuelContactsSetup({
             type="button"
             variant="secondary"
             disabled={apiPaused || Boolean(loading)}
-            onClick={() =>
+            onClick={() => {
+              const confirmed = window.confirm(
+                "Run full sync now? This can reprocess all GivingFuel contacts and may take longer than incremental sync."
+              );
+              if (!confirmed) return;
               void runAction(
-                "sync",
+                "full-sync",
                 () =>
                   fetch(
-                    `/api/admin/integrations/${encodeURIComponent(integrationKey)}/sync/contacts`,
+                    `/api/admin/integrations/${encodeURIComponent(integrationKey)}/sync/full`,
                     { method: "POST" }
                   ),
-                "Contacts sync completed."
+                "Full sync completed."
+              );
+            }}
+          >
+            {loading === "full-sync" ? "Running..." : "Run Full Sync"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={apiPaused || Boolean(loading)}
+            onClick={() =>
+              void runAction(
+                "incremental-sync",
+                () =>
+                  fetch(
+                    `/api/admin/integrations/${encodeURIComponent(integrationKey)}/sync/incremental`,
+                    { method: "POST" }
+                  ),
+                "Incremental sync completed."
               )
             }
           >
-            {loading === "sync" ? "Syncing..." : "Run Contacts Sync"}
+            {loading === "incremental-sync" ? "Running..." : "Run Incremental Sync"}
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={apiPaused || Boolean(loading)}
+            onClick={() => {
+              const confirmed = window.confirm(
+                "Reset sync state? This will require a new full sync before incremental runs."
+              );
+              if (!confirmed) return;
+              void runAction(
+                "reset-state",
+                () =>
+                  fetch(
+                    `/api/admin/integrations/${encodeURIComponent(integrationKey)}/sync/reset-state`,
+                    { method: "POST" }
+                  ),
+                "Sync state reset."
+              );
+            }}
+          >
+            {loading === "reset-state" ? "Resetting..." : "Reset Sync State"}
           </Button>
         </div>
       </section>
@@ -376,6 +461,63 @@ export function GivingFuelContactsSetup({
             label="Last Contacts Job Status"
             value={latestContactJob ? String(latestContactJob.status ?? "-") : "Never run"}
           />
+        </div>
+      </section>
+
+      <section className="rounded-md border border-slate-200 p-4">
+        <h4 className="mb-2 text-sm font-semibold text-slate-900">Full + Incremental Sync Progress</h4>
+        <div className="space-y-3">
+          <div>
+            <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
+              <span>{stateStatusMessage || prettySyncModeStatus(syncModeStatus)}</span>
+              <span>
+                {statePercent !== null ? `${Math.round(statePercent)}%` : stateInProgress ? "Processing..." : "-"}
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded bg-slate-200">
+              {statePercent !== null ? (
+                <div className="h-2 rounded bg-brand-600" style={{ width: `${statePercent}%` }} />
+              ) : stateInProgress ? (
+                <div className="h-2 w-2/5 animate-pulse rounded bg-brand-500" />
+              ) : (
+                <div className="h-2 rounded bg-slate-300" style={{ width: "0%" }} />
+              )}
+            </div>
+          </div>
+          <div className="grid gap-2 text-sm md:grid-cols-2">
+            <Info label="Sync Mode Status" value={prettySyncModeStatus(syncModeStatus)} />
+            <Info
+              label="Initial Full Sync Complete"
+              value={Boolean(syncState?.initial_full_sync_completed) ? "Yes" : "No"}
+            />
+            <Info
+              label="Records Processed"
+              value={
+                stateTotal
+                  ? `${stateProcessed.toLocaleString()} of ${stateTotal.toLocaleString()}`
+                  : `${stateProcessed.toLocaleString()} processed`
+              }
+            />
+            <Info
+              label="Records Remaining"
+              value={stateRemaining !== null ? stateRemaining.toLocaleString() : "Estimating / unknown"}
+            />
+            <Info label="Records Created" value={stateCreated.toLocaleString()} />
+            <Info label="Records Updated" value={stateUpdated.toLocaleString()} />
+            <Info label="Records Skipped" value={stateSkipped.toLocaleString()} />
+            <Info label="Records Failed" value={stateFailed.toLocaleString()} />
+            <Info label="Current Page" value={stateCurrentPage > 0 ? String(stateCurrentPage) : "-"} />
+            <Info label="Current Batch" value={stateCurrentBatch > 0 ? String(stateCurrentBatch) : "-"} />
+            <Info label="Last Successful Full Sync" value={formatDate(stateLastFullSync || null)} />
+            <Info
+              label="Last Successful Incremental Sync"
+              value={formatDate(stateLastIncrementalSync || null)}
+            />
+            <Info label="Last Checkpoint" value={stateCheckpoint || "-"} />
+            <Info label="Started At" value={formatDate(stateStartedAt || null)} />
+            <Info label="Last Updated At" value={formatDate(stateLastUpdatedAt || null)} />
+            <Info label="Last Error" value={stateLastError || "-"} />
+          </div>
         </div>
       </section>
 

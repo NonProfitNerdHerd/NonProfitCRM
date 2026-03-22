@@ -18,12 +18,17 @@ type WebconnexClientConfig = {
 type ListParams = {
   startingAfter?: string | null;
   limit?: number;
+  dateCreatedAfter?: string | null;
+  dateCreatedBefore?: string | null;
+  dateUpdatedAfter?: string | null;
+  dateUpdatedBefore?: string | null;
 };
 
 type ListResponse = {
   records: Array<Record<string, unknown>>;
   nextCursor: string | null;
   hasMore: boolean;
+  totalResults: number | null;
 };
 
 function wait(ms: number) {
@@ -171,6 +176,18 @@ function extractHasMore(payload: unknown, nextCursor: string | null, recordCount
   if (parsedNested !== null) return parsedNested;
   if (nextCursor) return true;
   return recordCount >= limit && recordCount > 0;
+}
+
+function extractTotalResults(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const container = payload as Record<string, unknown>;
+  const direct = container.totalResults ?? container.total_results ?? container.total ?? null;
+  if (typeof direct === "number" && Number.isFinite(direct)) return Math.max(0, Math.floor(direct));
+  if (typeof direct === "string" && direct.trim()) {
+    const parsed = Number(direct);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.floor(parsed));
+  }
+  return null;
 }
 
 function recordStableId(record: Record<string, unknown>) {
@@ -332,18 +349,24 @@ export class WebconnexApiClient {
       // Some APIs expect snake_case cursor names.
       queryParams.starting_after = params.startingAfter;
     }
+    if (params?.dateCreatedAfter) queryParams.dateCreatedAfter = params.dateCreatedAfter;
+    if (params?.dateCreatedBefore) queryParams.dateCreatedBefore = params.dateCreatedBefore;
+    if (params?.dateUpdatedAfter) queryParams.dateUpdatedAfter = params.dateUpdatedAfter;
+    if (params?.dateUpdatedBefore) queryParams.dateUpdatedBefore = params.dateUpdatedBefore;
     const payload = await this.request(this.contactsPath, {
       ...queryParams
     });
     const records = normalizeRecords(payload);
     const extractedCursor = extractNextCursor(payload);
     const hasMore = extractHasMore(payload, extractedCursor, records.length, limit);
+    const totalResults = extractTotalResults(payload);
     const fallbackCursor =
       records.length > 0 ? recordStableId(records[records.length - 1] as Record<string, unknown>) : "";
     return {
       records,
       nextCursor: extractedCursor || (hasMore ? fallbackCursor : null),
-      hasMore
+      hasMore,
+      totalResults
     };
   }
 
@@ -356,18 +379,24 @@ export class WebconnexApiClient {
       queryParams.startingAfter = params.startingAfter;
       queryParams.starting_after = params.startingAfter;
     }
+    if (params?.dateCreatedAfter) queryParams.dateCreatedAfter = params.dateCreatedAfter;
+    if (params?.dateCreatedBefore) queryParams.dateCreatedBefore = params.dateCreatedBefore;
+    if (params?.dateUpdatedAfter) queryParams.dateUpdatedAfter = params.dateUpdatedAfter;
+    if (params?.dateUpdatedBefore) queryParams.dateUpdatedBefore = params.dateUpdatedBefore;
     const payload = await this.request(this.transactionsPath, {
       ...queryParams
     });
     const records = normalizeRecords(payload);
     const extractedCursor = extractNextCursor(payload);
     const hasMore = extractHasMore(payload, extractedCursor, records.length, limit);
+    const totalResults = extractTotalResults(payload);
     const fallbackCursor =
       records.length > 0 ? recordStableId(records[records.length - 1] as Record<string, unknown>) : "";
     return {
       records,
       nextCursor: extractedCursor || (hasMore ? fallbackCursor : null),
-      hasMore
+      hasMore,
+      totalResults
     };
   }
 

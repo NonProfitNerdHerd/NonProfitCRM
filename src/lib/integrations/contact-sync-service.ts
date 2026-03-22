@@ -15,8 +15,11 @@ type ContactSyncResult = {
   cursor: string | null;
   pagingComplete: boolean;
   totalExpected: number | null;
+  nextCheckpoint: string | null;
   completionNote: string;
 };
+
+type ContactSyncRunMode = "full" | "incremental";
 
 function isExternalIdSchemaMissingError(error: unknown) {
   const message = String(
@@ -232,7 +235,8 @@ export class ContactSyncService {
     return {
       externalId,
       contactId,
-      actionTaken: actionTaken as "created" | "updated"
+      actionTaken: actionTaken as "created" | "updated",
+      sourceModifiedAt
     };
   }
 
@@ -277,10 +281,27 @@ export class ContactSyncService {
     job: IntegrationSyncJob;
     apiClient: WebconnexApiClient;
     logService: IntegrationLogService;
+    runMode: ContactSyncRunMode;
+    incrementalCheckpoint?: string | null;
+    onProgress?: (payload: {
+      currentPage: number;
+      currentCursor: string | null;
+      recordsRetrieved: number;
+      recordsProcessed: number;
+      recordsCreated: number;
+      recordsUpdated: number;
+      recordsSkipped: number;
+      recordsFailed: number;
+      totalRecordsExpected: number | null;
+      statusMessage: string;
+    }) => Promise<void> | void;
   }): Promise<ContactSyncResult> {
     const supabase = await createIntegrationClient();
     const syncSettings = { ...(input.connection.sync_settings_json ?? {}) } as Record<string, unknown>;
-    let cursor: string | null = (syncSettings.contactsCursor as string | null | undefined) ?? null;
+    const runStartedAt = new Date().toISOString();
+    const requestedCheckpoint =
+      input.runMode === "incremental" ? readDateTime({ value: input.incrementalCheckpoint }, ["value"]) : null;
+    let cursor: string | null = null;
     let retrieved = 0;
     let processed = 0;
     let created = 0;
@@ -292,15 +313,23 @@ export class ContactSyncService {
     let pagesProcessed = 0;
     let pagingComplete = true;
     let completionNote = "Paging complete.";
+    let totalExpected: number | null = null;
+    let latestSourceModifiedAt: string | null = null;
 
     while (hasMore && pageGuard < 10000) {
       pageGuard += 1;
-      const startingCursor = cursor;
+      const startingCursor: string | null = cursor;
       let page: Awaited<ReturnType<WebconnexApiClient["getContacts"]>>;
       try {
         page = await input.apiClient.getContacts({
           startingAfter: cursor,
-          limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT
+          limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT,
+          ...(requestedCheckpoint
+            ? {
+                dateUpdatedAfter: requestedCheckpoint,
+                dateCreatedAfter: requestedCheckpoint
+              }
+            : {})
         });
       } catch (pageError) {
         failed += 1;
@@ -320,6 +349,9 @@ export class ContactSyncService {
       pagesProcessed += 1;
       retrieved += page.records.length;
       hasMore = page.hasMore;
+      if (totalExpected === null && typeof page.totalResults === "number" && Number.isFinite(page.totalResults)) {
+        totalExpected = Math.max(0, Math.floor(page.totalResults));
+      }
       await input.logService.addSyncLog({
         organizationId: input.organizationId,
         integrationConnectionId: input.connection.id,
@@ -330,12 +362,15 @@ export class ContactSyncService {
         message: `Fetched page ${pagesProcessed}: ${page.records.length} record(s), hasMore=${String(page.hasMore)}, nextCursor=${page.nextCursor ?? "null"}`,
         requestPayload: {
           startingAfter: startingCursor,
-          limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT
+          limit: GIVINGFUEL_DEFAULT_PAGE_LIMIT,
+          runMode: input.runMode,
+          incrementalCheckpoint: requestedCheckpoint
         },
         responsePayload: {
           recordCount: page.records.length,
           hasMore: page.hasMore,
-          nextCursor: page.nextCursor
+          nextCursor: page.nextCursor,
+          totalResults: page.totalResults
         }
       });
 
@@ -363,6 +398,11 @@ export class ContactSyncService {
             created += 1;
           } else {
             updated += 1;
+          }
+          if (synced.sourceModifiedAt) {
+            if (!latestSourceModifiedAt || synced.sourceModifiedAt > latestSourceModifiedAt) {
+              latestSourceModifiedAt = synced.sourceModifiedAt;
+            }
           }
 
           await input.logService.addSyncLog({
@@ -408,40 +448,35 @@ export class ContactSyncService {
           ])
         : "";
       cursor = (page.nextCursor ?? fallbackCursor) || cursor;
-      if (cursor && (pagesProcessed % 5 === 0 || !hasMore)) {
-        syncSettings.contactsCursor = cursor;
-        const { error: checkpointError } = await supabase
-          .from("integration_connections")
-          .update({
-            sync_settings_json: syncSettings
-          })
-          .eq("organization_id", input.organizationId)
-          .eq("id", input.connection.id);
-        if (checkpointError) {
-          await input.logService.enqueueError({
-            organizationId: input.organizationId,
-            integrationConnectionId: input.connection.id,
-            jobId: input.job.id,
-            entityType: "integration",
-            payload: { contactsCursor: cursor, pagesProcessed },
-            errorMessage: `Failed to persist contacts cursor checkpoint: ${checkpointError.message}`
-          });
-        }
-      }
+      const statusMessage = `Syncing contacts page ${pagesProcessed}${cursor ? ` (cursor ${cursor})` : ""}`;
       await input.logService.updateJobProgress({
         organizationId: input.organizationId,
         jobId: input.job.id,
         currentPage: pagesProcessed,
         currentCursor: cursor,
-        totalRecordsExpected: null,
+        totalRecordsExpected: totalExpected,
         recordsRetrieved: retrieved,
         recordsProcessed: processed,
         recordsCreated: created,
         recordsUpdated: updated,
         recordsSkipped: skipped,
         recordsFailed: failed,
-        statusDetail: `Syncing contacts page ${pagesProcessed}${cursor ? ` (cursor ${cursor})` : ""}`
+        statusDetail: statusMessage
       });
+      if (input.onProgress) {
+        await input.onProgress({
+          currentPage: pagesProcessed,
+          currentCursor: cursor,
+          recordsRetrieved: retrieved,
+          recordsProcessed: processed,
+          recordsCreated: created,
+          recordsUpdated: updated,
+          recordsSkipped: skipped,
+          recordsFailed: failed,
+          totalRecordsExpected: totalExpected,
+          statusMessage
+        });
+      }
 
       if (!hasMore) break;
       if (!cursor) {
@@ -472,14 +507,17 @@ export class ContactSyncService {
       completionNote = "Contacts pagination guard limit reached before completion.";
     }
 
+    const nextCheckpoint = latestSourceModifiedAt ?? requestedCheckpoint ?? runStartedAt;
+
     await input.logService.addSyncLog({
       organizationId: input.organizationId,
       integrationConnectionId: input.connection.id,
       jobId: input.job.id,
       entityType: "contacts_summary",
       status: "processed",
-      message: `Contacts sync summary: pages=${pagesProcessed}, retrieved=${retrieved}, processed=${processed}, created=${created}, updated=${updated}, failed=${failed}, skipped=${skipped}, pagingComplete=${String(pagingComplete)}, nextCursor=${cursor ?? "null"}`,
+      message: `Contacts sync summary: mode=${input.runMode}, pages=${pagesProcessed}, retrieved=${retrieved}, processed=${processed}, created=${created}, updated=${updated}, failed=${failed}, skipped=${skipped}, pagingComplete=${String(pagingComplete)}, nextCursor=${cursor ?? "null"}, nextCheckpoint=${nextCheckpoint}`,
       responsePayload: {
+        runMode: input.runMode,
         pagesProcessed,
         retrieved,
         processed,
@@ -489,7 +527,9 @@ export class ContactSyncService {
         skipped,
         pagingComplete,
         completionNote,
-        nextCursor: cursor
+        nextCursor: cursor,
+        totalExpected,
+        nextCheckpoint
       }
     });
 
@@ -503,7 +543,8 @@ export class ContactSyncService {
       pagesProcessed,
       cursor,
       pagingComplete,
-      totalExpected: null,
+      totalExpected,
+      nextCheckpoint,
       completionNote
     };
   }

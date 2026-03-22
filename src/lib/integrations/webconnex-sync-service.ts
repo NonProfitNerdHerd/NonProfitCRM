@@ -5,10 +5,15 @@ import { WebconnexApiClient } from "@/lib/integrations/webconnex-api-client";
 import { ContactSyncService } from "@/lib/integrations/contact-sync-service";
 import { DonationSyncService } from "@/lib/integrations/donation-sync-service";
 import {
+  IntegrationSyncRunMode,
+  IntegrationSyncStateService
+} from "@/lib/integrations/integration-sync-state-service";
+import {
   GIVINGFUEL_API_HEADER_NAME,
   GIVINGFUEL_CUSTOMERS_PATH,
   GIVINGFUEL_DEFAULT_PAGE_LIMIT,
   GIVINGFUEL_FORMS_PATH,
+  GIVINGFUEL_INTEGRATION_KEY,
   GIVINGFUEL_PRODUCT_VALUE,
   GIVINGFUEL_TRANSACTIONS_PATH
 } from "@/lib/integrations/givingfuel-contacts-config";
@@ -48,6 +53,7 @@ export class WebconnexSyncService {
   private logService = new IntegrationLogService();
   private contactSyncService = new ContactSyncService();
   private donationSyncService = new DonationSyncService();
+  private syncStateService = new IntegrationSyncStateService();
 
   private buildClient(connection: IntegrationConnection, apiKeyOverride?: string) {
     const config = connection.configuration_json ?? {};
@@ -229,18 +235,74 @@ export class WebconnexSyncService {
     connection: IntegrationConnection;
     scope: SyncScope;
     jobType: "manual" | "scheduled" | "retry_failed";
+    syncRunMode?: IntegrationSyncRunMode;
   }): Promise<SyncExecutionResult> {
     const supabase = await createIntegrationClient();
-    const job = await this.logService.createJob({
-      organizationId: input.organizationId,
-      integrationConnectionId: input.connection.id,
-      jobType: input.jobType,
-      syncScope: input.scope,
-      triggeredBy: input.userId,
-      triggeredByType: input.jobType
-    });
-
     const syncSettings = { ...(input.connection.sync_settings_json ?? {}) };
+    const isContactsStateManaged =
+      input.definition.provider_key === GIVINGFUEL_INTEGRATION_KEY && input.scope === "contacts";
+    let resolvedSyncRunMode: Exclude<IntegrationSyncRunMode, "auto"> = "incremental";
+    let acquiredSyncState:
+      | Awaited<ReturnType<IntegrationSyncStateService["acquireRun"]>>["state"]
+      | null = null;
+
+    if (isContactsStateManaged) {
+      const acquired = await this.syncStateService.acquireRun({
+        organizationId: input.organizationId,
+        integrationConnectionId: input.connection.id,
+        requestedMode: input.syncRunMode ?? "auto",
+        syncScope: "contacts",
+        userId: input.userId,
+        statusMessage: "Preparing GivingFuel Contacts sync run."
+      });
+      acquiredSyncState = acquired.state;
+      resolvedSyncRunMode = acquired.runMode;
+    }
+
+    let job;
+    try {
+      job = await this.logService.createJob({
+        organizationId: input.organizationId,
+        integrationConnectionId: input.connection.id,
+        jobType: input.jobType,
+        syncScope: input.scope,
+        triggeredBy: input.userId,
+        triggeredByType: input.jobType,
+        syncRunMode: isContactsStateManaged ? resolvedSyncRunMode : "incremental"
+      });
+      if (acquiredSyncState) {
+        acquiredSyncState = await this.syncStateService.attachJob({
+          organizationId: input.organizationId,
+          integrationConnectionId: input.connection.id,
+          syncScope: "contacts",
+          jobId: job.id,
+          userId: input.userId
+        });
+      }
+    } catch (createJobError) {
+      if (acquiredSyncState) {
+        await this.syncStateService.completeRun({
+          organizationId: input.organizationId,
+          integrationConnectionId: input.connection.id,
+          syncScope: "contacts",
+          runMode: resolvedSyncRunMode,
+          success: false,
+          recordsProcessed: 0,
+          recordsCreated: 0,
+          recordsUpdated: 0,
+          recordsSkipped: 0,
+          recordsFailed: 0,
+          statusMessage: "Failed to create integration sync job.",
+          lastErrorMessage:
+            createJobError instanceof Error
+              ? createJobError.message
+              : "Unable to create integration sync job.",
+          userId: input.userId
+        });
+      }
+      throw createJobError;
+    }
+
     const client = this.buildClient(input.connection);
     let recordsProcessed = 0;
     let recordsRetrieved = 0;
@@ -255,6 +317,7 @@ export class WebconnexSyncService {
     let totalRecordsExpected: number | null = null;
     let pagingComplete = true;
     let completionDetail = "Sync running.";
+    let contactsResult: Awaited<ReturnType<ContactSyncService["run"]>> | null = null;
 
     await supabase
       .from("integration_connections")
@@ -277,7 +340,8 @@ export class WebconnexSyncService {
             currentCursor: null,
             totalRecordsExpected: null,
             pagingComplete: false,
-            completedSuccessfully: false
+            completedSuccessfully: false,
+            syncRunMode: isContactsStateManaged ? resolvedSyncRunMode : "incremental"
           }
         },
         updated_by: input.userId
@@ -300,12 +364,33 @@ export class WebconnexSyncService {
       }
 
       if (input.scope === "contacts" || input.scope === "all") {
-        const contactsResult = await this.contactSyncService.run({
+        contactsResult = await this.contactSyncService.run({
           organizationId: input.organizationId,
           connection: input.connection,
           job,
           apiClient: client,
-          logService: this.logService
+          logService: this.logService,
+          runMode: isContactsStateManaged ? resolvedSyncRunMode : "incremental",
+          incrementalCheckpoint: acquiredSyncState?.last_processed_checkpoint ?? null,
+          onProgress: isContactsStateManaged
+            ? async (progress) => {
+                await this.syncStateService.updateProgress({
+                  organizationId: input.organizationId,
+                  integrationConnectionId: input.connection.id,
+                  syncScope: "contacts",
+                  recordsProcessed: progress.recordsProcessed,
+                  recordsCreated: progress.recordsCreated,
+                  recordsUpdated: progress.recordsUpdated,
+                  recordsSkipped: progress.recordsSkipped,
+                  recordsFailed: progress.recordsFailed,
+                  totalRecordsExpected: progress.totalRecordsExpected,
+                  currentPage: progress.currentPage,
+                  currentBatch: progress.currentPage,
+                  statusMessage: progress.statusMessage,
+                  userId: input.userId
+                });
+              }
+            : undefined
         });
         recordsRetrieved += contactsResult.retrieved;
         recordsProcessed += contactsResult.processed;
@@ -313,7 +398,6 @@ export class WebconnexSyncService {
         recordsUpdated += contactsResult.updated;
         recordsSkipped += contactsResult.skipped;
         recordsFailed += contactsResult.failed;
-        syncSettings.contactsCursor = contactsResult.cursor;
         finalCursor = contactsResult.cursor;
         pagingComplete = pagingComplete && contactsResult.pagingComplete;
         completionDetail = contactsResult.completionNote;
@@ -329,6 +413,8 @@ export class WebconnexSyncService {
           skipped: contactsResult.skipped,
           pagingComplete: contactsResult.pagingComplete,
           completionNote: contactsResult.completionNote,
+          runMode: isContactsStateManaged ? resolvedSyncRunMode : "incremental",
+          nextCheckpoint: contactsResult.nextCheckpoint,
           finishedAt: new Date().toISOString()
         };
       }
@@ -374,19 +460,6 @@ export class WebconnexSyncService {
         };
       }
 
-      const now = new Date().toISOString();
-      syncSettings.lastSuccessfulSyncDate = now;
-
-      await supabase
-        .from("integration_connections")
-        .update({
-          sync_settings_json: syncSettings,
-          connection_status: recordsFailed > 0 || !pagingComplete ? "connected_with_errors" : "connected",
-          updated_by: input.userId
-        })
-        .eq("organization_id", input.organizationId)
-        .eq("id", input.connection.id);
-
       status = recordsFailed > 0 || !pagingComplete ? "completed_with_errors" : "completed";
       if (status === "completed_with_errors") {
         if (recordsFailed > 0) {
@@ -406,7 +479,11 @@ export class WebconnexSyncService {
         integrationConnectionId: input.connection.id,
         jobId: job.id,
         entityType: "integration",
-        payload: { scope: input.scope, jobType: input.jobType },
+        payload: {
+          scope: input.scope,
+          jobType: input.jobType,
+          syncRunMode: isContactsStateManaged ? resolvedSyncRunMode : "incremental"
+        },
         errorMessage: errorSummary
       });
 
@@ -422,6 +499,38 @@ export class WebconnexSyncService {
         .eq("id", input.connection.id);
     }
 
+    const completedSuccessfully = status === "completed" && pagingComplete && recordsFailed === 0;
+    const successTimestamp = completedSuccessfully ? new Date().toISOString() : null;
+
+    if (completedSuccessfully) {
+      syncSettings.lastSuccessfulSyncDate = successTimestamp;
+      if (isContactsStateManaged) {
+        if (resolvedSyncRunMode === "full") {
+          syncSettings.lastSuccessfulFullSyncDate = successTimestamp;
+        } else {
+          syncSettings.lastSuccessfulIncrementalSyncDate = successTimestamp;
+        }
+      }
+      if (contactsResult?.cursor) {
+        syncSettings.contactsCursor = contactsResult.cursor;
+      }
+    }
+
+    await supabase
+      .from("integration_connections")
+      .update({
+        sync_settings_json: syncSettings,
+        connection_status:
+          status === "failed"
+            ? "failed"
+            : completedSuccessfully
+              ? "connected"
+              : "connected_with_errors",
+        updated_by: input.userId
+      })
+      .eq("organization_id", input.organizationId)
+      .eq("id", input.connection.id);
+
     await this.logService.completeJob({
       organizationId: input.organizationId,
       jobId: job.id,
@@ -434,16 +543,40 @@ export class WebconnexSyncService {
       recordsFailed,
       totalRecordsExpected,
       currentPage,
-      completedSuccessfully: status === "completed" && pagingComplete && recordsFailed === 0,
+      completedSuccessfully,
       pagingComplete,
       cursor: finalCursor,
-      lastSuccessfulSyncDate:
-        status === "completed" || status === "completed_with_errors"
-          ? new Date().toISOString()
-          : null,
+      lastSuccessfulSyncDate: successTimestamp,
       errorSummary: errorSummary ?? completionDetail,
       startedDate: job.started_date
     });
+
+    if (isContactsStateManaged) {
+      await this.syncStateService.completeRun({
+        organizationId: input.organizationId,
+        integrationConnectionId: input.connection.id,
+        syncScope: "contacts",
+        runMode: resolvedSyncRunMode,
+        success: completedSuccessfully,
+        checkpoint: completedSuccessfully ? (contactsResult?.nextCheckpoint ?? successTimestamp) : null,
+        totalRecordsExpected,
+        currentPage,
+        currentBatch: currentPage,
+        recordsProcessed,
+        recordsCreated,
+        recordsUpdated,
+        recordsSkipped,
+        recordsFailed,
+        statusMessage:
+          completedSuccessfully
+            ? resolvedSyncRunMode === "full"
+              ? "Initial full sync completed successfully."
+              : "Incremental sync completed successfully."
+            : errorSummary ?? completionDetail,
+        lastErrorMessage: completedSuccessfully ? null : errorSummary ?? completionDetail,
+        userId: input.userId
+      });
+    }
 
     await supabase
       .from("integration_connections")
@@ -452,14 +585,14 @@ export class WebconnexSyncService {
           ...syncSettings,
           integrationRuntimeState: {
             syncStatus:
-              status === "completed" && pagingComplete && recordsFailed === 0
+              completedSuccessfully
                 ? "fully_synced"
                 : "could_not_complete",
             runId: job.id,
             startedAt: job.started_date,
             completedAt: new Date().toISOString(),
             statusDetail:
-              status === "completed" && pagingComplete && recordsFailed === 0
+              completedSuccessfully
                 ? "Completed all available pages/records."
                 : errorSummary ?? completionDetail,
             recordsRetrieved,
@@ -472,11 +605,12 @@ export class WebconnexSyncService {
             currentCursor: finalCursor,
             totalRecordsExpected,
             pagingComplete,
-            completedSuccessfully: status === "completed" && pagingComplete && recordsFailed === 0
+            completedSuccessfully,
+            syncRunMode: isContactsStateManaged ? resolvedSyncRunMode : "incremental"
           },
           lastSuccessfulSyncDate:
-            status === "completed" || status === "completed_with_errors"
-              ? new Date().toISOString()
+            completedSuccessfully
+              ? successTimestamp
               : syncSettings.lastSuccessfulSyncDate ?? null
         },
         updated_by: input.userId
@@ -494,7 +628,7 @@ export class WebconnexSyncService {
       recordsSkipped,
       recordsFailed,
       pagingComplete,
-      completedSuccessfully: status === "completed" && pagingComplete && recordsFailed === 0,
+      completedSuccessfully,
       errorSummary: errorSummary ?? completionDetail
     };
   }

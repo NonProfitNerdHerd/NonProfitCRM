@@ -43,6 +43,7 @@ export type IntegrationSyncJob = {
   integration_connection_id: string;
   job_type: string;
   sync_scope: string;
+  sync_run_mode: "full" | "incremental";
   started_date: string;
   completed_date: string | null;
   status: string;

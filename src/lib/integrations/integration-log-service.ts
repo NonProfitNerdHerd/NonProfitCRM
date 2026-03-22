@@ -29,24 +29,54 @@ export class IntegrationLogService {
     integrationConnectionId: string;
     jobType: string;
     syncScope: string;
+    syncRunMode?: "full" | "incremental";
     triggeredBy: string;
     triggeredByType?: string;
   }): Promise<IntegrationSyncJob> {
     const supabase = await createIntegrationClient();
-    const { data, error } = await supabase
+    const payloadWithMode = {
+      organization_id: input.organizationId,
+      integration_connection_id: input.integrationConnectionId,
+      job_type: input.jobType,
+      sync_scope: input.syncScope,
+      sync_run_mode: input.syncRunMode ?? "incremental",
+      status: "running",
+      started_date: new Date().toISOString(),
+      triggered_by: input.triggeredBy,
+      triggered_by_type: input.triggeredByType ?? "manual"
+    };
+    let { data, error } = await supabase
       .from("integration_sync_jobs")
-      .insert({
-        organization_id: input.organizationId,
-        integration_connection_id: input.integrationConnectionId,
-        job_type: input.jobType,
-        sync_scope: input.syncScope,
-        status: "running",
-        started_date: new Date().toISOString(),
-        triggered_by: input.triggeredBy,
-        triggered_by_type: input.triggeredByType ?? "manual"
-      })
+      .insert(payloadWithMode)
       .select("*")
       .single();
+
+    if (error) {
+      const message = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+      const missingSyncRunMode =
+        error.code === "42703" ||
+        message.includes("sync_run_mode") ||
+        message.includes("column") ||
+        message.includes("does not exist");
+      if (!missingSyncRunMode) throw error;
+      const fallbackResult = await supabase
+        .from("integration_sync_jobs")
+        .insert({
+          organization_id: input.organizationId,
+          integration_connection_id: input.integrationConnectionId,
+          job_type: input.jobType,
+          sync_scope: input.syncScope,
+          status: "running",
+          started_date: new Date().toISOString(),
+          triggered_by: input.triggeredBy,
+          triggered_by_type: input.triggeredByType ?? "manual"
+        })
+        .select("*")
+        .single();
+      data = fallbackResult.data;
+      error = fallbackResult.error;
+    }
+
     if (error) throw error;
     return data as IntegrationSyncJob;
   }

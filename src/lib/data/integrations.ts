@@ -17,6 +17,10 @@ import { IntegrationJobRunner } from "@/lib/integrations/integration-job-runner"
 import { IntegrationRetryService } from "@/lib/integrations/integration-retry-service";
 import { WebconnexSyncService } from "@/lib/integrations/webconnex-sync-service";
 import { ContactSyncService } from "@/lib/integrations/contact-sync-service";
+import {
+  IntegrationSyncRunMode,
+  IntegrationSyncStateService
+} from "@/lib/integrations/integration-sync-state-service";
 import { createIntegrationClient } from "@/lib/integrations/db";
 import { encryptIntegrationSecret } from "@/lib/integrations/secrets";
 import { logAuditEvent } from "@/lib/data/audit";
@@ -44,6 +48,7 @@ const jobRunner = new IntegrationJobRunner();
 const retryService = new IntegrationRetryService();
 const webconnexSyncService = new WebconnexSyncService();
 const contactSyncService = new ContactSyncService();
+const syncStateService = new IntegrationSyncStateService();
 const SUPPORTED_PROVIDER_KEYS = new Set([
   GIVINGFUEL_INTEGRATION_KEY,
   GIVINGFUEL_DONATIONS_INTEGRATION_KEY,
@@ -807,6 +812,15 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
             connectionId: connection.id
           })
         : null;
+    const contactSyncState =
+      integrationKey === GIVINGFUEL_INTEGRATION_KEY
+        ? await syncStateService.ensureState({
+            organizationId: context.organizationId,
+            integrationConnectionId: connection.id,
+            syncScope: "contacts",
+            userId: context.userId
+          })
+        : null;
 
     if (crmContactsCountResult.error) throw crmContactsCountResult.error;
     if (crmPersonalContactsCountResult.error) throw crmPersonalContactsCountResult.error;
@@ -866,6 +880,7 @@ export async function getIntegrationDetailForAdmin(integrationKey: string) {
           jobs[0]?.started_date ??
           null
       },
+      syncState: contactSyncState,
       apiPaused: INTEGRATIONS_API_PAUSED
     };
   } catch (error) {
@@ -1057,7 +1072,11 @@ export async function testIntegrationConnection(
   }
 }
 
-export async function runIntegrationSync(integrationKey: string, scope: SyncScope) {
+export async function runIntegrationSync(
+  integrationKey: string,
+  scope: SyncScope,
+  options?: { syncRunMode?: IntegrationSyncRunMode }
+) {
   const context = await requireIntegrationsManager();
   if (INTEGRATIONS_API_PAUSED) {
     throw new Error(INTEGRATIONS_API_PAUSED_MESSAGE);
@@ -1083,7 +1102,8 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
       definition,
       connection,
       scope,
-      jobType: "manual"
+      jobType: "manual",
+      syncRunMode: options?.syncRunMode ?? "auto"
     });
     await logAuditEvent({
       organizationId: context.organizationId,
@@ -1091,7 +1111,12 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
       actionType: "integration_manual_sync_run",
       targetEntityType: "integration_connections",
       targetEntityId: connection.id,
-      metadata: { integrationKey, scope, ...result }
+      metadata: {
+        integrationKey,
+        scope,
+        syncRunMode: options?.syncRunMode ?? "auto",
+        ...result
+      }
     });
     return result;
   } catch (error) {
@@ -1100,6 +1125,71 @@ export async function runIntegrationSync(integrationKey: string, scope: SyncScop
     }
     throw error;
   }
+}
+
+export async function runGivingFuelContactsFullSync() {
+  return runIntegrationSync(GIVINGFUEL_INTEGRATION_KEY, "contacts", {
+    syncRunMode: "full"
+  });
+}
+
+export async function runGivingFuelContactsIncrementalSync() {
+  return runIntegrationSync(GIVINGFUEL_INTEGRATION_KEY, "contacts", {
+    syncRunMode: "incremental"
+  });
+}
+
+export async function resetGivingFuelContactsSyncState() {
+  const context = await requireIntegrationsManager();
+  const { definition, connection } = await getDefinitionAndConnection(
+    context.organizationId,
+    context.userId,
+    GIVINGFUEL_INTEGRATION_KEY
+  );
+  if (definition.provider_key !== GIVINGFUEL_INTEGRATION_KEY) {
+    throw new Error("Sync state reset is only available for GivingFuel Contacts.");
+  }
+  const state = await syncStateService.resetState({
+    organizationId: context.organizationId,
+    integrationConnectionId: connection.id,
+    syncScope: "contacts",
+    userId: context.userId
+  });
+
+  const syncSettings = { ...(connection.sync_settings_json ?? {}) } as Record<string, unknown>;
+  delete syncSettings.contactsCursor;
+  delete syncSettings.lastSuccessfulSyncDate;
+  delete syncSettings.lastSuccessfulFullSyncDate;
+  delete syncSettings.lastSuccessfulIncrementalSyncDate;
+  syncSettings.integrationRuntimeState = {
+    syncStatus: "pending_initial_sync",
+    statusDetail: "Sync state reset. Initial full sync is required."
+  };
+
+  const supabase = await createIntegrationClient();
+  const { error: resetConfigError } = await supabase
+    .from("integration_connections")
+    .update({
+      sync_settings_json: syncSettings,
+      updated_by: context.userId
+    })
+    .eq("organization_id", context.organizationId)
+    .eq("id", connection.id);
+  if (resetConfigError) throw resetConfigError;
+
+  await logAuditEvent({
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    actionType: "integration_sync_state_reset",
+    targetEntityType: "integration_connections",
+    targetEntityId: connection.id,
+    metadata: {
+      integrationKey: GIVINGFUEL_INTEGRATION_KEY,
+      syncScope: "contacts"
+    }
+  });
+
+  return state;
 }
 
 export async function retryFailedIntegrationSync(integrationKey: string) {
