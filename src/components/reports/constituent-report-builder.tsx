@@ -96,6 +96,17 @@ const previewColumnOrder = [
   "taskStatuses"
 ] as const;
 
+const transactionPreviewColumnOrder = [
+  "donationDate",
+  "amount",
+  "donorName",
+  "campaignName",
+  "paymentType",
+  "acknowledgementStatus",
+  "city",
+  "state"
+] as const;
+
 const PAPER_SIZE_OPTIONS: Array<{ key: PaperSize; label: string }> = [
   { key: "letter", label: 'Letter (8.5" x 11")' },
   { key: "legal", label: 'Legal (8.5" x 14")' },
@@ -535,7 +546,30 @@ export function ConstituentReportBuilder() {
     trackingStatus: false,
     taskStatus: false,
     membershipStatus: false,
-    tags: false
+    tags: false,
+    txFreeText: false,
+    txDonorName: false,
+    txCampaign: false,
+    txDonationDate: false,
+    txAmount: false,
+    txPaymentType: false,
+    txAck: false,
+    txEntityType: false,
+    txTagContains: false
+  });
+
+  const [txFilters, setTxFilters] = useState({
+    freeText: "",
+    donorNameContains: "",
+    campaignContains: "",
+    donationDateFrom: "",
+    donationDateTo: "",
+    minAmount: "",
+    maxAmount: "",
+    tagContains: "",
+    paymentType: [] as string[],
+    acknowledgementStatus: [] as string[],
+    entityType: [] as string[]
   });
   const [expandedTagPaths, setExpandedTagPaths] = useState<Set<string>>(new Set());
 
@@ -550,8 +584,9 @@ export function ConstituentReportBuilder() {
   }, [availableColumns]);
   const previewColumns = useMemo(() => {
     const allowed = new Set(availableColumns.map((column) => column.key));
-    return previewColumnOrder.filter((column) => allowed.has(column));
-  }, [availableColumns]);
+    const order = reportMode === "transaction" ? transactionPreviewColumnOrder : previewColumnOrder;
+    return order.filter((column) => allowed.has(column));
+  }, [availableColumns, reportMode]);
   const filterMap = useMemo(() => {
     const map = new Map<string, ReportFilter>();
     for (const filter of metadata?.activeDefinition.filters ?? []) map.set(filter.key, filter);
@@ -577,12 +612,37 @@ export function ConstituentReportBuilder() {
     [filters, selectedTagIds]
   );
 
+  const transactionFiltersPayload = useMemo(
+    () => ({
+      freeText: txFilters.freeText.trim() || undefined,
+      donorNameContains: txFilters.donorNameContains.trim() || undefined,
+      campaignContains: txFilters.campaignContains.trim() || undefined,
+      donationDateFrom: txFilters.donationDateFrom || undefined,
+      donationDateTo: txFilters.donationDateTo || undefined,
+      minAmount: txFilters.minAmount.trim() ? Number(txFilters.minAmount) : undefined,
+      maxAmount: txFilters.maxAmount.trim() ? Number(txFilters.maxAmount) : undefined,
+      tagContains: txFilters.tagContains.trim() || undefined,
+      paymentType: txFilters.paymentType.length > 0 ? txFilters.paymentType : undefined,
+      acknowledgementStatus:
+        txFilters.acknowledgementStatus.length > 0 ? txFilters.acknowledgementStatus : undefined,
+      entityType: txFilters.entityType.length > 0 ? txFilters.entityType : undefined,
+      tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined
+    }),
+    [txFilters, selectedTagIds]
+  );
+
+  const activeFiltersPayload =
+    reportMode === "transaction" ? transactionFiltersPayload : filtersPayload;
+
   const isAllFieldsSelected =
     availableColumns.length > 0 && selectedFields.length === availableColumns.length;
   const membershipOptions = filterMap.get("membershipStatus")?.options ?? [];
   const recordTypeOptions = filterMap.get("entityType")?.options ?? [];
   const trackingOptions = filterMap.get("trackingStatus")?.options ?? [];
   const taskStatusOptions = filterMap.get("taskStatus")?.options ?? [];
+  const txPaymentOptions = filterMap.get("paymentType")?.options ?? [];
+  const txAckOptions = filterMap.get("acknowledgementStatus")?.options ?? [];
+  const txEntityTypeOptions = filterMap.get("entityType")?.options ?? [];
   const tagTreeRoots = useMemo(() => {
     const nodesByPath = new Map<string, TagTreeNode>();
     const roots: TagTreeNode[] = [];
@@ -658,6 +718,19 @@ export function ConstituentReportBuilder() {
     checked: boolean
   ) {
     setFilters((prev) => {
+      const current = new Set(prev[key]);
+      if (checked) current.add(value);
+      else current.delete(value);
+      return { ...prev, [key]: Array.from(current) };
+    });
+  }
+
+  function toggleTxMulti(
+    key: "paymentType" | "acknowledgementStatus" | "entityType",
+    value: string,
+    checked: boolean
+  ) {
+    setTxFilters((prev) => {
       const current = new Set(prev[key]);
       if (checked) current.add(value);
       else current.delete(value);
@@ -843,11 +916,13 @@ export function ConstituentReportBuilder() {
   }
 
   async function loadMetadata() {
+    if (reportMode === "project") return;
     setError(null);
-    const response = await fetch("/api/reports/fields?reportType=contacts");
-    const payload = (await response.json().catch(() => null)) as MetadataPayload | null;
+    const reportType = reportMode === "transaction" ? "transactions" : "contacts";
+    const response = await fetch(`/api/reports/fields?reportType=${reportType}`);
+    const payload = (await response.json().catch(() => null)) as MetadataPayload & { message?: string } | null;
     if (!response.ok || !payload?.activeDefinition) {
-      setError("Unable to load report metadata.");
+      setError(payload?.message ?? "Unable to load report metadata.");
       return;
     }
     setMetadata(payload);
@@ -886,19 +961,20 @@ export function ConstituentReportBuilder() {
   }
 
   async function loadPreview(targetPage = page, targetPageSize = pageSize) {
-    if (reportMode !== "constituent") return;
+    if (reportMode === "project") return;
     if (previewColumns.length === 0) return;
     setLoadingPreview(true);
     setError(null);
     setHasLoadedPreview(true);
     try {
+      const reportType = reportMode === "transaction" ? "transactions" : "contacts";
       const response = await fetch("/api/reports/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          reportType: "contacts",
+          reportType,
           selectedColumns: previewColumns,
-          filters: filtersPayload,
+          filters: activeFiltersPayload,
           page: targetPage,
           pageSize: targetPageSize
         })
@@ -919,19 +995,21 @@ export function ConstituentReportBuilder() {
   }
 
   async function buildExportBlob(format: "csv" | "excel") {
+    const reportType = reportMode === "transaction" ? "transactions" : "contacts";
     const response = await fetch("/api/reports/export", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        reportType: "contacts",
+        reportType,
         selectedColumns: selectedFields,
-        filters: filtersPayload,
+        filters: activeFiltersPayload,
         format,
         executionMetadata: {
-          report_mode: reportMode,
-          workflow: "constituent_report_builder",
+          report_mode: reportMode === "transaction" ? "transaction" : "constituent",
+          workflow:
+            reportMode === "transaction" ? "transaction_report_builder" : "constituent_report_builder",
           selected_columns: selectedFields,
-          filters: filtersPayload
+          filters: activeFiltersPayload
         }
       })
     });
@@ -1016,6 +1094,32 @@ export function ConstituentReportBuilder() {
   }
 
   async function fetchFilteredConstituentsForMailer() {
+    if (reportMode === "transaction") {
+      const response = await fetch("/api/reports/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reportType: "transactions",
+          selectedColumns: ["contactId", "name", "email", "phone", "address", "city", "state", "zip"],
+          filters: transactionFiltersPayload,
+          exportAll: true,
+          recordRun: false
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message ?? "Unable to fetch mail recipients from transactions.");
+      }
+      const rawRows = (payload?.rows ?? []) as Array<Record<string, unknown>>;
+      const byContact = new Map<string, Record<string, unknown>>();
+      for (const row of rawRows) {
+        const id = toText(row.contactId);
+        if (!id || byContact.has(id)) continue;
+        byContact.set(id, row);
+      }
+      return Array.from(byContact.values());
+    }
+
     const response = await fetch("/api/reports/run", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1257,33 +1361,34 @@ export function ConstituentReportBuilder() {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        reportType: "contacts",
+        reportType: reportMode === "transaction" ? "transactions" : "contacts",
         outputKey: job.key,
         outputLabel: job.label,
         fileName: job.fileName,
         fileDataUrl: dataUrl,
         rowCount: totalCount,
         selectedColumns: selectedFields,
-        filters: filtersPayload,
-        reportMode
+        filters: activeFiltersPayload,
+        reportMode: reportMode === "transaction" ? "transaction" : "constituent"
       })
     });
   }
 
   function buildPlannedJobs() {
     const jobs: Array<Pick<DownloadJob, "key" | "label" | "fileName">> = [];
+    const exportBase = reportMode === "transaction" ? "transaction-report" : "constituent-report";
     if (canExportExcel) {
       jobs.push({
         key: "excel",
         label: "Simple Excel Export",
-        fileName: "constituent-report.xlsx"
+        fileName: `${exportBase}.xlsx`
       });
     }
     if (canExportCsv) {
       jobs.push({
         key: "csv",
         label: "Simple CSV Export",
-        fileName: "constituent-report.csv"
+        fileName: `${exportBase}.csv`
       });
     }
     if (includeActivitiesReport === "yes") {
@@ -1411,17 +1516,26 @@ export function ConstituentReportBuilder() {
   }
 
   useEffect(() => {
-    void loadMetadata();
-  }, []);
-
-  useEffect(() => {
-    if (reportMode !== "constituent") {
+    if (reportMode === "project") {
+      setMetadata(null);
       setRows([]);
       setTotalCount(0);
-      setPage(1);
-      setPageCount(1);
       setHasLoadedPreview(false);
+      return;
     }
+    setStep("filters");
+    setRows([]);
+    setTotalCount(0);
+    setPage(1);
+    setPageCount(1);
+    setHasLoadedPreview(false);
+    setReportRunLocked(false);
+    setDownloadJobs((prev) => {
+      revokeDownloadUrls(prev);
+      return [];
+    });
+    if (reportMode === "transaction") setIncludeActivitiesReport("no");
+    void loadMetadata();
   }, [reportMode]);
 
   useEffect(() => {
@@ -1432,7 +1546,11 @@ export function ConstituentReportBuilder() {
   }, [step]);
 
   useEffect(() => {
-    if (step === "filters" && reportMode === "constituent" && tagSummaryRows.length === 0) {
+    if (
+      step === "filters" &&
+      (reportMode === "constituent" || reportMode === "transaction") &&
+      tagSummaryRows.length === 0
+    ) {
       void loadTagSummary();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1485,10 +1603,487 @@ export function ConstituentReportBuilder() {
             </div>
           </div>
 
-          {reportMode !== "constituent" ? (
+          {reportMode === "project" ? (
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-              {reportMode === "transaction" ? "Transaction Report" : "Project Report"} steps will be configured next.
+              Project Report steps will be configured next.
             </div>
+          ) : reportMode === "transaction" ? (
+            <>
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-900">Transaction Filters</p>
+                <p className="mb-3 text-xs text-slate-600">
+                  Filter individual gifts and payments. Tag filters apply to the donor&apos;s contact record.
+                </p>
+                <div className="space-y-3">
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txFreeText")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txFreeText)}
+                        </span>
+                        <span>Free Text Search</span>
+                      </span>
+                      <span className="max-w-[50%] truncate text-xs text-slate-500">
+                        {txFilters.freeText.trim() || "blank"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txFreeText ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        <Input
+                          value={txFilters.freeText}
+                          onChange={(event) =>
+                            setTxFilters((prev) => ({ ...prev, freeText: event.target.value }))
+                          }
+                          placeholder="Donor, memo, campaign, payment type..."
+                        />
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txDonorName")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txDonorName)}
+                        </span>
+                        <span>Donor Name Contains</span>
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {txFilters.donorNameContains.trim() || "blank"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txDonorName ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        <Input
+                          value={txFilters.donorNameContains}
+                          onChange={(event) =>
+                            setTxFilters((prev) => ({ ...prev, donorNameContains: event.target.value }))
+                          }
+                          placeholder="Partial donor name..."
+                        />
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txCampaign")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txCampaign)}
+                        </span>
+                        <span>Campaign Contains</span>
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {txFilters.campaignContains.trim() || "blank"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txCampaign ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        <Input
+                          value={txFilters.campaignContains}
+                          onChange={(event) =>
+                            setTxFilters((prev) => ({ ...prev, campaignContains: event.target.value }))
+                          }
+                          placeholder="Campaign name..."
+                        />
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txDonationDate")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txDonationDate)}
+                        </span>
+                        <span>Donation Date Range</span>
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txDonationDate ? (
+                      <div className="grid gap-3 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">From</label>
+                          <Input
+                            type="date"
+                            value={txFilters.donationDateFrom}
+                            onChange={(event) =>
+                              setTxFilters((prev) => ({ ...prev, donationDateFrom: event.target.value }))
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">To</label>
+                          <Input
+                            type="date"
+                            value={txFilters.donationDateTo}
+                            onChange={(event) =>
+                              setTxFilters((prev) => ({ ...prev, donationDateTo: event.target.value }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txAmount")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txAmount)}
+                        </span>
+                        <span>Amount Range</span>
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txAmount ? (
+                      <div className="grid gap-3 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Minimum</label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={txFilters.minAmount}
+                            onChange={(event) =>
+                              setTxFilters((prev) => ({ ...prev, minAmount: event.target.value }))
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Maximum</label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={txFilters.maxAmount}
+                            onChange={(event) =>
+                              setTxFilters((prev) => ({ ...prev, maxAmount: event.target.value }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txPaymentType")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txPaymentType)}
+                        </span>
+                        <span>Payment Type</span>
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {txFilters.paymentType.length > 0
+                          ? `${txFilters.paymentType.length} selected`
+                          : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txPaymentType ? (
+                      <div className="grid gap-2 border-t border-slate-200 px-3 py-3 md:grid-cols-3">
+                        {txPaymentOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={txFilters.paymentType.includes(option.value)}
+                              onChange={(event) =>
+                                toggleTxMulti("paymentType", option.value, event.target.checked)
+                              }
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txAck")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txAck)}
+                        </span>
+                        <span>Acknowledgement Status</span>
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {txFilters.acknowledgementStatus.length > 0
+                          ? `${txFilters.acknowledgementStatus.length} selected`
+                          : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txAck ? (
+                      <div className="grid gap-2 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        {txAckOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={txFilters.acknowledgementStatus.includes(option.value)}
+                              onChange={(event) =>
+                                toggleTxMulti("acknowledgementStatus", option.value, event.target.checked)
+                              }
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txEntityType")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txEntityType)}
+                        </span>
+                        <span>Donor Entity Type</span>
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {txFilters.entityType.length > 0
+                          ? `${txFilters.entityType.length} selected`
+                          : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.txEntityType ? (
+                      <div className="grid gap-2 border-t border-slate-200 px-3 py-3 md:grid-cols-2">
+                        {txEntityTypeOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={txFilters.entityType.includes(option.value)}
+                              onChange={(event) =>
+                                toggleTxMulti("entityType", option.value, event.target.checked)
+                              }
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("tags")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">{sectionChevron(filterSectionsOpen.tags)}</span>
+                        <span>Tags (Hierarchy)</span>
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {selectedTagIds.length > 0 ? `${selectedTagIds.length} selected` : "None selected"}
+                      </span>
+                    </button>
+                    {filterSectionsOpen.tags ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        {loadingTagSummary ? (
+                          <p className="text-sm text-slate-500">Loading tags...</p>
+                        ) : tagSummaryRows.length === 0 ? (
+                          <p className="text-sm text-slate-500">No tags available.</p>
+                        ) : (
+                          <div className="max-h-56 space-y-1 overflow-auto rounded-md border border-slate-200 p-2">
+                            {tagTreeRoots.map((node) => renderTagNode(node))}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-md border border-slate-200">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold text-slate-900"
+                      onClick={() => toggleSection("txTagContains")}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-3 text-xs text-slate-500">
+                          {sectionChevron(filterSectionsOpen.txTagContains)}
+                        </span>
+                        <span>Tag Text Contains</span>
+                      </span>
+                      <span className="text-xs text-slate-500">{txFilters.tagContains.trim() || "blank"}</span>
+                    </button>
+                    {filterSectionsOpen.txTagContains ? (
+                      <div className="border-t border-slate-200 px-3 py-3">
+                        <Input
+                          value={txFilters.tagContains}
+                          onChange={(event) =>
+                            setTxFilters((prev) => ({ ...prev, tagContains: event.target.value }))
+                          }
+                          placeholder="Match tag path or name..."
+                        />
+                      </div>
+                    ) : null}
+                  </section>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" onClick={() => void loadPreview(1, pageSize)}>
+                    {loadingPreview ? "Running..." : "Apply Filters"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setTxFilters({
+                        freeText: "",
+                        donorNameContains: "",
+                        campaignContains: "",
+                        donationDateFrom: "",
+                        donationDateTo: "",
+                        minAmount: "",
+                        maxAmount: "",
+                        tagContains: "",
+                        paymentType: [],
+                        acknowledgementStatus: [],
+                        entityType: []
+                      });
+                      setSelectedTagIds([]);
+                      setExpandedTagPaths(new Set());
+                      void loadPreview(1, pageSize);
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                  {!loadingPreview ? (
+                    <Button type="button" onClick={() => setStep("fields")}>
+                      Run Report and Download
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-slate-200 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-slate-900">
+                    Transactions ({totalCount.toLocaleString()})
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {previewColumns.map((column) => (
+                          <th
+                            key={column}
+                            className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                          >
+                            {columnLabelMap.get(column) ?? column}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {rows.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={previewColumns.length || 1}
+                            className="px-3 py-4 text-center text-sm text-slate-500"
+                          >
+                            {loadingPreview
+                              ? "Loading results..."
+                              : hasLoadedPreview
+                                ? "No transactions matched current filters."
+                                : "Table is blank until you click Apply Filters."}
+                          </td>
+                        </tr>
+                      ) : (
+                        rows.map((row, rowIndex) => (
+                          <tr key={`row-${rowIndex}`}>
+                            {previewColumns.map((column) => (
+                              <td key={`${rowIndex}-${column}`} className="px-3 py-2 text-slate-700">
+                                {column === "amount"
+                                  ? (() => {
+                                      const n = Number(row[column]);
+                                      return Number.isFinite(n)
+                                        ? n.toLocaleString(undefined, {
+                                            style: "currency",
+                                            currency: String(row.currency ?? "USD") || "USD"
+                                          })
+                                        : String(row[column] ?? "-");
+                                    })()
+                                  : String(row[column] ?? "-")}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-600">Rows:</span>
+                    <select
+                      className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                      value={pageSize}
+                      disabled={!hasLoadedPreview}
+                      onChange={(event) => {
+                        const nextPageSize = Number(event.target.value);
+                        setPageSize(nextPageSize);
+                        void loadPreview(1, nextPageSize);
+                      }}
+                    >
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!hasLoadedPreview || page <= 1 || loadingPreview}
+                      onClick={() => void loadPreview(Math.max(1, page - 1), pageSize)}
+                    >
+                      Prev
+                    </Button>
+                    <span className="text-xs text-slate-600">
+                      Page {page} of {pageCount}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!hasLoadedPreview || page >= pageCount || loadingPreview}
+                      onClick={() => void loadPreview(Math.min(pageCount, page + 1), pageSize)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <div>
@@ -1890,12 +2485,19 @@ export function ConstituentReportBuilder() {
           <p className="text-sm font-semibold text-slate-900">
             Step 3: Do you want to include an Activities Report as well?
           </p>
+          {reportMode === "transaction" ? (
+            <p className="text-sm text-slate-600">
+              Activity summaries are only available for constituent reports. Leave this set to &quot;No&quot; and
+              continue.
+            </p>
+          ) : null}
           <div className="flex gap-3">
             <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
               <input
                 type="radio"
                 name="include-activities"
                 checked={includeActivitiesReport === "yes"}
+                disabled={reportMode === "transaction"}
                 onChange={() => setIncludeActivitiesReport("yes")}
               />
               Yes

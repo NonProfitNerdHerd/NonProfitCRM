@@ -892,10 +892,142 @@ async function buildMembershipRows(orgId: string) {
 
 async function buildRowsByType(reportType: ReportType, orgId: string, filters: ReportFilters) {
   if (reportType === "contacts") return buildContactRows(orgId);
+  if (reportType === "transactions") return buildTransactionRows(orgId);
   if (reportType === "campaigns") return buildCampaignRows(orgId);
   if (reportType === "donors") return buildDonorRows(orgId, filters);
   if (reportType === "projects") return buildProjectRows(orgId);
   return buildMembershipRows(orgId);
+}
+
+function donationOrgSchemaError(error: unknown) {
+  const message = String(
+    (error as { message?: string; details?: string })?.message ??
+      (error as { details?: string })?.details ??
+      ""
+  ).toLowerCase();
+  return message.includes("crm_organization_id") || message.includes("crm_organizations");
+}
+
+async function buildTransactionRows(orgId: string) {
+  const supabase = await createClient();
+  const fullSelect =
+    "id, contact_id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, external_transaction_id, source, source_platform, campaign, acknowledgement_status, acknowledgement_sent_date, memo, is_recurring, created_at, campaign_id, contacts(first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,email,phone,address_line_1,address_line_2,city,state,postal_code), campaigns(name)";
+  const legacySelect =
+    "id, contact_id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, external_transaction_id, source, source_platform, campaign, acknowledgement_status, acknowledgement_sent_date, memo, is_recurring, created_at, campaign_id, contacts(first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,email,phone,address_line_1,address_line_2,city,state,postal_code)";
+
+  const pageSize = 1000;
+  const donationsAccum: Array<Record<string, unknown>> = [];
+  let offset = 0;
+
+  while (true) {
+    let page = await supabase
+      .from("donations")
+      .select(fullSelect)
+      .eq("organization_id", orgId)
+      .order("donation_date", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (page.error && donationOrgSchemaError(page.error)) {
+      page = await supabase
+        .from("donations")
+        .select(legacySelect)
+        .eq("organization_id", orgId)
+        .order("donation_date", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+    }
+    if (page.error) throw page.error;
+    const batch = (page.data ?? []) as Array<Record<string, unknown>>;
+    donationsAccum.push(...batch);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+    if (offset > 100000) break;
+  }
+
+  const contactIds = Array.from(
+    new Set(donationsAccum.map((d) => text(d.contact_id)).filter(Boolean))
+  );
+  const tagsByContact = new Map<string, { names: Set<string>; ids: Set<string> }>();
+  if (contactIds.length > 0) {
+    const contactTagsResult = await supabase
+      .from("contact_tags")
+      .select("contact_id,tags(id,name,path)")
+      .eq("organization_id", orgId)
+      .in("contact_id", contactIds)
+      .limit(100000);
+    if (contactTagsResult.error) throw contactTagsResult.error;
+    for (const row of contactTagsResult.data ?? []) {
+      const contactId = text(row.contact_id);
+      const tag = relatedSingle<Record<string, unknown>>(row.tags);
+      const tagId = text(tag?.id);
+      const name = text(tag?.name);
+      const path = text(tag?.path);
+      if (!contactId) continue;
+      if (!tagsByContact.has(contactId)) {
+        tagsByContact.set(contactId, { names: new Set<string>(), ids: new Set<string>() });
+      }
+      const bucket = tagsByContact.get(contactId)!;
+      if (tagId) bucket.ids.add(tagId);
+      if (path) bucket.names.add(path);
+      else if (name) bucket.names.add(name);
+    }
+  }
+
+  return donationsAccum.map((donation) => {
+    const contact = relatedSingle<Record<string, unknown>>(donation.contacts) ?? {};
+    const campaignRel = relatedSingle<Record<string, unknown>>(donation.campaigns);
+    const contactId = text(donation.contact_id);
+    const campaignFromRelation = text(campaignRel?.name);
+    const campaignName = campaignFromRelation || text(donation.campaign) || "";
+    const tags = tagsByContact.get(contactId) ?? { names: new Set<string>(), ids: new Set<string>() };
+    const tagList = Array.from(tags.names).sort((a, b) => a.localeCompare(b)).join(", ");
+    const tagIds = Array.from(tags.ids);
+    const trackingStatus = lower(contact.tracking_status);
+    const rawEntity = lower(contact.entity_type);
+    const entityType =
+      rawEntity === "organization"
+        ? trackingStatus === "donor"
+          ? "Donor Organization"
+          : "Organization"
+        : trackingStatus === "donor"
+          ? "Donor"
+          : "Contact";
+    const address = [text(contact.address_line_1), text(contact.address_line_2)]
+      .filter(Boolean)
+      .join(", ");
+    const donorName = contactId ? contactDisplayName(contact) : "No contact";
+    const displayName = donorName;
+
+    return {
+      id: text(donation.id),
+      contactId,
+      donationDate: isoDate(donation.donation_date),
+      amount: toNumber(donation.amount),
+      currency: text(donation.currency) || "USD",
+      donorName: displayName,
+      name: displayName,
+      email: text(contact.email),
+      phone: text(contact.phone),
+      address,
+      city: text(contact.city),
+      state: text(contact.state),
+      zip: text(contact.postal_code),
+      entityType,
+      campaignName,
+      paymentType: text(donation.payment_type),
+      checkNumber: text(donation.check_number),
+      transactionReference: text(donation.transaction_id),
+      externalTransactionId: text(donation.external_transaction_id),
+      donationStatus: text(donation.status),
+      acknowledgementStatus: text(donation.acknowledgement_status),
+      acknowledgementSentDate: isoDate(donation.acknowledgement_sent_date),
+      source: text(donation.source),
+      sourcePlatform: text(donation.source_platform),
+      memo: text(donation.memo),
+      isRecurring: Boolean(donation.is_recurring) ? "Yes" : "No",
+      tagList,
+      tagIds,
+      createdDate: isoDate(donation.created_at)
+    };
+  });
 }
 
 function applyFilters(reportType: ReportType, rows: ReportRow[], filters: ReportFilters) {
@@ -1091,6 +1223,64 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
         if (key === "expiringWithinDays" && toNumber(row.expiringInDays) > toNumber(value)) return false;
         if (key === "renewalStatus" && text(row.renewalStatus) !== text(value)) return false;
       }
+
+      if (reportType === "transactions") {
+        if (key === "donationDateFrom" && !inDateRange(row.donationDate, value, undefined)) return false;
+        if (key === "donationDateTo" && !inDateRange(row.donationDate, undefined, value)) return false;
+        if (key === "minAmount" && toNumber(row.amount) < toNumber(value)) return false;
+        if (key === "maxAmount" && toNumber(row.amount) > toNumber(value)) return false;
+        if (key === "paymentType") {
+          const selected = listOfText(value);
+          if (selected.length > 0 && !selected.some((entry) => lower(entry) === lower(row.paymentType))) {
+            return false;
+          }
+        }
+        if (key === "acknowledgementStatus") {
+          const selected = listOfText(value);
+          if (
+            selected.length > 0 &&
+            !selected.some((entry) => lower(entry) === lower(row.acknowledgementStatus))
+          ) {
+            return false;
+          }
+        }
+        if (key === "campaignContains" && !containsValue(row.campaignName, value)) return false;
+        if (key === "donorNameContains" && !containsValue(row.donorName, value)) return false;
+        if (key === "tagContains" && !containsValue(row.tagList, value)) return false;
+        if (key === "tagIds") {
+          const selectedTagIds = Array.isArray(value)
+            ? value.map((entry) => text(entry)).filter(Boolean)
+            : [text(value)].filter(Boolean);
+          if (selectedTagIds.length > 0) {
+            const rowTagIds = Array.isArray(row.tagIds)
+              ? (row.tagIds as unknown[]).map((entry) => text(entry)).filter(Boolean)
+              : [];
+            if (!selectedTagIds.every((selectedTagId) => rowTagIds.includes(selectedTagId))) return false;
+          }
+        }
+        if (key === "entityType") {
+          const selected = listOfText(value);
+          const normalizedRowEntityType = lower(row.entityType);
+          if (
+            selected.length > 0 &&
+            !selected.some((entry) => {
+              const normalizedEntry = lower(entry);
+              if (normalizedEntry === "person") {
+                return normalizedRowEntityType === "donor" || normalizedRowEntityType === "contact";
+              }
+              if (normalizedEntry === "organization") {
+                return (
+                  normalizedRowEntityType === "organization" ||
+                  normalizedRowEntityType === "donor organization"
+                );
+              }
+              return normalizedEntry === normalizedRowEntityType;
+            })
+          ) {
+            return false;
+          }
+        }
+      }
     }
     return true;
   });
@@ -1168,10 +1358,13 @@ export async function getReportBuilderMetadata(activeReportType?: ReportType) {
     }));
 
   const fallbackReportType = (availableReportTypes[0]?.key ?? "contacts") as ReportType;
-  const reportType =
-    activeReportType && availableReportTypes.some((type) => type.key === activeReportType)
-      ? activeReportType
-      : fallbackReportType;
+  if (
+    activeReportType &&
+    !availableReportTypes.some((type) => type.key === activeReportType)
+  ) {
+    throw new Error("You are not authorized to use this report type.");
+  }
+  const reportType = (activeReportType ?? fallbackReportType) as ReportType;
   const definition = REPORT_TYPE_DEFINITIONS[reportType];
 
   return {
@@ -1550,6 +1743,7 @@ function deriveHistoryMode(domainKey: string, executionMetadata: Record<string, 
   if (metadataMode === "constituent") return "constituent";
   if (lower(domainKey) === "projects") return "project";
   if (lower(domainKey) === "contacts") return "constituent";
+  if (lower(domainKey) === "transactions") return "transaction";
   return "transaction";
 }
 
@@ -1599,8 +1793,9 @@ export async function registerPdfReportRun(input: {
     row_count: Math.max(0, Math.floor(Number(input.rowCount) || 0)),
     included_pii: false,
     execution_metadata: {
-      workflow: "constituent_report_builder",
-      report_mode: text(input.reportMode || "constituent"),
+      workflow:
+        input.reportType === "transactions" ? "transaction_report_builder" : "constituent_report_builder",
+      report_mode: text(input.reportMode || (input.reportType === "transactions" ? "transaction" : "constituent")),
       selected_columns: input.selectedColumns ?? [],
       filters: input.filters ?? {},
       output_key: text(input.outputKey),

@@ -1,6 +1,12 @@
 import { type PermissionKey } from "@/types/database";
 
-export type ReportType = "contacts" | "campaigns" | "donors" | "projects" | "memberships";
+export type ReportType =
+  | "contacts"
+  | "transactions"
+  | "campaigns"
+  | "donors"
+  | "projects"
+  | "memberships";
 
 export type SortDirection = "asc" | "desc";
 
@@ -151,6 +157,79 @@ export const REPORT_TYPE_DEFINITIONS: Record<ReportType, ReportTypeDefinition> =
       { key: "state", label: "State", type: "text" },
       { key: "city", label: "City", type: "text" },
       { key: "zip", label: "Zip", type: "text" }
+    ]
+  },
+  transactions: {
+    key: "transactions",
+    label: "Transaction Reports",
+    description: "One row per gift or payment with donor and campaign context.",
+    requiredPermission: "can_view_donations",
+    defaultSort: { field: "donationDate", direction: "desc" },
+    columns: [
+      { key: "donationDate", label: "Donation Date", dataType: "date", defaultSelected: true, sortable: true },
+      { key: "amount", label: "Amount", dataType: "currency", defaultSelected: true, sortable: true },
+      { key: "currency", label: "Currency", defaultSelected: true, sortable: true },
+      { key: "donorName", label: "Donor Name", defaultSelected: true, sortable: true },
+      { key: "name", label: "Name (mail merge)", sortable: true },
+      { key: "email", label: "Email", sortable: true },
+      { key: "phone", label: "Phone", sortable: true },
+      { key: "address", label: "Address", sortable: false },
+      { key: "city", label: "City", defaultSelected: true, sortable: true },
+      { key: "state", label: "State", defaultSelected: true, sortable: true },
+      { key: "zip", label: "Zip", sortable: true },
+      { key: "contactId", label: "Contact ID", sortable: true },
+      { key: "entityType", label: "Entity Type", sortable: true },
+      { key: "campaignName", label: "Campaign", defaultSelected: true, sortable: true },
+      { key: "paymentType", label: "Payment Type", defaultSelected: true, sortable: true },
+      { key: "checkNumber", label: "Check Number", sortable: true },
+      { key: "transactionReference", label: "Transaction ID", sortable: true },
+      { key: "externalTransactionId", label: "External Transaction ID", sortable: true },
+      { key: "donationStatus", label: "Donation Status", sortable: true },
+      { key: "acknowledgementStatus", label: "Acknowledgement Status", defaultSelected: true, sortable: true },
+      { key: "acknowledgementSentDate", label: "Acknowledgement Sent Date", dataType: "date", sortable: true },
+      { key: "source", label: "Source", sortable: true },
+      { key: "sourcePlatform", label: "Source Platform", sortable: true },
+      { key: "memo", label: "Memo", sortable: false },
+      { key: "isRecurring", label: "Recurring", sortable: true },
+      { key: "tagList", label: "Contact Tags", sortable: true },
+      { key: "createdDate", label: "Created Date", dataType: "date", sortable: true }
+    ],
+    filters: [
+      { key: "freeText", label: "Free Text Search", type: "text", placeholder: "Donor, memo, campaign..." },
+      { key: "donationDateFrom", label: "Donation Date From", type: "date" },
+      { key: "donationDateTo", label: "Donation Date To", type: "date" },
+      { key: "minAmount", label: "Minimum Amount", type: "number" },
+      { key: "maxAmount", label: "Maximum Amount", type: "number" },
+      {
+        key: "paymentType",
+        label: "Payment Type",
+        type: "select",
+        options: [
+          { label: "Cash", value: "Cash" },
+          { label: "Check", value: "Check" },
+          { label: "Card", value: "Card" }
+        ]
+      },
+      {
+        key: "acknowledgementStatus",
+        label: "Acknowledgement Status",
+        type: "select",
+        options: ACK_OPTIONS
+      },
+      { key: "campaignContains", label: "Campaign Contains", type: "text" },
+      { key: "donorNameContains", label: "Donor Name Contains", type: "text" },
+      {
+        key: "entityType",
+        label: "Donor Entity Type",
+        type: "select",
+        options: [
+          { label: "Donor", value: "Donor" },
+          { label: "Contact", value: "Contact" },
+          { label: "Donor Organization", value: "Donor Organization" },
+          { label: "Organization", value: "Organization" }
+        ]
+      },
+      { key: "tagContains", label: "Tag Contains", type: "text", placeholder: "Major Donor" }
     ]
   },
   campaigns: {

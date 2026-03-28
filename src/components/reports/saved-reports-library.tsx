@@ -16,6 +16,7 @@ type SavedReport = {
 
 const REPORT_TYPE_OPTIONS: Array<{ label: string; value: ReportType }> = [
   { label: "Contacts", value: "contacts" },
+  { label: "Transactions", value: "transactions" },
   { label: "Campaigns", value: "campaigns" },
   { label: "Donors", value: "donors" },
   { label: "Projects", value: "projects" },

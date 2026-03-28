@@ -10,7 +10,7 @@ export default async function ReportBuilderPage() {
     <Card>
       <CardHeader
         title="Report Builder"
-        subtitle="Build constituent reports with guided filters, field selection, and export."
+        subtitle="Build constituent and transaction reports with guided filters, field selection, and export."
       />
       <ConstituentReportBuilder />
     </Card>
