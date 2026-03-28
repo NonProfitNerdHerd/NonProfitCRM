@@ -218,7 +218,7 @@ export function StaffSidebar({
   ];
 
   return (
-    <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-slate-200 bg-slate-50 px-4 py-6">
+    <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-slate-200 bg-white px-4 py-6">
       <div className="mb-8">
         <Link href={withTenantPrefix("/staff/dashboard")} className="block">
           {organizationLogoUrl ? (
