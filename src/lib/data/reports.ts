@@ -76,6 +76,17 @@ function inDateRange(value: unknown, from?: unknown, to?: unknown) {
   return true;
 }
 
+/** Inclusive compare on calendar YYYY-MM-DD (avoids UTC midnight edge cases vs date-only filters). */
+function inCalendarDateRange(value: unknown, from?: unknown, to?: unknown) {
+  const day = isoDate(value);
+  if (!day) return false;
+  const fromDay = from ? text(from).slice(0, 10) : "";
+  const toDay = to ? text(to).slice(0, 10) : "";
+  if (fromDay.length === 10 && day < fromDay) return false;
+  if (toDay.length === 10 && day > toDay) return false;
+  return true;
+}
+
 function containsValue(value: unknown, query: unknown) {
   const search = lower(query);
   if (!search) return true;
@@ -1003,10 +1014,18 @@ async function buildTransactionRows(orgId: string) {
     const donorName = contactId ? contactDisplayName(contact) : "No contact";
     const displayName = donorName;
 
+    const rawDonationDate = donation.donation_date;
+    const donationDateNormalized =
+      isoDate(rawDonationDate) ||
+      (() => {
+        const s = text(rawDonationDate);
+        return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : "";
+      })();
+
     return {
       id: text(donation.id),
       contactId,
-      donationDate: isoDate(donation.donation_date),
+      donationDate: donationDateNormalized,
       amount: toNumber(donation.amount),
       currency: text(donation.currency) || "USD",
       donorName: displayName,
@@ -1045,6 +1064,16 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
 
   return rows.filter((row) => {
     for (const [key, value] of normalized) {
+      if (
+        reportType === "transactions" &&
+        (key === "createdDateFrom" ||
+          key === "createdDateTo" ||
+          key === "modifiedDateFrom" ||
+          key === "modifiedDateTo")
+      ) {
+        continue;
+      }
+
       if (key === "freeText") {
         const haystack = Object.entries(row)
           .filter(([column]) => column !== "id")
@@ -1232,8 +1261,8 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
       }
 
       if (reportType === "transactions") {
-        if (key === "donationDateFrom" && !inDateRange(row.donationDate, value, undefined)) return false;
-        if (key === "donationDateTo" && !inDateRange(row.donationDate, undefined, value)) return false;
+        if (key === "donationDateFrom" && !inCalendarDateRange(row.donationDate, value, undefined)) return false;
+        if (key === "donationDateTo" && !inCalendarDateRange(row.donationDate, undefined, value)) return false;
         if (key === "minAmount" && toNumber(row.amount) < toNumber(value)) return false;
         if (key === "maxAmount" && toNumber(row.amount) > toNumber(value)) return false;
         if (key === "paymentType") {
@@ -1262,7 +1291,8 @@ function applyFilters(reportType: ReportType, rows: ReportRow[], filters: Report
             const rowTagIds = Array.isArray(row.tagIds)
               ? (row.tagIds as unknown[]).map((entry) => text(entry)).filter(Boolean)
               : [];
-            if (!selectedTagIds.every((selectedTagId) => rowTagIds.includes(selectedTagId))) return false;
+            // OR: any selected tag on the donor matches (AND was too easy to zero out with stale multi-select).
+            if (!selectedTagIds.some((selectedTagId) => rowTagIds.includes(selectedTagId))) return false;
           }
         }
         if (key === "entityType") {

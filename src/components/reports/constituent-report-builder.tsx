@@ -1908,6 +1908,10 @@ export function ConstituentReportBuilder() {
                     </button>
                     {filterSectionsOpen.tags ? (
                       <div className="border-t border-slate-200 px-3 py-3">
+                        <p className="mb-2 text-xs text-slate-600">
+                          Include a transaction if the donor&apos;s contact has{" "}
+                          <span className="font-medium">any</span> of the tags you select (not all).
+                        </p>
                         {loadingTagSummary ? (
                           <p className="text-sm text-slate-500">Loading tags...</p>
                         ) : tagSummaryRows.length === 0 ? (
