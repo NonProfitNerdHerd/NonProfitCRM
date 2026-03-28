@@ -28,9 +28,15 @@ type RunReportInput = {
   exportAll?: boolean;
 };
 
+type RelatedRecord = Record<string, unknown> | Record<string, unknown>[] | null | undefined;
+
 function relatedSingle<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+function relatedSingleFromUnknown(value: unknown): Record<string, unknown> | null {
+  return relatedSingle<Record<string, unknown>>(value as RelatedRecord);
 }
 
 function text(value: unknown) {
@@ -973,8 +979,8 @@ async function buildTransactionRows(orgId: string) {
   }
 
   return donationsAccum.map((donation) => {
-    const contact = relatedSingle<Record<string, unknown>>(donation.contacts) ?? {};
-    const campaignRel = relatedSingle<Record<string, unknown>>(donation.campaigns);
+    const contact = relatedSingleFromUnknown(donation.contacts) ?? {};
+    const campaignRel = relatedSingleFromUnknown(donation.campaigns);
     const contactId = text(donation.contact_id);
     const campaignFromRelation = text(campaignRel?.name);
     const campaignName = campaignFromRelation || text(donation.campaign) || "";
