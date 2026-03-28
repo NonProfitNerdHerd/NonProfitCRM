@@ -373,7 +373,9 @@ const MAIL_LABEL_PRODUCTS: LabelProduct[] = [
 const defaultLetterEditorHtml = [
   "<p>{{today}}</p>",
   "<p>{{name}}</p>",
-  "<p>{{address}}</p>",
+  "<p>{{address_line_1}}</p>",
+  "<p>{{address_line_2}}</p>",
+  "<p>{{city_state_zip}}</p>",
   "<p>Dear {{name}},</p>",
   "<p>Thank you for your continued partnership and support.</p>",
   "<p>Sincerely,<br/>Your Organization</p>"
@@ -382,7 +384,26 @@ const defaultLetterEditorHtml = [
 const LETTER_TOKEN_REFERENCE = [
   { token: "{{today}}", fieldName: "Today", description: "Current date based on browser locale." },
   { token: "{{name}}", fieldName: "Constituent Name", description: "Contact or organization display name." },
-  { token: "{{address}}", fieldName: "Full Address", description: "Address, city, state, and postal code combined." },
+  {
+    token: "{{address}}",
+    fieldName: "Full Address (single line)",
+    description: "Street, city, state, and postal code combined on one line (legacy templates)."
+  },
+  {
+    token: "{{address_line_1}}",
+    fieldName: "Address Line 1",
+    description: "First street line; empty lines are omitted in the PDF."
+  },
+  {
+    token: "{{address_line_2}}",
+    fieldName: "Address Line 2",
+    description: "Second street line; omitted when blank."
+  },
+  {
+    token: "{{city_state_zip}}",
+    fieldName: "City, State Zip",
+    description: "City, state, and ZIP formatted without extra commas when some parts are missing."
+  },
   { token: "{{email}}", fieldName: "Email", description: "Primary email for the constituent." },
   { token: "{{phone}}", fieldName: "Phone", description: "Primary phone number for the constituent." },
   { token: "{{city}}", fieldName: "City", description: "City value from constituent record." },
@@ -1117,7 +1138,18 @@ export function ConstituentReportBuilder() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           reportType: "transactions",
-          selectedColumns: ["contactId", "name", "email", "phone", "address", "city", "state", "zip"],
+          selectedColumns: [
+            "contactId",
+            "name",
+            "email",
+            "phone",
+            "address",
+            "address_line_1",
+            "address_line_2",
+            "city",
+            "state",
+            "zip"
+          ],
           filters: transactionFiltersPayload,
           exportAll: true,
           recordRun: false
@@ -1142,7 +1174,18 @@ export function ConstituentReportBuilder() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         reportType: "contacts",
-        selectedColumns: ["id", "name", "email", "phone", "address", "city", "state", "zip"],
+        selectedColumns: [
+          "id",
+          "name",
+          "email",
+          "phone",
+          "address",
+          "address_line_1",
+          "address_line_2",
+          "city",
+          "state",
+          "zip"
+        ],
         filters: filtersPayload,
         exportAll: true,
         recordRun: false
@@ -1155,19 +1198,34 @@ export function ConstituentReportBuilder() {
     return (payload?.rows ?? []) as Array<Record<string, unknown>>;
   }
 
+  function formatLetterCityStateZip(row: Record<string, unknown>) {
+    const city = toText(row.city);
+    const state = toText(row.state);
+    const zip = toText(row.zip);
+    const stateZip = [state, zip].filter(Boolean).join(" ");
+    return [city, stateZip].filter(Boolean).join(", ");
+  }
+
   function applyLetterTokens(templateHtml: string, row: Record<string, unknown>) {
     const today = new Date().toLocaleDateString();
+    const line1 = toText(row.address_line_1);
+    const line2 = toText(row.address_line_2);
+    const streetCombined = [line1, line2].filter(Boolean).join(", ");
+    const legacyStreet = toText(row.address);
     const replacements: Record<string, string> = {
       today,
       name: toText(row.name),
       phone: toText(row.phone),
       email: toText(row.email),
-      address: [toText(row.address), toText(row.city), toText(row.state), toText(row.zip)]
-        .filter(Boolean)
-        .join(", "),
+      address_line_1: line1,
+      address_line_2: line2,
+      city_state_zip: formatLetterCityStateZip(row),
       city: toText(row.city),
       state: toText(row.state),
-      zip: toText(row.zip)
+      zip: toText(row.zip),
+      address: [legacyStreet || streetCombined, toText(row.city), toText(row.state), toText(row.zip)]
+        .filter(Boolean)
+        .join(", ")
     };
     return templateHtml.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_match, token: string) => {
       return replacements[token.toLowerCase()] ?? "";
@@ -1194,9 +1252,9 @@ export function ConstituentReportBuilder() {
       "h5",
       "h6"
     ]);
-    const pushLine = (allowBlank = false) => {
+    const pushLine = () => {
       const normalized = currentLine.replace(/\s+/g, " ").trim();
-      if (normalized || allowBlank) {
+      if (normalized) {
         lines.push(normalized);
       }
       currentLine = "";
@@ -1210,7 +1268,7 @@ export function ConstituentReportBuilder() {
       if (!(node instanceof HTMLElement)) return;
       const tagName = node.tagName.toLowerCase();
       if (tagName === "br") {
-        pushLine(true);
+        pushLine();
         return;
       }
       if (tagName === "li") {
@@ -1218,16 +1276,16 @@ export function ConstituentReportBuilder() {
       }
       const isBlock = blockTags.has(tagName);
       if (isBlock && currentLine.trim().length > 0) {
-        pushLine(true);
+        pushLine();
       }
       Array.from(node.childNodes).forEach((child) => walkNode(child));
       if (isBlock) {
-        pushLine(true);
+        pushLine();
       }
     };
     Array.from(container.childNodes).forEach((node) => walkNode(node));
     if (currentLine.trim().length > 0) {
-      pushLine(false);
+      pushLine();
     }
     return lines.length > 0 ? lines : [""];
   }
@@ -1270,8 +1328,7 @@ export function ConstituentReportBuilder() {
       documentPdf.setFont("helvetica", "normal");
       documentPdf.setFontSize(11);
       for (const line of lines) {
-        if (!line) {
-          y += lineHeight;
+        if (!line.trim()) {
           continue;
         }
         const wrapped = documentPdf.splitTextToSize(line, contentWidth);
