@@ -920,20 +920,21 @@ async function buildTransactionRows(orgId: string) {
   let offset = 0;
 
   while (true) {
-    let page = await supabase
+    const primaryPage = await supabase
       .from("donations")
       .select(fullSelect)
       .eq("organization_id", orgId)
       .order("donation_date", { ascending: false })
       .range(offset, offset + pageSize - 1);
-    if (page.error && donationOrgSchemaError(page.error)) {
-      page = await supabase
-        .from("donations")
-        .select(legacySelect)
-        .eq("organization_id", orgId)
-        .order("donation_date", { ascending: false })
-        .range(offset, offset + pageSize - 1);
-    }
+    const page =
+      primaryPage.error && donationOrgSchemaError(primaryPage.error)
+        ? await supabase
+            .from("donations")
+            .select(legacySelect)
+            .eq("organization_id", orgId)
+            .order("donation_date", { ascending: false })
+            .range(offset, offset + pageSize - 1)
+        : primaryPage;
     if (page.error) throw page.error;
     const batch = (page.data ?? []) as Array<Record<string, unknown>>;
     donationsAccum.push(...batch);
