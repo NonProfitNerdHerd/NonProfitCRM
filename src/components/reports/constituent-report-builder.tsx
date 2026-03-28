@@ -962,7 +962,24 @@ export function ConstituentReportBuilder() {
 
   async function loadPreview(targetPage = page, targetPageSize = pageSize) {
     if (reportMode === "project") return;
-    if (previewColumns.length === 0) return;
+    let columnsToRequest =
+      previewColumns.length > 0 ? previewColumns : (metadata?.activeDefinition?.defaultColumns ?? []);
+    if (columnsToRequest.length === 0 && reportMode === "transaction") {
+      columnsToRequest = [
+        "donationDate",
+        "amount",
+        "donorName",
+        "campaignName",
+        "paymentType",
+        "acknowledgementStatus",
+        "city",
+        "state"
+      ];
+    }
+    if (columnsToRequest.length === 0 && reportMode === "constituent") {
+      columnsToRequest = ["name", "email", "city", "state", "entityType"];
+    }
+    if (columnsToRequest.length === 0) return;
     setLoadingPreview(true);
     setError(null);
     setHasLoadedPreview(true);
@@ -973,7 +990,7 @@ export function ConstituentReportBuilder() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           reportType,
-          selectedColumns: previewColumns,
+          selectedColumns: columnsToRequest,
           filters: activeFiltersPayload,
           page: targetPage,
           pageSize: targetPageSize

@@ -28,15 +28,9 @@ type RunReportInput = {
   exportAll?: boolean;
 };
 
-type RelatedRecord = Record<string, unknown> | Record<string, unknown>[] | null | undefined;
-
 function relatedSingle<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
-}
-
-function relatedSingleFromUnknown(value: unknown): Record<string, unknown> | null {
-  return relatedSingle<Record<string, unknown>>(value as RelatedRecord);
 }
 
 function text(value: unknown) {
@@ -916,44 +910,31 @@ async function buildRowsByType(reportType: ReportType, orgId: string, filters: R
   return buildMembershipRows(orgId);
 }
 
-function donationOrgSchemaError(error: unknown) {
-  const message = String(
-    (error as { message?: string; details?: string })?.message ??
-      (error as { details?: string })?.details ??
-      ""
-  ).toLowerCase();
-  return message.includes("crm_organization_id") || message.includes("crm_organizations");
+function isActiveFilterValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  return text(value) !== "";
 }
 
 async function buildTransactionRows(orgId: string) {
   const supabase = await createClient();
-  const fullSelect =
-    "id, contact_id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, external_transaction_id, source, source_platform, campaign, acknowledgement_status, acknowledgement_sent_date, memo, is_recurring, created_at, campaign_id, contacts(first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,email,phone,address_line_1,address_line_2,city,state,postal_code), campaigns(name)";
-  const legacySelect =
-    "id, contact_id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, external_transaction_id, source, source_platform, campaign, acknowledgement_status, acknowledgement_sent_date, memo, is_recurring, created_at, campaign_id, contacts(first_name,last_name,preferred_name,organization_name,entity_type,tracking_status,email,phone,address_line_1,address_line_2,city,state,postal_code)";
+  const donationSelect =
+    "id, contact_id, amount, currency, donation_date, status, payment_type, check_number, transaction_id, external_transaction_id, source, source_platform, campaign, acknowledgement_status, acknowledgement_sent_date, memo, is_recurring, created_at, campaign_id";
 
   const pageSize = 1000;
   const donationsAccum: Array<Record<string, unknown>> = [];
   let offset = 0;
 
   while (true) {
-    const primaryPage = await supabase
+    const { data, error } = await supabase
       .from("donations")
-      .select(fullSelect)
+      .select(donationSelect)
       .eq("organization_id", orgId)
       .order("donation_date", { ascending: false })
       .range(offset, offset + pageSize - 1);
-    const page =
-      primaryPage.error && donationOrgSchemaError(primaryPage.error)
-        ? await supabase
-            .from("donations")
-            .select(legacySelect)
-            .eq("organization_id", orgId)
-            .order("donation_date", { ascending: false })
-            .range(offset, offset + pageSize - 1)
-        : primaryPage;
-    if (page.error) throw page.error;
-    const batch = (page.data ?? []) as Array<Record<string, unknown>>;
+    if (error) throw error;
+    const batch = (data ?? []) as Array<Record<string, unknown>>;
     donationsAccum.push(...batch);
     if (batch.length < pageSize) break;
     offset += pageSize;
@@ -963,37 +944,79 @@ async function buildTransactionRows(orgId: string) {
   const contactIds = Array.from(
     new Set(donationsAccum.map((d) => text(d.contact_id)).filter(Boolean))
   );
+  const contactMap = new Map<string, Record<string, unknown>>();
+  const idChunkSize = 200;
+  if (contactIds.length > 0) {
+    for (let index = 0; index < contactIds.length; index += idChunkSize) {
+      const idChunk = contactIds.slice(index, index + idChunkSize);
+      const contactsResult = await supabase
+        .from("contacts")
+        .select(
+          "id, first_name, last_name, preferred_name, organization_name, entity_type, tracking_status, email, phone, address_line_1, address_line_2, city, state, postal_code"
+        )
+        .eq("organization_id", orgId)
+        .in("id", idChunk);
+      if (contactsResult.error) throw contactsResult.error;
+      for (const row of contactsResult.data ?? []) {
+        contactMap.set(text(row.id), row as Record<string, unknown>);
+      }
+    }
+  }
+
+  const campaignIds = Array.from(
+    new Set(donationsAccum.map((d) => text(d.campaign_id)).filter(Boolean))
+  );
+  const campaignNameById = new Map<string, string>();
+  if (campaignIds.length > 0) {
+    for (let index = 0; index < campaignIds.length; index += idChunkSize) {
+      const idChunk = campaignIds.slice(index, index + idChunkSize);
+      const campaignsResult = await supabase
+        .from("campaigns")
+        .select("id, name")
+        .eq("organization_id", orgId)
+        .in("id", idChunk);
+      if (campaignsResult.error) throw campaignsResult.error;
+      for (const row of campaignsResult.data ?? []) {
+        campaignNameById.set(text(row.id), text(row.name));
+      }
+    }
+  }
+
   const tagsByContact = new Map<string, { names: Set<string>; ids: Set<string> }>();
   if (contactIds.length > 0) {
-    const contactTagsResult = await supabase
-      .from("contact_tags")
-      .select("contact_id,tags(id,name,path)")
-      .eq("organization_id", orgId)
-      .in("contact_id", contactIds)
-      .limit(100000);
-    if (contactTagsResult.error) throw contactTagsResult.error;
-    for (const row of contactTagsResult.data ?? []) {
-      const contactId = text(row.contact_id);
-      const tag = relatedSingle<Record<string, unknown>>(row.tags);
-      const tagId = text(tag?.id);
-      const name = text(tag?.name);
-      const path = text(tag?.path);
-      if (!contactId) continue;
-      if (!tagsByContact.has(contactId)) {
-        tagsByContact.set(contactId, { names: new Set<string>(), ids: new Set<string>() });
+    const tagChunkSize = 200;
+    for (let index = 0; index < contactIds.length; index += tagChunkSize) {
+      const idChunk = contactIds.slice(index, index + tagChunkSize);
+      const contactTagsResult = await supabase
+        .from("contact_tags")
+        .select("contact_id,tags(id,name,path)")
+        .eq("organization_id", orgId)
+        .in("contact_id", idChunk)
+        .limit(100000);
+      if (contactTagsResult.error) throw contactTagsResult.error;
+      for (const row of contactTagsResult.data ?? []) {
+        const contactId = text(row.contact_id);
+        const tag = relatedSingle<Record<string, unknown>>(row.tags);
+        const tagId = text(tag?.id);
+        const name = text(tag?.name);
+        const path = text(tag?.path);
+        if (!contactId) continue;
+        if (!tagsByContact.has(contactId)) {
+          tagsByContact.set(contactId, { names: new Set<string>(), ids: new Set<string>() });
+        }
+        const bucket = tagsByContact.get(contactId)!;
+        if (tagId) bucket.ids.add(tagId);
+        if (path) bucket.names.add(path);
+        else if (name) bucket.names.add(name);
       }
-      const bucket = tagsByContact.get(contactId)!;
-      if (tagId) bucket.ids.add(tagId);
-      if (path) bucket.names.add(path);
-      else if (name) bucket.names.add(name);
     }
   }
 
   return donationsAccum.map((donation) => {
-    const contact = relatedSingleFromUnknown(donation.contacts) ?? {};
-    const campaignRel = relatedSingleFromUnknown(donation.campaigns);
     const contactId = text(donation.contact_id);
-    const campaignFromRelation = text(campaignRel?.name);
+    const contact = contactMap.get(contactId) ?? {};
+    const campaignId = text(donation.campaign_id);
+    const campaignFromRelation = campaignNameById.get(campaignId) ?? "";
     const campaignName = campaignFromRelation || text(donation.campaign) || "";
     const tags = tagsByContact.get(contactId) ?? { names: new Set<string>(), ids: new Set<string>() };
     const tagList = Array.from(tags.names).sort((a, b) => a.localeCompare(b)).join(", ");
@@ -1057,9 +1080,7 @@ async function buildTransactionRows(orgId: string) {
 }
 
 function applyFilters(reportType: ReportType, rows: ReportRow[], filters: ReportFilters) {
-  const normalized = Object.entries(filters ?? {}).filter(
-    ([, value]) => value !== null && value !== undefined && text(value) !== ""
-  );
+  const normalized = Object.entries(filters ?? {}).filter(([, value]) => isActiveFilterValue(value));
   if (normalized.length === 0) return rows;
 
   return rows.filter((row) => {
